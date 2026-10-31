@@ -5325,3 +5325,12 @@ html[data-theme='dark'] .cs-account-avatar { color: var(--ink); }
   .cs-nav-close { display: none; }
   .cs-quick-group { flex-wrap: wrap; }
 }
+
+/* Message time labels: small and quiet, not a large mono numeral */
+.msg-actions .font-mono-num {
+  font-family: var(--font-main);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  letter-spacing: 0;
+}
