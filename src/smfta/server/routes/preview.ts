@@ -8,17 +8,38 @@ export interface HostedWebsitePreview {
   updatedAt: number;
 }
 
-const PREVIEW_STORE_LIMIT = 100;
-const previewStore = new Map<string, HostedWebsitePreview>();
+const MAX_PREVIEW_HTML_CHARS = 3_000_000;
 
-function prunePreviewStore() {
-  if (previewStore.size <= PREVIEW_STORE_LIMIT) return;
-  const oldest = Array.from(previewStore.entries()).sort(
-    (a, b) => a[1].updatedAt - b[1].updatedAt
-  )[0];
-  if (oldest) {
-    previewStore.delete(oldest[0]);
-  }
+async function getAdmin() {
+  const { supabaseAdmin } = await import('@/integrations/supabase/client.server');
+  return supabaseAdmin;
+}
+
+async function ownerKeyFor(req: Request): Promise<string> {
+  const raw = String(req.userId || req.ip || 'anonymous');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 16);
+}
+
+async function loadPreview(projectId: string): Promise<HostedWebsitePreview | null> {
+  if (!projectId) return null;
+  const admin = await getAdmin();
+  const { data } = await admin
+    .from('smfta_published_previews')
+    .select('id,title,html,files,updated_at')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    projectId: data.id,
+    title: data.title,
+    html: data.html,
+    files: Array.isArray(data.files) ? (data.files as HostedWebsitePreview['files']) : [],
+    updatedAt: new Date(data.updated_at).getTime(),
+  };
 }
 
 export const previewRouter = Router();
@@ -28,7 +49,7 @@ export const previewRouter = Router();
  * Registers or updates a compiled website project on the backend so it has a
  * real, shareable and navigable Preview URL (/preview/:projectId).
  */
-previewRouter.post('/api/preview/publish', (req: Request, res: Response) => {
+previewRouter.post('/api/preview/publish', async (req: Request, res: Response) => {
   const body = req.body || {};
   const rawId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
   const projectId =
@@ -59,20 +80,43 @@ previewRouter.post('/api/preview/publish', (req: Request, res: Response) => {
         }))
     : [];
 
-  prunePreviewStore();
-  previewStore.set(projectId, {
-    projectId,
+  if (html.length > MAX_PREVIEW_HTML_CHARS) {
+    res.status(413).json({ ok: false, error: 'Website is too large to publish' });
+    return;
+  }
+
+  const admin = await getAdmin();
+  const ownerKey = await ownerKeyFor(req);
+  let storedId = projectId;
+  const { data: existing } = await admin
+    .from('smfta_published_previews')
+    .select('owner_key')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (existing && existing.owner_key !== ownerKey) {
+    // Someone else already owns this link: give this visitor their own link.
+    storedId = `${projectId}-${ownerKey.slice(0, 8)}`.slice(0, 80);
+  }
+
+  const { error } = await admin.from('smfta_published_previews').upsert({
+    id: storedId,
+    owner_key: ownerKey,
     title,
     html,
     files,
-    updatedAt: Date.now(),
   });
+  if (error) {
+    res.status(500).json({ ok: false, error: 'Could not publish the website preview' });
+    return;
+  }
 
+  const now = Date.now();
   res.json({
     ok: true,
-    projectId,
-    previewUrl: `/preview/${projectId}`,
-    updatedAt: Date.now(),
+    projectId: storedId,
+    previewUrl: `/preview/${storedId}`,
+    previewPath: `/preview/${storedId}`,
+    updatedAt: now,
   });
 });
 
@@ -80,9 +124,9 @@ previewRouter.post('/api/preview/publish', (req: Request, res: Response) => {
  * GET /api/preview/:projectId/meta
  * Returns metadata for a published website preview project.
  */
-previewRouter.get('/api/preview/:projectId/meta', (req: Request, res: Response) => {
-  const projectId = String(req.params.projectId || '').replace(/[^\w-]/g, '');
-  const entry = previewStore.get(projectId);
+previewRouter.get('/api/preview/:projectId/meta', async (req: Request, res: Response) => {
+  const projectId = String(req.params.projectId || '').replace(/[^\w-]/g, '').slice(0, 80);
+  const entry = await loadPreview(projectId);
   if (!entry) {
     res.status(404).json({ ok: false, error: 'Preview project not found' });
     return;
@@ -102,9 +146,9 @@ previewRouter.get('/api/preview/:projectId/meta', (req: Request, res: Response) 
  * GET /preview/:projectId
  * Serves the live interactive website directly in the browser.
  */
-previewRouter.get('/preview/:projectId', (req: Request, res: Response) => {
-  const projectId = String(req.params.projectId || '').replace(/[^\w-]/g, '');
-  const entry = previewStore.get(projectId);
+previewRouter.get('/preview/:projectId', async (req: Request, res: Response) => {
+  const projectId = String(req.params.projectId || '').replace(/[^\w-]/g, '').slice(0, 80);
+  const entry = await loadPreview(projectId);
 
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader(
