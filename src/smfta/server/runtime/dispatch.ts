@@ -121,9 +121,42 @@ async function readBody(request: Request): Promise<unknown> {
   return text;
 }
 
+function isInternalHost(host: string): boolean {
+  return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(host);
+}
+
+export function resolvePublicOrigin(
+  url: URL,
+  headers: Record<string, string | undefined>
+): URL {
+  const candidates: string[] = [];
+  const fwdHost = headers['x-forwarded-host']?.split(',')[0]?.trim();
+  if (fwdHost) {
+    const proto = headers['x-forwarded-proto']?.split(',')[0]?.trim() || 'https';
+    candidates.push(`${proto}://${fwdHost}`);
+  }
+  if (headers['origin']) candidates.push(headers['origin']);
+  if (headers['referer']) candidates.push(headers['referer']);
+  for (const c of candidates) {
+    try {
+      const u = new URL(c);
+      if (!isInternalHost(u.host)) return new URL(u.origin);
+    } catch {
+      /* ignore malformed */
+    }
+  }
+  return new URL(url.origin);
+}
+
 export async function dispatchToLegacyApp(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const headers = lowerHeaders(request.headers);
+  // Behind the hosting proxy the request URL can be an internal address
+  // (e.g. localhost). Recover the public origin so OAuth return links and
+  // preview URLs point at the real site, never at localhost.
+  const publicOrigin = resolvePublicOrigin(url, headers);
+  headers['host'] = publicOrigin.host;
+  headers['x-forwarded-proto'] = publicOrigin.protocol.replace(':', '');
   const ip =
     headers['cf-connecting-ip'] ||
     (headers['x-forwarded-for'] || '').split(',')[0]?.trim() ||
@@ -175,7 +208,7 @@ export async function dispatchToLegacyApp(request: Request): Promise<Response> {
     params: {},
     body: {},
     ip,
-    socket: { remoteAddress: ip, encrypted: url.protocol === 'https:' },
+    socket: { remoteAddress: ip, encrypted: publicOrigin.protocol === 'https:' },
     signal: request.signal,
     get(name: string) {
       return headers[name.toLowerCase()];
