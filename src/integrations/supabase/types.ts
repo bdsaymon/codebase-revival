@@ -82,7 +82,10 @@ export type Database = {
       }
       smfta_user_state: {
         Row: {
+          active_project: Json | null
           autonomy: string | null
+          connections: Json | null
+          custom_prompts: Json
           memory: Json
           notes: Json
           saved_profiles: Json
@@ -91,9 +94,13 @@ export type Database = {
           updated_at: string
           user_id: string
           widgets: Json
+          workspace: Json | null
         }
         Insert: {
+          active_project?: Json | null
           autonomy?: string | null
+          connections?: Json | null
+          custom_prompts?: Json
           memory?: Json
           notes?: Json
           saved_profiles?: Json
@@ -102,9 +109,13 @@ export type Database = {
           updated_at?: string
           user_id: string
           widgets?: Json
+          workspace?: Json | null
         }
         Update: {
+          active_project?: Json | null
           autonomy?: string | null
+          connections?: Json | null
+          custom_prompts?: Json
           memory?: Json
           notes?: Json
           saved_profiles?: Json
@@ -113,6 +124,7 @@ export type Database = {
           updated_at?: string
           user_id?: string
           widgets?: Json
+          workspace?: Json | null
         }
         Relationships: []
       }
