@@ -208,7 +208,7 @@ export async function dispatchToLegacyApp(request: Request): Promise<Response> {
     params: {},
     body: {},
     ip,
-    socket: { remoteAddress: ip, encrypted: url.protocol === 'https:' },
+    socket: { remoteAddress: ip, encrypted: publicOrigin.protocol === 'https:' },
     signal: request.signal,
     get(name: string) {
       return headers[name.toLowerCase()];
