@@ -292,6 +292,8 @@ function loadJSON<T>(key: string, fallback: T): T {
   }
 }
 
+const STATE_PENDING_KEY = 'smfta_state_pending_uid';
+
 export default function App() {
   const [profile, setProfile] = useState<UserProfile>(() =>
     loadJSON<UserProfile>(LS_KEYS.profile, { name: 'Bossবোদা' })
@@ -1143,7 +1145,19 @@ export default function App() {
             await migrateLocalToCloud(cloudClient, userId);
           }
         } else {
-          applyCloudWorkspace(state, rows, switchedFromAnotherUser);
+          // A settings change that had not reached the cloud yet (e.g. the page
+          // was reloaded right after a change) wins over the older cloud copy.
+          let localPending = false;
+          try {
+            localPending = localStorage.getItem(STATE_PENDING_KEY) === userId;
+          } catch {
+            /* storage unavailable */
+          }
+          applyCloudWorkspace(
+            localPending && !switchedFromAnotherUser ? null : state,
+            rows,
+            switchedFromAnotherUser
+          );
         }
         hydratedUserRef.current = userId;
         setCloudReady(true);
@@ -1207,7 +1221,13 @@ export default function App() {
   useEffect(() => {
     if (!cloudReady || !cloudClient || !userId) return;
     if (statePushTimer.current) window.clearTimeout(statePushTimer.current);
-    statePushTimer.current = window.setTimeout(async () => {
+    try {
+      localStorage.setItem(STATE_PENDING_KEY, userId);
+    } catch {
+      /* storage unavailable */
+    }
+    const pushState = async () => {
+      statePushTimer.current = undefined;
       try {
         const result = await saveCloudState(
           cloudClient,
@@ -1217,6 +1237,11 @@ export default function App() {
         if (result === 'too_large') {
           showToast('Workspace data is too large to sync.');
           return;
+        }
+        try {
+          localStorage.removeItem(STATE_PENDING_KEY);
+        } catch {
+          /* storage unavailable */
         }
         await saveCloudProfile(
           cloudClient,
@@ -1230,8 +1255,22 @@ export default function App() {
         setCloudStatus('offline');
         console.warn('[cloudSync.pushState]', pushErr);
       }
-    }, 1200);
+    };
+    statePushTimer.current = window.setTimeout(pushState, 600);
+    // Leaving or hiding the page: send the pending change right away.
+    const flushNow = () => {
+      if (statePushTimer.current === undefined) return;
+      window.clearTimeout(statePushTimer.current);
+      void pushState();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flushNow();
+    };
+    window.addEventListener('pagehide', flushNow);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      window.removeEventListener('pagehide', flushNow);
+      document.removeEventListener('visibilitychange', onVisibility);
       if (statePushTimer.current) {
         window.clearTimeout(statePushTimer.current);
       }
