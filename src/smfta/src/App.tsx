@@ -1227,7 +1227,7 @@ export default function App() {
       /* storage unavailable */
     }
     const pushState = async () => {
-      statePushTimer.current = undefined;
+      statePushTimer.current = null;
       try {
         const result = await saveCloudState(
           cloudClient,
@@ -1259,7 +1259,7 @@ export default function App() {
     statePushTimer.current = window.setTimeout(pushState, 600);
     // Leaving or hiding the page: send the pending change right away.
     const flushNow = () => {
-      if (statePushTimer.current === undefined) return;
+      if (statePushTimer.current === null) return;
       window.clearTimeout(statePushTimer.current);
       void pushState();
     };
