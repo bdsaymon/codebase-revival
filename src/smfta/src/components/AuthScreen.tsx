@@ -339,7 +339,7 @@ export const AuthScreen: React.FC = () => {
           )}
         </p>
 
-        <span className="auth-version">v{APP_VERSION} · Secured by Supabase</span>
+        <span className="auth-version">v{APP_VERSION} · Secured by Lovable Cloud</span>
       </form>
     </div>
   );
