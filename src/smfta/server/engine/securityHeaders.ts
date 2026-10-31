@@ -21,7 +21,7 @@
  *    hardening headers are still sent.
  */
 
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from '../runtime/express';
 
 export interface SecurityHeadersConfig {
   /** Defaults to NODE_ENV === 'production'. CSP is only enforced when true. */

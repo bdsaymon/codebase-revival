@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from '../runtime/express';
 import { APP_VERSION } from '../../src/version';
 import { getSharedHardenedEngine } from '../engine/router';
 import { getNeuralStatus } from '../intentRules';

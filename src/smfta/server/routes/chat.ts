@@ -1,5 +1,5 @@
 import { performance } from 'node:perf_hooks';
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from '../runtime/express';
 import {
   buildXrahatPrompt,
   buildXrahatUrl,

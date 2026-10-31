@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from '../runtime/express';
 import crypto from 'node:crypto';
 import { verifyConnectionTargetSafe } from '../engine/config';
 import { redactSecrets } from '../engine/security';

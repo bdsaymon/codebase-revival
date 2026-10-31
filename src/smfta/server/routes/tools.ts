@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response } from '../runtime/express';
 import { callBackendEngine, sanitizeErrorMsg } from '../aiClient';
 import { sanitizeProprietaryOutput } from '../providers';
 import { getNeuralStatus, retrainModelWeights } from '../intentRules';

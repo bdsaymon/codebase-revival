@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync } from '../runtime/sqlite';
 import { DEFAULT_SERVER_KEY_DAILY_CAP, ENGINE_DEFAULTS } from './defaults';
 import {
   decryptKeyInMemory,
@@ -104,9 +104,9 @@ export class DurableStorage {
     const resolvedPath =
       opts.dbPath ||
       process.env.AI_ENGINE_DB_PATH ||
-      (isServerlessRuntime
-        ? path.join('/tmp', 'smfta_ai_engine.sqlite')
-        : path.resolve(process.cwd(), '.data', 'smfta_ai_engine.sqlite'));
+      // Edge runtime: engine state lives in memory per server instance
+      // (equivalent to the source's ephemeral /tmp serverless database).
+      (isServerlessRuntime ? ':memory:' : ':memory:');
     this.dbPath = resolvedPath;
 
     // Trigger startup check for AI_MASTER_KEY once (Phase 2.7)
