@@ -272,7 +272,7 @@ export async function dispatchToLegacyApp(request: Request): Promise<Response> {
       if (event === 'close' || event === 'finish') closeListeners.push(cb);
       return res;
     },
-    once(event: string, cb: () => void) {
+    once(event: 'close' | 'finish', cb: () => void) {
       return res.on(event, cb);
     },
   } as unknown as XRes;
