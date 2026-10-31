@@ -361,6 +361,19 @@ export default function App() {
   const auth = useAuth();
   const cloudClient = auth.configured ? getSupabase() : null;
   const userId = auth.user?.id ?? null;
+  // Signed-in accounts show their own name instead of the placeholder name.
+  useEffect(() => {
+    const meta = (auth.user?.user_metadata || {}) as Record<string, unknown>;
+    const accountName = String(
+      meta.display_name || meta.full_name || meta.name || ''
+    ).trim();
+    if (!accountName) return;
+    setProfile((prev) =>
+      !prev.name || prev.name === 'Bossবোদা' || prev.name === 'Boss'
+        ? { ...prev, name: accountName }
+        : prev
+    );
+  }, [auth.user]);
   /** False until the first cloud hydration for this account has completed. */
   const [cloudReady, setCloudReady] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<
