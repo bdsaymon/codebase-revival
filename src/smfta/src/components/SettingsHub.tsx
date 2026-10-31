@@ -3419,18 +3419,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {draft.theme === 'dark' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} Theme
               </span>
               <div className="cs-seg" role="radiogroup" aria-label="Theme">
-                {(['dark', 'light'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="radio"
-                    aria-checked={draft.theme === t}
-                    className={`cs-seg-btn ${draft.theme === t ? 'is-active' : ''}`}
-                    onClick={() => patch({ theme: t, themeMode: t })}
-                  >
-                    {t === 'dark' ? 'Dark' : 'Light'}
-                  </button>
-                ))}
+                {([
+                  ['dark', 'Dark'],
+                  ['light', 'Light'],
+                  ['system', 'Auto'],
+                ] as const).map(([t, l]) => {
+                  const current = draft.themeMode || draft.theme;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="radio"
+                      aria-checked={current === t}
+                      className={`cs-seg-btn ${current === t ? 'is-active' : ''}`}
+                      onClick={() =>
+                        patch(
+                          t === 'system'
+                            ? {
+                                themeMode: 'system',
+                                theme:
+                                  typeof window !== 'undefined' &&
+                                  window.matchMedia?.('(prefers-color-scheme: dark)').matches
+                                    ? 'dark'
+                                    : 'light',
+                              }
+                            : { theme: t, themeMode: t }
+                        )
+                      }
+                    >
+                      {l}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div className="cs-quick-group">
