@@ -1431,7 +1431,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     actualProviderUsed !== effectiveProvider &&
     !(
       (effectiveProvider === 'smfta_cloud' || effectiveProvider === 'xrahat') &&
-      (actualProviderUsed === 'xrahat' || actualProviderUsed === 'server_gemini')
+      (actualProviderUsed === 'xrahat' || actualProviderUsed === 'server_gemini' || actualProviderUsed === 'smfta_cloud')
     );
   const modelSwitched = Boolean(
     activeCustomModelName &&
