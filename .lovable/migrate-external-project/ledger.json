@@ -1,0 +1,20 @@
+{
+  "source": "code archive: Smfta_ai-main.zip (SMFTA AI Pro v19, React 19 + Vite SPA, Express 5 API, Supabase auth/sync, Android WebView wrapper)",
+  "capabilities": [
+    {"capability": "frontend code (App, components, utils, styles)", "source": "src/", "outcome": "migrate", "status": "in_progress", "next_action": "Copy SPA into TanStack project and mount at /"},
+    {"capability": "schema", "source": "supabase/migrations/20261028000001_create_smfta_auth_workspace.sql", "outcome": "migrate", "status": "pending", "next_action": "Recreate smfta_profiles, smfta_user_state, smfta_chat_sessions with RLS in Lovable Cloud"},
+    {"capability": "records", "source": "Supabase (no export attached)", "outcome": "migrate", "status": "pending", "next_action": "Request CSV/JSON export of smfta_* tables after preview"},
+    {"capability": "auth identities", "source": "Supabase auth (no export attached)", "outcome": "migrate", "status": "pending", "next_action": "Request users export (id, email) after preview; import with first-login verification"},
+    {"capability": "authorization", "source": "RLS owner-only policies", "outcome": "migrate", "status": "pending", "next_action": "Recreate owner-only RLS"},
+    {"capability": "AI engine API (/api/chat/stream, battle, tools, provider, health)", "source": "server/ Express", "outcome": "migrate", "status": "pending", "next_action": "Run Express routers through a Web Request adapter in a TanStack server route"},
+    {"capability": "engine storage (key pool, quotas, audit)", "source": "node:sqlite (ephemeral /tmp on Vercel)", "outcome": "migrate", "status": "pending", "next_action": "Replace node:sqlite with in-memory sql.js (asm) — same ephemeral behaviour as source serverless deploy"},
+    {"capability": "AI provider: Google Gemini (built-in models)", "source": "GEMINI_API_KEY", "outcome": "preserve", "status": "pending", "next_action": "Request GEMINI_API_KEY via secure form before live verification"},
+    {"capability": "AI providers: user-supplied keys (OpenAI, Anthropic, etc.)", "source": "client keystore + /api/provider-models, /api/test-provider", "outcome": "preserve", "status": "pending", "next_action": "Keep as-is"},
+    {"capability": "OAuth integrations (GitHub, Vercel, Supabase mgmt, Google Workspace) + /auth/callback", "source": "server/routes/oauth.ts", "outcome": "preserve", "status": "pending", "next_action": "Serve /auth/callback and /api/oauth/*; client IDs/secrets requested when the user wants these integrations"},
+    {"capability": "live preview publish (/api/preview/*, /preview/:id)", "source": "server/routes/preview.ts", "outcome": "preserve", "status": "pending", "next_action": "Serve through adapter"},
+    {"capability": "Android APK wrapper", "source": "app/, gradle, .github/workflows/build-apk.yml", "outcome": "not_migrated", "status": "accepted_out_of_scope", "next_action": "Native Android build is outside the web app; can be rebuilt externally pointing at the published URL"},
+    {"capability": "secrets", "source": ".env.example", "outcome": "migrate", "status": "pending", "next_action": "GEMINI_API_KEY needed; AI_MASTER_KEY optional; OAuth client secrets optional"},
+    {"capability": "cutover", "source": "Vercel deployment", "outcome": "pending", "status": "pending", "next_action": "Update OAuth app callback URLs to the new domain /auth/callback"},
+    {"capability": "verification", "source": "-", "outcome": "pending", "status": "pending", "next_action": "Build, render, sign up, sync, chat stream"}
+  ]
+}
