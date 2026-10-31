@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import bundledMigrationSql from './migrations/001_ai_engine.sql?raw';
 import { DatabaseSync } from '../runtime/sqlite';
 import { DEFAULT_SERVER_KEY_DAILY_CAP, ENGINE_DEFAULTS } from './defaults';
 import {
@@ -17,8 +17,6 @@ import {
  * BEGIN IMMEDIATE transactions + Compare-And-Set version checks.
  */
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export class CasConflictError extends Error {
   constructor(message: string) {
@@ -171,9 +169,8 @@ export class DurableStorage {
   }
 
   private runMigrations(): void {
-    const migrationPath = path.join(__dirname, 'migrations', '001_ai_engine.sql');
-    const sql = fs.existsSync(migrationPath)
-      ? fs.readFileSync(migrationPath, 'utf8')
+    const sql = bundledMigrationSql
+      ? bundledMigrationSql
       : `
 CREATE TABLE IF NOT EXISTS ai_encrypted_keys (
   provider_id TEXT NOT NULL,
