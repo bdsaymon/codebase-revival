@@ -16,3 +16,6 @@
 - User data (profiles, settings state, chat sessions) is stored in Lovable Cloud tables `smfta_*` with owner-only RLS; the UI reaches them through `src/smfta/src/utils/supabaseClient.ts`, which wraps the generated client.
 - The app UI is mounted client-only at `/` (lazy import after mount) because it reads browser storage during initialisation.
 - tsconfig strict extras (index-signature access, unchecked index, exact optional) are off because the imported code was written against plain `strict`.
+- Keyless built-in SMFTA models stream through the Lovable AI Gateway first (`src/smfta/server/runtime/lovableAi.ts`), with the old free third-party endpoint only as fallback, because that endpoint stalled replies.
+- Shared website previews (`/preview/:id`) are stored in the `smfta_published_previews` table via the server admin client, because in-memory storage is lost between server instances and links broke on other devices.
+- The API adapter rewrites the request host from forwarded/origin/referer headers (`resolvePublicOrigin`), because behind the hosting proxy the raw host is internal and OAuth links pointed at localhost.

@@ -29,6 +29,9 @@ import {
   Loader2,
   Lock,
   LogOut,
+  Moon,
+  Sun,
+  Languages,
   MessageSquare,
   Palette,
   Pin,
@@ -3380,6 +3383,143 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <div className={`cs-shell ${isInline ? 'is-inline' : ''}`}>
       {/* Left navigation */}
       <nav className={`cs-nav ${mobileNavOpen ? 'is-open' : 'is-hidden-mobile'}`} aria-label="Settings sections">
+        <div className="cs-nav-head">
+          <div className="cs-nav-title-row">
+            <h2 className="cs-nav-title">Settings</h2>
+            <button
+              type="button"
+              className="cs-nav-close"
+              onClick={handleSaveAndClose}
+              aria-label="Close settings"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            className="cs-account-card"
+            onClick={() => openSection('account')}
+          >
+            <span className="cs-account-avatar" aria-hidden="true">
+              {(profileName || auth.user?.email || 'S').trim().charAt(0).toUpperCase()}
+            </span>
+            <span className="cs-account-meta">
+              <span className="cs-account-name">{profileName || 'Your profile'}</span>
+              <span className="cs-account-email">
+                {auth.user?.email || 'Local mode — sign in to sync'}
+              </span>
+            </span>
+            <span className={`cs-account-pill ${auth.user ? 'is-on' : ''}`}>
+              <Cloud className="w-3 h-3" /> {auth.user ? 'Synced' : 'Local'}
+            </span>
+          </button>
+          <div className="cs-quick" aria-label="Quick settings">
+            <div className="cs-quick-group">
+              <span className="cs-quick-label">
+                {draft.theme === 'dark' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} Theme
+              </span>
+              <div className="cs-seg" role="radiogroup" aria-label="Theme">
+                {([
+                  ['dark', 'Dark'],
+                  ['light', 'Light'],
+                  ['system', 'Auto'],
+                ] as const).map(([t, l]) => {
+                  const current = draft.themeMode || draft.theme;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="radio"
+                      aria-checked={current === t}
+                      className={`cs-seg-btn ${current === t ? 'is-active' : ''}`}
+                      onClick={() =>
+                        patch(
+                          t === 'system'
+                            ? {
+                                themeMode: 'system',
+                                theme:
+                                  typeof window !== 'undefined' &&
+                                  window.matchMedia?.('(prefers-color-scheme: dark)').matches
+                                    ? 'dark'
+                                    : 'light',
+                              }
+                            : { theme: t, themeMode: t }
+                        )
+                      }
+                    >
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="cs-quick-group">
+              <span className="cs-quick-label">
+                <Languages className="w-3.5 h-3.5" /> Reply language
+              </span>
+              <div className="cs-seg" role="radiogroup" aria-label="Reply language">
+                {([
+                  ['auto', 'Auto'],
+                  ['bn', 'বাংলা'],
+                  ['en', 'English'],
+                ] as const).map(([v, l]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.replyLang === v}
+                    className={`cs-seg-btn ${draft.replyLang === v ? 'is-active' : ''}`}
+                    onClick={() => patch({ replyLang: v })}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="cs-quick-group">
+              <span className="cs-quick-label">
+                <Zap className="w-3.5 h-3.5" /> Speed
+              </span>
+              <div className="cs-seg" role="radiogroup" aria-label="Speed mode">
+                {([
+                  ['fast', 'Fast'],
+                  ['balanced', 'Balanced'],
+                  ['power', 'Power'],
+                ] as const).map(([v, l]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.mode === v}
+                    className={`cs-seg-btn ${draft.mode === v ? 'is-active' : ''}`}
+                    onClick={() => patch({ mode: v })}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="cs-quick-group">
+              <span className="cs-quick-label">
+                <Palette className="w-3.5 h-3.5" /> Accent
+              </span>
+              <div className="cs-swatches" role="radiogroup" aria-label="Accent color">
+                {(['indigo', 'emerald', 'rose', 'amber', 'sky', 'teal'] as const).map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.accent === a}
+                    aria-label={a}
+                    data-accent={a}
+                    className={`cs-swatch ${draft.accent === a ? 'is-active' : ''}`}
+                    onClick={() => patch({ accent: a })}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
         <div className="cs-nav-search">
           <Search className="w-4 h-4" />
           <input
@@ -3402,6 +3542,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 key={id}
                 type="button"
                 className={`cs-nav-item ${tab === id ? 'active' : ''}`}
+                data-section={id}
                 aria-current={tab === id ? 'page' : undefined}
                 onClick={() => openSection(id)}
               >

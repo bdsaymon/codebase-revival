@@ -80,6 +80,36 @@ export type Database = {
         }
         Relationships: []
       }
+      smfta_published_previews: {
+        Row: {
+          created_at: string
+          files: Json
+          html: string
+          id: string
+          owner_key: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          files?: Json
+          html: string
+          id: string
+          owner_key: string
+          title?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          files?: Json
+          html?: string
+          id?: string
+          owner_key?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       smfta_user_state: {
         Row: {
           active_project: Json | null

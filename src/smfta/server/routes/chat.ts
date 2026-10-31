@@ -37,6 +37,7 @@ import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from '../engine/defaults';
 import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
 import { mergeContinuationText } from '../../src/utils/streamGuard';
+import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
 
 export const chatRouter = Router();
 
@@ -1216,6 +1217,31 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     effectiveProvider === 'smfta_cloud' ||
     allowKeylessFallback === true;
 
+  // 5a. Built-in SMFTA models: reliable gateway path first (no user key needed)
+  if (!streamSucceeded && !clientClosed && canUseKeyless && isLovableAiAvailable()) {
+    if (fullReplyAccumulator.length > 0) {
+      emitReset();
+    }
+    const gw = await streamFromLovableAi({
+      systemInstruction: sysInstruction,
+      history:
+        normalizedHistory.length > 0
+          ? normalizedHistory
+          : [{ role: 'user', content: lastUserText }],
+      requestedModel: activeCustomModelName,
+      signal: upstreamAbortController.signal,
+      emitDelta,
+      maxTokens: effectiveMaxOutputTokens,
+    });
+    if (gw.ok) {
+      streamSucceeded = true;
+      actualProviderUsed = 'smfta_cloud';
+      actualModelUsed = activeCustomModelName || 'smfta-flash';
+    } else if (fullReplyAccumulator.length > 0) {
+      emitReset();
+    }
+  }
+
   if (!streamSucceeded && !clientClosed && canUseKeyless) {
     if (fullReplyAccumulator.length > 0) {
       emitReset();
@@ -1405,7 +1431,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     actualProviderUsed !== effectiveProvider &&
     !(
       (effectiveProvider === 'smfta_cloud' || effectiveProvider === 'xrahat') &&
-      (actualProviderUsed === 'xrahat' || actualProviderUsed === 'server_gemini')
+      (actualProviderUsed === 'xrahat' || actualProviderUsed === 'server_gemini' || actualProviderUsed === 'smfta_cloud')
     );
   const modelSwitched = Boolean(
     activeCustomModelName &&
