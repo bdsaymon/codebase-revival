@@ -5202,3 +5202,13 @@ html[data-theme='light'] .codews-fs-notice-banner {
 }
 
 
+
+/* Chat box: the whole composer already shows focus, so the inner text area
+   must not draw its own square outline (it looked like a stray box). */
+.composer textarea,
+.composer textarea:focus,
+.composer textarea:focus-visible,
+html[data-focus-ring='1'] .composer textarea:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
