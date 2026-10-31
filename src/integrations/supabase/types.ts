@@ -14,7 +14,108 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      smfta_chat_sessions: {
+        Row: {
+          created_at: string
+          data: Json
+          draft: string | null
+          pinned: boolean
+          session_id: number
+          title: string
+          title_source: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data: Json
+          draft?: string | null
+          pinned?: boolean
+          session_id: number
+          title?: string
+          title_source?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json
+          draft?: string | null
+          pinned?: boolean
+          session_id?: number
+          title?: string
+          title_source?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      smfta_profiles: {
+        Row: {
+          avatar_data_url: string | null
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+          legacy_user_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_data_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id: string
+          legacy_user_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_data_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+          legacy_user_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      smfta_user_state: {
+        Row: {
+          autonomy: string | null
+          memory: Json
+          notes: Json
+          saved_profiles: Json
+          settings: Json
+          skills: Json
+          updated_at: string
+          user_id: string
+          widgets: Json
+        }
+        Insert: {
+          autonomy?: string | null
+          memory?: Json
+          notes?: Json
+          saved_profiles?: Json
+          settings?: Json
+          skills?: Json
+          updated_at?: string
+          user_id: string
+          widgets?: Json
+        }
+        Update: {
+          autonomy?: string | null
+          memory?: Json
+          notes?: Json
+          saved_profiles?: Json
+          settings?: Json
+          skills?: Json
+          updated_at?: string
+          user_id?: string
+          widgets?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
