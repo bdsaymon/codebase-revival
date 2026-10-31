@@ -201,13 +201,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const signInWithGoogle = useCallback(async () => {
     if (!client) throw new Error('Authentication is not configured.');
-    const origin =
-      typeof window !== 'undefined' ? window.location.origin : '/';
-    const { error } = await client.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${origin}/` },
+    const { lovable } = await import('@/integrations/lovable/index');
+    const result = await lovable.auth.signInWithOAuth('google', {
+      redirect_uri: window.location.origin,
     });
-    if (error) throw error;
+    if (result.error) throw result.error;
   }, [client]);
 
   const exitRecoveryMode = useCallback(() => setRecoveryMode(false), []);
