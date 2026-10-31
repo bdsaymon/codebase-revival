@@ -8,3 +8,11 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+## Project rules
+- The imported SMFTA AI Pro app lives in `src/smfta/src` (UI) and `src/smfta/server` (API engine); keep their relative imports intact — server code imports shared helpers from `../src`.
+- The API engine's original Express routers run unchanged through `src/smfta/server/runtime/express.ts` + `dispatch.ts`, mounted by `src/routes/api/$.ts`, `src/routes/auth.callback.ts` and `src/routes/preview.$projectId.ts`; add new endpoints as routers there rather than a second API style.
+- Engine storage uses `runtime/sqlite.ts` (sql.js asm build, in-memory) in place of `node:sqlite`, because the edge runtime has no native SQLite or writable disk; engine state is per server instance and must not hold user data that needs to persist.
+- User data (profiles, settings state, chat sessions) is stored in Lovable Cloud tables `smfta_*` with owner-only RLS; the UI reaches them through `src/smfta/src/utils/supabaseClient.ts`, which wraps the generated client.
+- The app UI is mounted client-only at `/` (lazy import after mount) because it reads browser storage during initialisation.
+- tsconfig strict extras (index-signature access, unchecked index, exact optional) are off because the imported code was written against plain `strict`.
