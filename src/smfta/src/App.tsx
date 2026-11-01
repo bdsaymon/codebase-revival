@@ -4702,7 +4702,7 @@ export default function App() {
             }}
           />
         ) : (
-          <main className="v2-main">
+          <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
             {/* HEADER — quiet, product-grade chrome */}
             <header className="app-header">
               <button
@@ -5508,7 +5508,8 @@ export default function App() {
                   </div>
                 )}
 
-                {/* v19.0 — Chatbox Connected Services Selector & Live Resource Explorer */}
+                {/* Connected services row — only shown once a service is actually linked */}
+                {Object.values(connections || {}).some((c: any) => c && c.connected) && (
                 <div className="w-full max-w-[850px]">
                   <ChatConnectedServicesToolbar
                     connections={connections}
@@ -5525,6 +5526,7 @@ export default function App() {
                     notify={showToast}
                   />
                 </div>
+                )}
 
                 {/* Professional composer (v18.4.0) */}
                 <div className="composer">
@@ -6013,11 +6015,27 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </section>
 
-              <div className="text-center py-2 select-none text-[11px] text-[var(--ink-dim)] font-medium tracking-wide">
-                SMFTA AI Powered by SYMON HASAN
-              </div>
+                {activeChat.msgs.length === 0 && !isWaitingFirstToken && (
+                  <div className="starter-grid">
+                    {[
+                      { title: 'ওয়েবসাইট বানাও', text: 'একটা দোকানের সুন্দর landing page বানিয়ে দাও' },
+                      { title: 'লেখা লিখে দাও', text: 'Facebook পোস্টের জন্য একটা আকর্ষণীয় ক্যাপশন লেখো' },
+                      { title: 'কোড বুঝিয়ে দাও', text: 'JavaScript-এ async/await কীভাবে কাজ করে সহজে বোঝাও' },
+                    ].map((s) => (
+                      <button
+                        key={s.title}
+                        type="button"
+                        className="starter-card"
+                        onClick={() => void handleSend(s.text)}
+                      >
+                        <span className="starter-title">{s.title}</span>
+                        <span className="starter-text">{s.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               <input
                 ref={fileInputRef}
