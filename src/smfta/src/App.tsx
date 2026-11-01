@@ -5451,15 +5451,15 @@ export default function App() {
 
                 {/* Manual Provider Switch Alert Banner (when active provider hits rate limit / quota / error) */}
                 {providerLimitBanner && (
-                  <div className="w-full max-w-[850px] mb-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-200 flex flex-col gap-2">
+                  <div className="limit-banner w-full max-w-[780px] mb-3 flex flex-col gap-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2 text-xs">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <AlertTriangle className="limit-banner-icon w-4 h-4 shrink-0 mt-0.5" />
                         <div>
-                          <div className="font-semibold text-amber-300 font-mono text-[11px] uppercase tracking-wider">
-                            Provider Limit / Error — Manual Switch Available
+                          <div className="limit-banner-title">
+                            এই AI এখন উত্তর দিতে পারছে না
                           </div>
-                          <p className="text-amber-200/80 mt-0.5 leading-relaxed text-xs">
+                          <p className="limit-banner-text">
                             {providerLimitBanner.message}
                           </p>
                         </div>
@@ -5467,7 +5467,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setProviderLimitBanner(null)}
-                        className="p-1 text-amber-300/60 hover:text-amber-200 cursor-pointer"
+                        className="icon-btn"
                         title="Dismiss"
                       >
                         <X className="w-4 h-4" />
@@ -5475,8 +5475,8 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300/75">
-                        Switch Property:
+                      <span className="limit-banner-label">
+                        অন্যটা বেছে নিন:
                       </span>
                       {savedProfiles
                         .filter((p) => p.id !== providerLimitBanner.profileId)
@@ -5485,9 +5485,9 @@ export default function App() {
                             key={prof.id}
                             type="button"
                             onClick={() => handleSelectProfile(prof)}
-                            className="px-2.5 py-1 bg-[var(--surface)] border border-amber-400/40 hover:border-[var(--accent)] hover:bg-[var(--accent)] hover:text-white rounded text-xs font-mono text-[var(--ink)] flex items-center gap-1.5 cursor-pointer transition-colors"
+                            className="hdr-btn limit-banner-chip"
                           >
-                            <Zap className="w-3 h-3 text-amber-400" />
+                            <Zap className="w-3 h-3" />
                             <span>
                               {prof.name} ({prof.externalModel || 'default'})
                             </span>
@@ -5499,9 +5499,9 @@ export default function App() {
                           setSettingsTab('engine');
                           setSettingsOpen(true);
                         }}
-                        className="px-2.5 py-1 bg-transparent border border-[var(--border)] hover:border-amber-400 rounded text-[11px] font-mono text-amber-300 cursor-pointer"
+                        className="hdr-btn limit-banner-chip"
                       >
-                        + Manage
+                        Providers ঠিক করুন
                       </button>
                     </div>
                   </div>
