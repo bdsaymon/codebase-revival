@@ -4346,7 +4346,7 @@ export default function App() {
         </nav>
 
         {/* v18.9 redesign — Syntrix-style feature launcher */}
-        <div className="sb-feature-label">Features</div>
+        <div className="sb-feature-label">Tools</div>
         <nav className="sb-features" aria-label="Feature shortcuts">
           <button
             type="button"
@@ -4555,8 +4555,7 @@ export default function App() {
           </div>
           <div className="sb-upgrade-title">AI providers</div>
           <p className="sb-upgrade-text">
-            The built-in engine works without a key. Add your own provider to
-            use its verified models.
+            নিজের AI key যোগ করে আরও মডেল ব্যবহার করুন।
           </p>
           <button
             type="button"
@@ -4735,7 +4734,7 @@ export default function App() {
                     }}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    New Chat
+                    <span className="hdr-label">New Chat</span>
                   </button>
                   <button
                     type="button"
@@ -4744,7 +4743,7 @@ export default function App() {
                     disabled={activeChat.msgs.length === 0}
                   >
                     <Download className="w-3.5 h-3.5" />
-                    Export
+                    <span className="hdr-label">Export</span>
                   </button>
                 </div>
                 <button
