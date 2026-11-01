@@ -5000,10 +5000,9 @@ export default function App() {
                         <Sparkles className="w-5 h-5" />
                       </span>
                     </div>
-                    <div className="empty-eyebrow">Welcome back</div>
-                    <h1 className="empty-title">What are we building today?</h1>
+                    <h1 className="empty-title">What can I help with?</h1>
                     <p className="empty-sub">
-                      কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — সরাসরি নিচে লিখে শুরু করুন।
+                      কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — নিচে লিখে শুরু করুন।
                     </p>
                   </div>
                 ) : (
