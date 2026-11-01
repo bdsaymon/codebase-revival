@@ -5568,3 +5568,8 @@ html[data-theme='dark'] .cs-account-avatar { color: var(--ink); }
   color: #fff !important;
   border-radius: 18px 18px 6px 18px !important;
 }
+@media (min-width: 1024px) {
+  .app-header > .icon-btn.lg\:hidden,
+  .sb-brand > .icon-btn.lg\:hidden { display: none !important; }
+  .v2-main.is-empty .composer-wrap { padding-bottom: 12vh !important; }
+}
