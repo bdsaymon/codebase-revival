@@ -4724,45 +4724,42 @@ export default function App() {
               </div>
 
               <div className="app-header-actions">
-                {/* v18.9 redesign — Syntrix-style top navigation (desktop only) */}
-                <nav className="app-header-nav" aria-label="Workspace sections">
+                {/* v20 clean header — two clear actions */}
+                <div className="app-header-nav" aria-label="Chat actions">
                   <button
                     type="button"
-                    className="app-header-link active"
-                    onClick={() => setCurrentView('chat')}
-                  >
-                    <LayoutDashboard className="w-3.5 h-3.5" />
-                    Dashboard
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-link"
-                    onClick={() => handleOpenCodeWorkspace([], 0)}
-                    data-testid="header-open-workspace-btn"
-                  >
-                    <Code2 className="w-3.5 h-3.5" />
-                    Code Workspace
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-link"
+                    className="hdr-btn"
                     onClick={() => {
-                      setSettingsTab('general');
-                      setCurrentView('settings');
+                      handleNewChat();
+                      setCurrentView('chat');
                     }}
                   >
-                    <Settings className="w-3.5 h-3.5" />
-                    Settings
+                    <Plus className="w-3.5 h-3.5" />
+                    New Chat
                   </button>
                   <button
                     type="button"
-                    className="app-header-link"
-                    onClick={() => setInfoModal('whatsnew')}
+                    className="hdr-btn"
+                    onClick={handleExportChatMarkdown}
+                    disabled={activeChat.msgs.length === 0}
                   >
-                    <CircleHelp className="w-3.5 h-3.5" />
-                    Help &amp; Support
+                    <Download className="w-3.5 h-3.5" />
+                    Export
                   </button>
-                </nav>
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn hdr-theme"
+                  onClick={() =>
+                    setSettings((prev) => sanitizeSettings({
+                      ...prev,
+                      theme: prev.theme === 'dark' ? 'light' : 'dark',
+                    }))
+                  }
+                  title={settings.theme === 'dark' ? 'Light theme' : 'Dark theme'}
+                >
+                  {settings.theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
 
                 {/* Mobile & Desktop Quick Full-Screen Live Preview Button */}
                 <button
