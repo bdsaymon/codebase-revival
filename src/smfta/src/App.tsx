@@ -4346,7 +4346,7 @@ export default function App() {
         </nav>
 
         {/* v18.9 redesign — Syntrix-style feature launcher */}
-        <div className="sb-feature-label">Features</div>
+        <div className="sb-feature-label">Tools</div>
         <nav className="sb-features" aria-label="Feature shortcuts">
           <button
             type="button"
@@ -4555,8 +4555,7 @@ export default function App() {
           </div>
           <div className="sb-upgrade-title">AI providers</div>
           <p className="sb-upgrade-text">
-            The built-in engine works without a key. Add your own provider to
-            use its verified models.
+            নিজের AI key যোগ করে আরও মডেল ব্যবহার করুন।
           </p>
           <button
             type="button"
@@ -4702,7 +4701,7 @@ export default function App() {
             }}
           />
         ) : (
-          <main className="v2-main">
+          <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
             {/* HEADER — quiet, product-grade chrome */}
             <header className="app-header">
               <button
@@ -4724,45 +4723,42 @@ export default function App() {
               </div>
 
               <div className="app-header-actions">
-                {/* v18.9 redesign — Syntrix-style top navigation (desktop only) */}
-                <nav className="app-header-nav" aria-label="Workspace sections">
+                {/* v20 clean header — two clear actions */}
+                <div className="app-header-nav" aria-label="Chat actions">
                   <button
                     type="button"
-                    className="app-header-link active"
-                    onClick={() => setCurrentView('chat')}
-                  >
-                    <LayoutDashboard className="w-3.5 h-3.5" />
-                    Dashboard
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-link"
-                    onClick={() => handleOpenCodeWorkspace([], 0)}
-                    data-testid="header-open-workspace-btn"
-                  >
-                    <Code2 className="w-3.5 h-3.5" />
-                    Code Workspace
-                  </button>
-                  <button
-                    type="button"
-                    className="app-header-link"
+                    className="hdr-btn"
                     onClick={() => {
-                      setSettingsTab('general');
-                      setCurrentView('settings');
+                      handleNewChat();
+                      setCurrentView('chat');
                     }}
                   >
-                    <Settings className="w-3.5 h-3.5" />
-                    Settings
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="hdr-label">New Chat</span>
                   </button>
                   <button
                     type="button"
-                    className="app-header-link"
-                    onClick={() => setInfoModal('whatsnew')}
+                    className="hdr-btn"
+                    onClick={handleExportChatMarkdown}
+                    disabled={activeChat.msgs.length === 0}
                   >
-                    <CircleHelp className="w-3.5 h-3.5" />
-                    Help &amp; Support
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hdr-label">Export</span>
                   </button>
-                </nav>
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn hdr-theme"
+                  onClick={() =>
+                    setSettings((prev) => sanitizeSettings({
+                      ...prev,
+                      theme: prev.theme === 'dark' ? 'light' : 'dark',
+                    }))
+                  }
+                  title={settings.theme === 'dark' ? 'Light theme' : 'Dark theme'}
+                >
+                  {settings.theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
 
                 {/* Mobile & Desktop Quick Full-Screen Live Preview Button */}
                 <button
@@ -5003,10 +4999,9 @@ export default function App() {
                         <Sparkles className="w-5 h-5" />
                       </span>
                     </div>
-                    <div className="empty-eyebrow">Welcome back</div>
-                    <h1 className="empty-title">What are we building today?</h1>
+                    <h1 className="empty-title">What can I help with?</h1>
                     <p className="empty-sub">
-                      কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — সরাসরি নিচে লিখে শুরু করুন।
+                      কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — নিচে লিখে শুরু করুন।
                     </p>
                   </div>
                 ) : (
@@ -5456,15 +5451,15 @@ export default function App() {
 
                 {/* Manual Provider Switch Alert Banner (when active provider hits rate limit / quota / error) */}
                 {providerLimitBanner && (
-                  <div className="w-full max-w-[850px] mb-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-200 flex flex-col gap-2">
+                  <div className="limit-banner w-full max-w-[780px] mb-3 flex flex-col gap-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2 text-xs">
-                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <AlertTriangle className="limit-banner-icon w-4 h-4 shrink-0 mt-0.5" />
                         <div>
-                          <div className="font-semibold text-amber-300 font-mono text-[11px] uppercase tracking-wider">
-                            Provider Limit / Error — Manual Switch Available
+                          <div className="limit-banner-title">
+                            এই AI এখন উত্তর দিতে পারছে না
                           </div>
-                          <p className="text-amber-200/80 mt-0.5 leading-relaxed text-xs">
+                          <p className="limit-banner-text">
                             {providerLimitBanner.message}
                           </p>
                         </div>
@@ -5472,7 +5467,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setProviderLimitBanner(null)}
-                        className="p-1 text-amber-300/60 hover:text-amber-200 cursor-pointer"
+                        className="icon-btn"
                         title="Dismiss"
                       >
                         <X className="w-4 h-4" />
@@ -5480,8 +5475,8 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[10px] font-mono uppercase tracking-wider text-amber-300/75">
-                        Switch Property:
+                      <span className="limit-banner-label">
+                        অন্যটা বেছে নিন:
                       </span>
                       {savedProfiles
                         .filter((p) => p.id !== providerLimitBanner.profileId)
@@ -5490,9 +5485,9 @@ export default function App() {
                             key={prof.id}
                             type="button"
                             onClick={() => handleSelectProfile(prof)}
-                            className="px-2.5 py-1 bg-[var(--surface)] border border-amber-400/40 hover:border-[var(--accent)] hover:bg-[var(--accent)] hover:text-white rounded text-xs font-mono text-[var(--ink)] flex items-center gap-1.5 cursor-pointer transition-colors"
+                            className="hdr-btn limit-banner-chip"
                           >
-                            <Zap className="w-3 h-3 text-amber-400" />
+                            <Zap className="w-3 h-3" />
                             <span>
                               {prof.name} ({prof.externalModel || 'default'})
                             </span>
@@ -5504,15 +5499,16 @@ export default function App() {
                           setSettingsTab('engine');
                           setSettingsOpen(true);
                         }}
-                        className="px-2.5 py-1 bg-transparent border border-[var(--border)] hover:border-amber-400 rounded text-[11px] font-mono text-amber-300 cursor-pointer"
+                        className="hdr-btn limit-banner-chip"
                       >
-                        + Manage
+                        Providers ঠিক করুন
                       </button>
                     </div>
                   </div>
                 )}
 
-                {/* v19.0 — Chatbox Connected Services Selector & Live Resource Explorer */}
+                {/* Connected services row — only shown once a service is actually linked */}
+                {Object.values(connections || {}).some((c: any) => c && c.connected) && (
                 <div className="w-full max-w-[850px]">
                   <ChatConnectedServicesToolbar
                     connections={connections}
@@ -5529,6 +5525,7 @@ export default function App() {
                     notify={showToast}
                   />
                 </div>
+                )}
 
                 {/* Professional composer (v18.4.0) */}
                 <div className="composer">
@@ -6017,11 +6014,27 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </section>
 
-              <div className="text-center py-2 select-none text-[11px] text-[var(--ink-dim)] font-medium tracking-wide">
-                SMFTA AI Powered by SYMON HASAN
-              </div>
+                {activeChat.msgs.length === 0 && !isWaitingFirstToken && (
+                  <div className="starter-grid">
+                    {[
+                      { title: 'ওয়েবসাইট বানাও', text: 'একটা দোকানের সুন্দর landing page বানিয়ে দাও' },
+                      { title: 'লেখা লিখে দাও', text: 'Facebook পোস্টের জন্য একটা আকর্ষণীয় ক্যাপশন লেখো' },
+                      { title: 'কোড বুঝিয়ে দাও', text: 'JavaScript-এ async/await কীভাবে কাজ করে সহজে বোঝাও' },
+                    ].map((s) => (
+                      <button
+                        key={s.title}
+                        type="button"
+                        className="starter-card"
+                        onClick={() => void handleSend(s.text)}
+                      >
+                        <span className="starter-title">{s.title}</span>
+                        <span className="starter-text">{s.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
 
               <input
                 ref={fileInputRef}
