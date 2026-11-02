@@ -4715,11 +4715,6 @@ export default function App() {
 
               <div className="app-header-title">
                 <strong>{activeChat.msgs.length > 0 ? activeChat.title : 'New chat'}</strong>
-                <span>
-                  <span className="app-header-status-dot" />
-                  {activeDisplayName === 'Msfta shop ai' ? 'SMFTA Pro' : activeDisplayName}
-                  <span className="app-header-model">· {activeModelLabel}</span>
-                </span>
               </div>
 
               <div className="app-header-actions">
@@ -4760,17 +4755,6 @@ export default function App() {
                   {settings.theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
 
-                {/* Mobile & Desktop Quick Full-Screen Live Preview Button */}
-                <button
-                  type="button"
-                  onClick={() => handleOpenCodeWorkspace([], 0)}
-                  className="chip-btn lg:hidden"
-                  data-testid="mobile-header-live-preview-btn"
-                  title="Open Full-Screen Live Preview Workspace"
-                >
-                  <Play className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span>Preview</span>
-                </button>
 
                 <div className="relative">
                   <button
@@ -6015,25 +5999,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {activeChat.msgs.length === 0 && !isWaitingFirstToken && (
-                  <div className="starter-grid">
-                    {[
-                      { title: 'ওয়েবসাইট বানাও', text: 'একটা দোকানের সুন্দর landing page বানিয়ে দাও' },
-                      { title: 'লেখা লিখে দাও', text: 'Facebook পোস্টের জন্য একটা আকর্ষণীয় ক্যাপশন লেখো' },
-                      { title: 'কোড বুঝিয়ে দাও', text: 'JavaScript-এ async/await কীভাবে কাজ করে সহজে বোঝাও' },
-                    ].map((s) => (
-                      <button
-                        key={s.title}
-                        type="button"
-                        className="starter-card"
-                        onClick={() => void handleSend(s.text)}
-                      >
-                        <span className="starter-title">{s.title}</span>
-                        <span className="starter-text">{s.text}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
               </section>
 
               <input
