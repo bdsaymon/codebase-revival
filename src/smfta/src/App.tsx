@@ -2454,8 +2454,10 @@ export default function App() {
       scrollToBottom(false);
     };
 
+    // Once a chat has started, every message goes to the AI with the full
+    // conversation — canned local replies ignore context and broke memory.
     const isMultiTurnFollowUp =
-      activeChat.msgs.length > 0 && isFollowUpQuery(rawTxt);
+      activeChat.msgs.length > 0 || isFollowUpQuery(rawTxt);
     const hasActiveServiceSelection = Boolean(
       activeChat.serviceContext?.activeService
     );
