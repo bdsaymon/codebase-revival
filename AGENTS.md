@@ -19,3 +19,4 @@
 - Keyless built-in SMFTA models stream through the Lovable AI Gateway first (`src/smfta/server/runtime/lovableAi.ts`), with the old free third-party endpoint only as fallback, because that endpoint stalled replies.
 - Shared website previews (`/preview/:id`) are stored in the `smfta_published_previews` table via the server admin client, because in-memory storage is lost between server instances and links broke on other devices.
 - The API adapter rewrites the request host from forwarded/origin/referer headers (`resolvePublicOrigin`), because behind the hosting proxy the raw host is internal and OAuth links pointed at localhost.
+- The SMFTA code workspace is a view inside the app at `/`; never change the browser address to open it, because the site router has no page for app-internal paths and shows a 404.
