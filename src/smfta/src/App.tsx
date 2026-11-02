@@ -692,17 +692,8 @@ export default function App() {
     });
     saveWorkspaceHandoff(payload);
     setWorkspacePayload(payload);
-    try {
-      if (
-        typeof window !== 'undefined' &&
-        window.history?.pushState &&
-        window.location?.pathname !== '/workspace/code'
-      ) {
-        window.history.pushState({ view: 'workspace' }, '', '/workspace/code');
-      }
-    } catch {
-      // Ignore history API restrictions in test/sandbox environments
-    }
+    // Stay on "/": the site router has no /workspace/code page, so changing
+    // the address showed a 404 instead of the workspace and its preview.
     setCurrentView('workspace');
   };
 
