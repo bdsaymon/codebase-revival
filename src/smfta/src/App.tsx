@@ -127,7 +127,6 @@ import { SettingsModal, SettingsTabId } from './components/SettingsHub';
 import { NotebookModal, createNote, sanitizeNotes } from './components/NotebookModal';
 import { ConnectionsModal } from './components/ConnectionsModal';
 import { ChatConnectedServicesToolbar } from './components/ChatConnectedServicesToolbar';
-import { LivePreviewModal } from './components/LivePreviewModal';
 import { CodeWorkspaceModal } from './components/CodeWorkspace';
 import { CodeWorkspacePage } from './components/CodeWorkspacePage';
 import { TaskExecutionPanel } from './components/TaskExecutionPanel';
@@ -241,7 +240,6 @@ import {
 } from './utils/apkClientFallback';
 import { useAuth } from './context/AuthContext';
 import { getSupabase } from './utils/supabaseClient';
-import AuthScreen from './components/AuthScreen';
 import {
   CloudSessionRow,
   CloudStatePayload,
@@ -413,7 +411,6 @@ export default function App() {
   );
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [connectionsOpen, setConnectionsOpen] = useState(false);
-  const [previewBlocks, setPreviewBlocks] = useState<CodeBlockInfo[] | null>(null);
   // v18.8.0 — code + live preview side workspace (any language, .zip download)
   const [codeWorkspace, setCodeWorkspace] = useState<{
     blocks: CodeBlockInfo[];
@@ -2891,7 +2888,8 @@ export default function App() {
         discoveredModels: profileSnapshot.availableModels || [],
         supportsStreaming: profileSnapshot.supportsStreaming !== false,
         allowKeylessFallback: Boolean(settings.allowKeylessFallback),
-        maxOutputTokens: settings.maxOutputTokens,
+        maxOutputTokens: profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens,
+        contextWindow: profileSnapshot.contextWindow,
         weightTemp: settings.weightTemp ?? 0.7,
         topP: settings.topP ?? 0.9,
         trainingData: settings.trainingData || '',
@@ -4212,21 +4210,6 @@ export default function App() {
   const lastAiMessage =
     [...activeChat.msgs].reverse().find((m) => m.role === 'ai')?.text || '';
 
-  // Auth gate: when Supabase is configured the workspace is private until a
-  // valid session exists. Without env configuration (tests, offline/APK) the
-  // app renders in its original local-only mode.
-  if (auth.configured && auth.loading) {
-    return (
-      <div className="auth-boot" role="status" aria-live="polite">
-        <Loader2 className="w-7 h-7 animate-spin" />
-        <span>Restoring your secure session…</span>
-      </div>
-    );
-  }
-  if (auth.configured && !auth.user) {
-    return <AuthScreen />;
-  }
-
   return (
     <div className="app-shell flex h-[100dvh] w-full overflow-hidden bg-[var(--bg)] text-[var(--text)]">
       {/* Toast Notification */}
@@ -4258,7 +4241,7 @@ export default function App() {
           <div className="sb-mark" aria-hidden="true">S</div>
           <div className="sb-brand-text">
             <div className="sb-brand-title">SMFTA AI</div>
-            <div className="sb-brand-sub">Professional workspace · v{APP_VERSION}</div>
+            <div className="sb-brand-sub">Assistant</div>
           </div>
           <button
             type="button"
@@ -4572,7 +4555,7 @@ export default function App() {
               setSidebarOpen(false);
             }}
             className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
-            title="Account & settings"
+            title="Profile & settings"
           >
             <div className="sb-avatar">
               {settings.avatarDataUrl ? (
@@ -4588,7 +4571,7 @@ export default function App() {
               )}
             </div>
             <div className="sb-user">
-              <div className="sb-user-name">{profile.name || 'Your account'}</div>
+              <div className="sb-user-name">{profile.name || 'Your profile'}</div>
               <div className="sb-user-meta" title={auth.user?.email || ''}>
                 {auth.configured
                   ? auth.user?.email || 'Signed in'
@@ -4596,16 +4579,6 @@ export default function App() {
               </div>
             </div>
           </div>
-          {auth.configured && auth.user && (
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="icon-btn"
-              title="Sign out"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          )}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
@@ -4678,7 +4651,6 @@ export default function App() {
             onSelfRepair={handleSelfRepair}
             keystoreEphemeral={keystoreEphemeral}
             usageToday={usageToday}
-            onSignOut={handleSignOut}
             onOpenSkill={(sk) => {
               const widget =
                 selfWidgets.find((w) => w.id === `w-${sk.id}`) ||
@@ -4864,7 +4836,7 @@ export default function App() {
                     setSettingsTab('account');
                     setCurrentView('settings');
                   }}
-                  title="Account & settings"
+                  title="Profile & settings"
                 >
                   {settings.avatarDataUrl ? (
                     <img
@@ -4970,12 +4942,9 @@ export default function App() {
               >
                 {activeChat.msgs.length === 0 && !isWaitingFirstToken ? (
                   <div className="empty-state">
-                    {/* v18.9 redesign — Syntrix-style glowing orb welcome */}
-                    <div className="welcome-orb" aria-hidden="true">
-                      <span className="welcome-orb-core">
-                        <Sparkles className="w-5 h-5" />
-                      </span>
-                    </div>
+                    <h1 className="empty-title">SMFTA AI</h1>
+                    <p className="empty-sub">What can I help with?</p>
+                  </div>
                     <h1 className="empty-title">What can I help with?</h1>
                     <p className="empty-sub">
                       কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — নিচে লিখে শুরু করুন।
@@ -5124,9 +5093,6 @@ export default function App() {
                                 showToast('Installed into your self-update tools');
                               }
                             }}
-                            onOpenLivePreview={(blocks) =>
-                              handleOpenCodeWorkspace(blocks, 0, m.id)
-                            }
                             onOpenCodeWorkspace={(blocks, selectedIdx, msgId) =>
                               handleOpenCodeWorkspace(
                                 blocks,
@@ -6113,7 +6079,6 @@ export default function App() {
         onSelfRepair={handleSelfRepair}
         keystoreEphemeral={keystoreEphemeral}
         usageToday={usageToday}
-        onSignOut={handleSignOut}
         onOpenSkill={(sk) => {
           const widget =
             selfWidgets.find((w) => w.id === `w-${sk.id}`) ||
@@ -6135,14 +6100,6 @@ export default function App() {
         onClose={() => setCodeWorkspace(null)}
         blocks={codeWorkspace?.blocks || []}
         title={codeWorkspace?.title}
-        notify={showToast}
-      />
-
-      {/* LIVE PREVIEW — see the AI's code running, instantly */}
-      <LivePreviewModal
-        isOpen={previewBlocks !== null}
-        onClose={() => setPreviewBlocks(null)}
-        blocks={previewBlocks || []}
         notify={showToast}
       />
 

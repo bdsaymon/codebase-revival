@@ -102,7 +102,6 @@ import {
 } from '../utils/apkClientFallback';
 import { playNotifChime } from '../utils/notify';
 import { useAuth } from '../context/AuthContext';
-import { friendlyAuthError } from '../utils/authErrors';
 import { APP_VERSION } from '../version';
 import {
   TOOL_CAPABILITY_REGISTRY,
@@ -213,8 +212,6 @@ export interface SettingsModalProps {
   onOpenSkill?: (skill: SelfSkill) => void;
   keystoreEphemeral?: boolean;
   usageToday?: number;
-  /** Supabase sign-out (wired only when cloud auth is configured). */
-  onSignOut?: () => void | Promise<void>;
 }
 
 // ── Compact, reusable Claude-style primitives ──────────────────────────────
@@ -421,7 +418,7 @@ const SECTION_META: Record<
     icon: <Server className="w-4 h-4" />,
   },
   performance: {
-    label: 'Response & Performance',
+    label: 'Responses',
     hint: 'Speed modes, streaming, tokens, retries and fallback',
     keywords: 'performance response fast balanced quality streaming token timeout retry fallback latency',
     icon: <Zap className="w-4 h-4" />,
@@ -439,13 +436,13 @@ const SECTION_META: Record<
     icon: <Lock className="w-4 h-4" />,
   },
   connectors: {
-    label: 'Cloud Connectors',
+    label: 'Connections',
     hint: 'Google Drive, GitHub and cloud sync',
     keywords: 'cloud connector drive github sync কানেক্ট integration vault',
     icon: <Cloud className="w-4 h-4" />,
   },
   permissions: {
-    label: 'AI Permissions',
+    label: 'Tools & Permissions',
     hint: 'Autonomy, tool permissions and self-control',
     keywords: 'permission autonomy authority retry timeout skill widget self repair capability gpu tools',
     icon: <ShieldCheck className="w-4 h-4" />,
@@ -463,9 +460,9 @@ const SECTION_META: Record<
     icon: <SlidersHorizontal className="w-4 h-4" />,
   },
   account: {
-    label: 'Account',
-    hint: 'Sign-in, password, usage and about',
-    keywords: 'account অ্যাকাউন্ট email sign out logout password avatar usage limit about version',
+    label: 'Profile & About',
+    hint: 'Profile, usage and app version',
+    keywords: 'profile avatar usage about version',
     icon: <User className="w-4 h-4" />,
   },
 };
@@ -525,7 +522,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenSkill,
   keystoreEphemeral = false,
   usageToday = 0,
-  onSignOut,
 }) => {
   const auth = useAuth();
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
@@ -632,10 +628,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
 
   // Account password change
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
-  const [pwBusy, setPwBusy] = useState(false);
-  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const initialSnapshotRef = React.useRef<{
     settings: AppSettings;
@@ -1003,7 +995,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return ['gemini-3.7-flash', 'deepseek-v4-flash-0731', 'claude-sonnet-5', 'claude-opus-4.8'];
     }
     if (u.includes('inceptionlabs') || u.includes('mercury')) {
-      return ['mercury-3', 'mercury', 'mercury-coder', 'mercury-2'];
+      return ['mercury-2', 'mercury', 'mercury-coder'];
     }
     if (u.includes('groq')) {
       return ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
@@ -1339,29 +1331,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       notify?.('Avatar updated.');
     };
     reader.readAsDataURL(file);
-  };
-
-  const handleChangePassword = async () => {
-    setPwMsg(null);
-    if (pw1.length < 6) {
-      setPwMsg({ ok: false, text: 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।' });
-      return;
-    }
-    if (pw1 !== pw2) {
-      setPwMsg({ ok: false, text: 'দুইটি পাসওয়ার্ড মিলছে না।' });
-      return;
-    }
-    setPwBusy(true);
-    try {
-      await auth.updatePassword(pw1);
-      setPwMsg({ ok: true, text: 'পাসওয়ার্ড সফলভাবে পরিবর্তন হয়েছে।' });
-      setPw1('');
-      setPw2('');
-    } catch (err) {
-      setPwMsg({ ok: false, text: friendlyAuthError(err) });
-    } finally {
-      setPwBusy(false);
-    }
   };
 
   const handleDiscardAndClose = () => {
@@ -1941,6 +1910,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       step={2048}
                       onChange={(v) => updateSavedProfileField(prof.id, { contextWindow: v })}
                     />
+                    <SliderRow
+                      label="Maximum response tokens"
+                      value={prof.maxOutputTokens ?? 4096}
+                      min={64}
+                      max={32768}
+                      step={64}
+                      onChange={(v) => updateSavedProfileField(prof.id, { maxOutputTokens: v })}
+                    />
                     <ToggleRow
                       label="SSE streaming support"
                       description="Enable incremental token streaming when supported by this endpoint."
@@ -2166,7 +2143,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               if (newProviderId === 'custom' && (!newModel || newModel === 'gpt-4o-mini')) {
                 const u = v.toLowerCase();
                 if (u.includes('codecraft')) setNewModel('gemini-3.7-flash');
-                else if (u.includes('inceptionlabs') || u.includes('mercury')) setNewModel('mercury-3');
+                else if (u.includes('inceptionlabs') || u.includes('mercury')) setNewModel('mercury-2');
                 else if (u.includes('generativelanguage.googleapis.com')) setNewModel('gemini-2.5-flash');
                 else if (u.includes('groq.com')) setNewModel('llama-3.3-70b-versatile');
                 else if (u.includes('deepseek.com')) setNewModel('deepseek-chat');
@@ -2817,23 +2794,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const renderConnectors = () => (
     <>
       <Card
-        title="Cloud sync"
-        description="Your authenticated Supabase account syncs chats and settings."
-        icon={<Cloud className="w-4 h-4" />}
-      >
-        {auth.configured && auth.user ? (
-          <p className="cs-callout success">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>Signed in as {auth.user.email} · data isolated by Row Level Security.</span>
-          </p>
-        ) : (
-          <p className="cs-callout info">
-            Cloud account not configured — data stays on this device.
-          </p>
-        )}
-      </Card>
-
-      <Card
         title="Integrations Hub — GitHub, Vercel, Supabase & Google"
         description="Real OAuth & API connections with granular permission verification, live service workbenches, and confirmation-gated operations."
         icon={<Wrench className="w-4 h-4" />}
@@ -3040,83 +3000,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const renderAccount = () => (
     <>
-      {auth.configured && (
-        <Card title="Supabase account" description="Your authenticated sign-in identity." icon={<ShieldCheck className="w-4 h-4" />}>
-          <div className="cs-account-row">
-            <div className="cs-avatar">
-              {draft.avatarDataUrl ? (
-                <img src={draft.avatarDataUrl} alt="" />
-              ) : (
-                (auth.user?.email || profile.name || 'S').charAt(0).toUpperCase()
-              )}
-            </div>
-            <div className="cs-row-info">
-              <span className="cs-label">{auth.user?.email}</span>
-              <span className="cs-desc">
-                {auth.user?.app_metadata?.provider === 'google' ? 'Google sign-in' : 'Email sign-in'} ·
-                sessions persist across reloads
-              </span>
-            </div>
-          </div>
-
-          <div className="cs-row cs-row-column">
-            <div className="cs-row-info">
-              <span className="cs-label">Change password</span>
-              <span className="cs-desc">Use a password you do not reuse elsewhere.</span>
-            </div>
-            <input
-              type="password"
-              className="cs-input"
-              placeholder="New password (min 6 chars)"
-              value={pw1}
-              onChange={(e) => setPw1(e.target.value)}
-            />
-            <input
-              type="password"
-              className="cs-input"
-              placeholder="Confirm new password"
-              value={pw2}
-              onChange={(e) => setPw2(e.target.value)}
-            />
-            {pwMsg && (
-              <p className={`cs-callout ${pwMsg.ok ? 'success' : 'warn'}`}>
-                {pwMsg.ok ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-                <span>{pwMsg.text}</span>
-              </p>
-            )}
-            <div className="cs-form-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={pwBusy || auth.user?.app_metadata?.provider === 'google'}
-                title={
-                  auth.user?.app_metadata?.provider === 'google'
-                    ? 'Google accounts manage passwords at Google'
-                    : undefined
-                }
-                onClick={handleChangePassword}
-              >
-                {pwBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                Update password
-              </button>
-            </div>
-          </div>
-
-          <div className="cs-form-actions">
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={() => {
-                onClose();
-                void onSignOut?.();
-              }}
-            >
-              <LogOut className="w-4 h-4" /> Sign out
-            </button>
-          </div>
-        </Card>
-      )}
-
       <Card title="Local profile" description="Identity used inside conversations on this device.">
         <div className="cs-account-row">
           <div className="cs-avatar">
@@ -3394,130 +3277,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <X className="w-4 h-4" />
             </button>
-          </div>
-          <button
-            type="button"
-            className="cs-account-card"
-            onClick={() => openSection('account')}
-          >
-            <span className="cs-account-avatar" aria-hidden="true">
-              {(profileName || auth.user?.email || 'S').trim().charAt(0).toUpperCase()}
-            </span>
-            <span className="cs-account-meta">
-              <span className="cs-account-name">{profileName || 'Your profile'}</span>
-              <span className="cs-account-email">
-                {auth.user?.email || 'Local mode — sign in to sync'}
-              </span>
-            </span>
-            <span className={`cs-account-pill ${auth.user ? 'is-on' : ''}`}>
-              <Cloud className="w-3 h-3" /> {auth.user ? 'Synced' : 'Local'}
-            </span>
-          </button>
-          <div className="cs-quick" aria-label="Quick settings">
-            <div className="cs-quick-group">
-              <span className="cs-quick-label">
-                {draft.theme === 'dark' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />} Theme
-              </span>
-              <div className="cs-seg" role="radiogroup" aria-label="Theme">
-                {([
-                  ['dark', 'Dark'],
-                  ['light', 'Light'],
-                  ['system', 'Auto'],
-                ] as const).map(([t, l]) => {
-                  const current = draft.themeMode || draft.theme;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      role="radio"
-                      aria-checked={current === t}
-                      className={`cs-seg-btn ${current === t ? 'is-active' : ''}`}
-                      onClick={() =>
-                        patch(
-                          t === 'system'
-                            ? {
-                                themeMode: 'system',
-                                theme:
-                                  typeof window !== 'undefined' &&
-                                  window.matchMedia?.('(prefers-color-scheme: dark)').matches
-                                    ? 'dark'
-                                    : 'light',
-                              }
-                            : { theme: t, themeMode: t }
-                        )
-                      }
-                    >
-                      {l}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="cs-quick-group">
-              <span className="cs-quick-label">
-                <Languages className="w-3.5 h-3.5" /> Reply language
-              </span>
-              <div className="cs-seg" role="radiogroup" aria-label="Reply language">
-                {([
-                  ['auto', 'Auto'],
-                  ['bn', 'বাংলা'],
-                  ['en', 'English'],
-                ] as const).map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    role="radio"
-                    aria-checked={draft.replyLang === v}
-                    className={`cs-seg-btn ${draft.replyLang === v ? 'is-active' : ''}`}
-                    onClick={() => patch({ replyLang: v })}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cs-quick-group">
-              <span className="cs-quick-label">
-                <Zap className="w-3.5 h-3.5" /> Speed
-              </span>
-              <div className="cs-seg" role="radiogroup" aria-label="Speed mode">
-                {([
-                  ['fast', 'Fast'],
-                  ['balanced', 'Balanced'],
-                  ['power', 'Power'],
-                ] as const).map(([v, l]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    role="radio"
-                    aria-checked={draft.mode === v}
-                    className={`cs-seg-btn ${draft.mode === v ? 'is-active' : ''}`}
-                    onClick={() => patch({ mode: v })}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cs-quick-group">
-              <span className="cs-quick-label">
-                <Palette className="w-3.5 h-3.5" /> Accent
-              </span>
-              <div className="cs-swatches" role="radiogroup" aria-label="Accent color">
-                {(['indigo', 'emerald', 'rose', 'amber', 'sky', 'teal'] as const).map((a) => (
-                  <button
-                    key={a}
-                    type="button"
-                    role="radio"
-                    aria-checked={draft.accent === a}
-                    aria-label={a}
-                    data-accent={a}
-                    className={`cs-swatch ${draft.accent === a ? 'is-active' : ''}`}
-                    onClick={() => patch({ accent: a })}
-                  />
-                ))}
-              </div>
-            </div>
           </div>
         </div>
         <div className="cs-nav-search">
