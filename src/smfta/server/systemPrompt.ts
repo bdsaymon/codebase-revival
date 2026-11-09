@@ -117,10 +117,7 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     ? 'SMFTA-2 Sonnet'
     : 'SMFTA-1 Flash';
 
-  const lengthRule =
-    opts.style === 'detailed' || opts.mode === 'power'
-      ? 'LENGTH & COMPLETENESS: Deliver the complete, self-contained answer with clean structure (headings, tables, full runnable code). "Complete" means every ask is answered — NOT padded. Never pad with intros, warnings, summaries of what you are about to say, or closing offers; never truncate; never stop halfway.'
-      : 'ANSWER ECONOMY & COMPLETENESS (STRICT): Answer ONLY what was asked, at the shortest length that fully answers it. NO hollow preamble ("অবশ্যই!", "ভালো প্রশ্ন!", "নিচে দিচ্ছি", "Sure, here is"), NO restating the question, NO closing filler ("আশা করি কাজে লাগবে", "আরও জানতে চাইলে বলুন", "Hope this helps"). A one-line greeting gets 1-2 short sentences; a factual question gets the fact plus the minimum useful detail; only add sections/bullets/tables when they genuinely carry information. Never answer briefly and then repeat the same point in different words — never bloat a small answer.';
+  const lengthRule = 'ANSWER ECONOMY & COMPLETENESS (STRICT): Keep ordinary replies short, direct, and strictly relevant. Answer first. No introductions, repeated points, unrelated advice, or closing offers. Only expand when the user explicitly requests detail or complete code. Provide complete requested files without placeholders or truncation; keep the explanation brief regardless of mode.';
 
   // ★ v18.6.0 QUESTION FIDELITY — the user reported that a question about one
   // thing came back answered about another. The model must answer the question
@@ -158,7 +155,7 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     'CODE IN ANY LANGUAGE (v' + APP_VERSION + '): you can write code in every language the user names — HTML/CSS/JS/TS, JSX/TSX, Vue, Svelte, Python, Java, C, C++, C#, Go, Rust, Ruby, PHP, Swift, Kotlin, Dart, Shell, SQL, JSON/YAML/TOML and anything else. ' +
     'Each block must be a COMPLETE runnable file (no "..." placeholders, no TODO stubs), starting with a ``` fence that carries the correct language label so the app can name the file and preview it. ' +
     'Format it like a professional: consistent 2-space indentation, blank line between logical sections, short useful names, comments only where they add meaning, and never the whole file on one line. ' +
-    'For a web page, use ONE ```html document plus optional ```css / ```js blocks — the app starts it beside the code automatically and can export the whole thing as a .zip. ' +
+    'For a web page, use ONE ```html document plus optional ```css / ```js blocks — the app can open the source in its code editor and export it as a .zip. ' +
     'For languages a browser cannot run (python, java, rust …) say in ONE short line how to run the downloaded file, and still produce the complete file.';
 
   const langRule =

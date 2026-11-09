@@ -751,10 +751,10 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                           onOpenCodeWorkspace(codeBlocks, currentCodeIdx, messageId)
                         }
                         className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-[var(--primary)] text-white hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap font-semibold shadow-xs"
-                        title="Open in Full-Screen Live Preview Workspace"
+                        title="Open in Code Workspace"
                       >
                         <Play className="w-3 h-3" />
-                        <span>{isWebCode ? 'Open Live Preview' : 'Open in Code Workspace'}</span>
+                        <span>Open in Code Workspace</span>
                       </button>
                     )}
                     <button
@@ -844,34 +844,6 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
           );
         });
       })()}
-
-      {/* Full-Screen Live Website Preview Ready Card (for mobile & desktop 1-tap launch) */}
-      {!isStreaming && livePreview && onOpenCodeWorkspace && (
-        <div
-          className="mt-3 rounded-xl border border-indigo-500/35 bg-indigo-500/10 p-3 flex flex-wrap items-center justify-between gap-3"
-          data-testid="chat-open-fullscreen-preview-banner"
-        >
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-[var(--text)] flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Live Interactive Website Preview Ready</span>
-            </div>
-            <div className="text-[11px] text-[var(--text-2)] mt-0.5">
-              {codeBlocks.length} background project {codeBlocks.length === 1 ? 'file' : 'files'} compiled · Desktop, Tablet &amp; Mobile Full-Screen Preview
-            </div>
-          </div>
-          <button
-            type="button"
-            data-testid="chat-open-fullscreen-preview-btn"
-            onClick={() => onOpenCodeWorkspace(codeBlocks, 0, messageId)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm cursor-pointer transition-colors"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>Open Full-Screen Preview</span>
-          </button>
-        </div>
-      )}
-
 
       {isStreaming && (
         <span className="inline-block w-2 h-4 bg-[var(--primary)] rounded-sm animate-pulse ml-1 align-middle" />

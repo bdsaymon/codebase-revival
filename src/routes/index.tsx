@@ -10,13 +10,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Bilingual AI assistant with cloud vault, AI Notebook, live widgets, co-writer, Code Lab and persistent memory.",
+          "SMFTA AI: direct answers, Mercury and custom providers, code editing, Notebook and persistent on-device memory.",
       },
       { property: "og:title", content: "SMFTA AI Pro" },
       {
         property: "og:description",
         content:
-          "Bilingual AI assistant with cloud vault, AI Notebook, live widgets, co-writer, Code Lab and persistent memory.",
+          "SMFTA AI: direct answers, Mercury and custom providers, code editing, Notebook and persistent on-device memory.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

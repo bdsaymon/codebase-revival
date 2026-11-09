@@ -82,6 +82,7 @@ export function builtinTierLabel(
 }
 
 export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  inceptionlabs: 'mercury-2',
   xrahat: '',
   smfta_cloud: '',
   unorouter: 'google/gemini-2.5-flash',
@@ -116,6 +117,7 @@ export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
 };
 
 export const DEFAULT_PROVIDER_BASE_URLS: Record<string, string> = {
+  inceptionlabs: 'https://api.inceptionlabs.ai/v1/chat/completions',
   xrahat: '',
   smfta_cloud: '',
   custom: '',
@@ -150,6 +152,7 @@ export const DEFAULT_PROVIDER_BASE_URLS: Record<string, string> = {
 };
 
 export const QUICK_PROVIDER_CHIPS: Record<string, string[]> = {
+  inceptionlabs: ['mercury-2', 'mercury', 'mercury-coder'],
   xrahat: [
     'deepseek-r1',
     'gpt-4o',
@@ -296,6 +299,11 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'builtin',
     keyless: true,
     note: 'সার্ভার-সাইড Gemini (কী থাকলে) — নাহলে ফ্রি ফলব্যাক।',
+  },
+  {
+    id: 'inceptionlabs', label: 'Inception Labs (Mercury)', short: 'Mercury',
+    group: 'popular', keyHint: 'Inception Labs API key',
+    docsUrl: 'https://docs.inceptionlabs.ai', note: 'Mercury chat completions',
   },
   {
     id: 'codecraft',

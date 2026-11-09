@@ -244,6 +244,7 @@ export interface UserProfile {
 export type ExternalProviderId =
   | 'xrahat'
   | 'smfta_cloud'
+  | 'inceptionlabs'
   | 'unorouter'
   | 'codecraft'
   | 'gemini_custom'
