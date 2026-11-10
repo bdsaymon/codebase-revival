@@ -4945,11 +4945,6 @@ export default function App() {
                     <h1 className="empty-title">SMFTA AI</h1>
                     <p className="empty-sub">What can I help with?</p>
                   </div>
-                    <h1 className="empty-title">What can I help with?</h1>
-                    <p className="empty-sub">
-                      কোড, ওয়েবসাইট, লেখা বা বিশ্লেষণ — নিচে লিখে শুরু করুন।
-                    </p>
-                  </div>
                 ) : (
               <div className="w-full max-w-[900px] mx-auto">
                 {activeChat.msgs.map((m) => (
