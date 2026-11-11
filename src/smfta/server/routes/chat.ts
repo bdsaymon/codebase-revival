@@ -983,7 +983,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           .join('\n\n')
       : '';
 
-  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}`;
+  const conciseRule = "\n\nRESPONSE STYLE (highest priority): Answer only what the user asked. Be short, direct and relevant — no filler, no greetings, no repeating the question, no unrelated suggestions. Use the user's language. When the user asks for code, give complete, working code without truncation.";
+  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}${conciseRule}`;
   const cacheModelKey = `${effectiveProvider}:${activeCustomModelName || 'default'}`;
 
   // 3. Response Cache Lookup (user-scoped sha256 - P0-03; only for standalone single-turn requests without active conversation/project context)

@@ -213,8 +213,8 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     id: 'inceptionlabs',
     name: 'Inception Labs (Mercury)',
     url: 'https://api.inceptionlabs.ai/v1/chat/completions',
-    defaultModel: 'mercury-3',
-    fallbackModels: ['mercury-3', 'mercury', 'mercury-coder'],
+    defaultModel: 'mercury-2',
+    fallbackModels: ['mercury-2', 'mercury', 'mercury-coder'],
   },
   lmstudio: {
     id: 'lmstudio',
@@ -760,7 +760,7 @@ export function inferModelForCustomBaseUrl(baseUrl?: string): string {
   if (!baseUrl) return 'gpt-4o-mini';
   const u = baseUrl.toLowerCase();
   if (u.includes('codecraft')) return 'gemini-3.7-flash';
-  if (u.includes('inceptionlabs') || u.includes('mercury')) return 'mercury-3';
+  if (u.includes('inceptionlabs') || u.includes('mercury')) return 'mercury-2';
   if (u.includes('generativelanguage.googleapis.com')) return 'gemini-2.5-flash';
   if (u.includes('groq.com')) return 'llama-3.3-70b-versatile';
   if (u.includes('deepseek.com')) return 'deepseek-chat';

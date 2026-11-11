@@ -4574,7 +4574,7 @@ export default function App() {
               <div className="sb-user-name">{profile.name || 'Your profile'}</div>
               <div className="sb-user-meta" title={auth.user?.email || ''}>
                 {auth.configured
-                  ? auth.user?.email || 'Signed in'
+                  ? auth.user?.email || 'Local workspace'
                   : 'Local workspace'}
               </div>
             </div>
