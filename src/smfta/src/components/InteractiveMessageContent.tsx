@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Sparkles,
+  Brain,
   Check,
   X,
   Copy,
@@ -134,6 +135,74 @@ export function extractThinkingAndResponse(
     cleanResponse,
     isThinkingActive,
   };
+}
+
+/**
+ * Extracts a concise, human-readable topic or first meaningful sentence
+ * from raw `<think>` reasoning text.
+ */
+export function extractThinkingTopic(thinkingText: string): string {
+  const raw = String(thinkingText || '').trim();
+  if (!raw) return 'Analyzing request';
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^(?:\d+[.)]\s*|step\s+\d+[:.-]?\s*|[-*•#>]+\s*)+/i, '')
+        .replace(/\*\*|__|`/g, '')
+        .replace(
+          /^(?:okay[,.\s]*|alright[,.\s]*|hmm+[,.\s]*|let'?s\s+see[,.\s]*|let\s+me\s+think(?:\s+about\s+this)?[,.\s]*)/i,
+          ''
+        )
+        .trim()
+    )
+    .filter((line) => line.length >= 3);
+
+  const candidateLine = lines[0] || raw.replace(/\s+/g, ' ').trim();
+  const firstSentence =
+    candidateLine.split(/(?<=[.!?।])\s+/)[0]?.trim() || candidateLine;
+  const cleaned = firstSentence.replace(/[.:;,]+$/, '').trim();
+  if (!cleaned) return 'Analyzing request';
+
+  if (cleaned.length > 56) {
+    return `${cleaned.slice(0, 53).trimEnd()}...`;
+  }
+  return cleaned;
+}
+
+export function estimateThinkingSeconds(
+  thinkingText: string,
+  measuredSeconds?: number
+): number {
+  if (
+    typeof measuredSeconds === 'number' &&
+    Number.isFinite(measuredSeconds) &&
+    measuredSeconds >= 1
+  ) {
+    return Math.max(1, Math.round(measuredSeconds));
+  }
+  const words = String(thinkingText || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  if (words === 0) return 1;
+  return Math.max(1, Math.min(45, Math.ceil(words / 14)));
+}
+
+export function formatThinkingHeadline(
+  thinkingText: string,
+  isReasoningActive: boolean,
+  durationSeconds?: number
+): string {
+  const topic = extractThinkingTopic(thinkingText);
+  if (isReasoningActive) {
+    const suffix = topic.endsWith('...') ? '' : '...';
+    return `Thinking: ${topic}${suffix}`;
+  }
+  const cleanTopic = topic.replace(/\.{2,}$/, '').trim() || 'request';
+  const secs = estimateThinkingSeconds(thinkingText, durationSeconds);
+  return `Thought on ${cleanTopic} (${secs} seconds)`;
 }
 
 function parseBlocks(markdown: string): ParsedBlock[] {
@@ -483,6 +552,31 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
     thinking
   );
 
+  const isReasoningNow = Boolean(isThinkingActive || (isStreaming && !cleanResponse && thinkingText));
+  const thinkingStartRef = useRef<number | null>(null);
+  const [measuredThinkSec, setMeasuredThinkSec] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (isReasoningNow) {
+      if (thinkingStartRef.current === null) {
+        thinkingStartRef.current = Date.now();
+      }
+    } else if (thinkingStartRef.current !== null) {
+      const elapsedSec = Math.max(
+        1,
+        Math.round((Date.now() - thinkingStartRef.current) / 1000)
+      );
+      setMeasuredThinkSec(elapsedSec);
+      thinkingStartRef.current = null;
+    }
+  }, [isReasoningNow]);
+
+  const thinkingHeadline = formatThinkingHeadline(
+    thinkingText,
+    isReasoningNow,
+    measuredThinkSec
+  );
+
   const isWebCodeLang = (lang?: string): boolean => {
     const l = (lang || '').toLowerCase().trim();
     return [
@@ -678,24 +772,36 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
 
   return (
     <div className="msg-prose space-y-1.5 text-[var(--text)]">
-      {/* Modern Collapsible "Thinking" UI with Gradient Glow */}
+      {/* Modern Collapsible "Thinking" UI with Animated Aurora Gradient Glow */}
       {(Boolean(thinkingText) || isThinkingActive) && (
         <div
           data-testid="thinking-accordion"
-          className="mb-3 rounded-xl p-[1px] bg-gradient-to-r from-purple-500/45 via-indigo-500/45 to-blue-500/45 shadow-[0_0_16px_-3px_rgba(139,92,246,0.3)] transition-all"
+          className="thinking-accordion-container"
         >
-          <div className="rounded-[11px] bg-[var(--surface)] overflow-hidden">
+          <div className="thinking-accordion-inner">
             <button
               type="button"
               data-testid="thinking-accordion-toggle"
               aria-expanded={isThinkingExpanded}
               onClick={() => setIsThinkingExpanded((prev) => !prev)}
-              className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
+              className="w-full flex items-center justify-between gap-2.5 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
             >
               <span className="flex items-center gap-2 min-w-0">
-                <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse shrink-0" />
-                <span className="truncate font-medium bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-                  Thinking process...
+                <Brain
+                  className={`w-3.5 h-3.5 text-pink-400 shrink-0 ${
+                    isReasoningNow ? 'animate-pulse' : ''
+                  }`}
+                />
+                <Sparkles
+                  className={`w-3.5 h-3.5 text-purple-400 shrink-0 ${
+                    isReasoningNow ? 'animate-spin' : 'animate-pulse'
+                  }`}
+                />
+                <span
+                  data-testid="thinking-accordion-headline"
+                  className="truncate font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(139,92,246,0.45)]"
+                >
+                  {thinkingHeadline}
                 </span>
               </span>
               <ChevronDown
@@ -708,7 +814,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
             {isThinkingExpanded && (
               <div
                 data-testid="thinking-accordion-content"
-                className="px-3.5 py-3 border-t border-purple-500/20 bg-muted/40 font-mono text-xs leading-relaxed text-[var(--text-2)] max-h-60 overflow-y-auto whitespace-pre-wrap"
+                className="mt-2.5 pt-2.5 px-3 py-2.5 rounded-lg border-t border-purple-500/20 bg-muted/40 font-mono text-xs leading-relaxed text-[var(--text-2)] max-h-60 overflow-y-auto whitespace-pre-wrap"
               >
                 {thinkingText || 'Thinking...'}
               </div>

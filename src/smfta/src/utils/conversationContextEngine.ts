@@ -810,12 +810,13 @@ export function deriveLiveOperationProgressSteps(
       : arg1.activeService || followUp?.inferredService;
   const q = (query || '').toLowerCase();
 
-  const steps: string[] = ['Analyzing Conversation Context...'];
+  if (!service) {
+    return [];
+  }
 
-  if (
-    service === 'github' ||
-    /(?:github|গিটহাব|repo|রিপো|login|bug|বাগ|ফাইল|file|commit|pr)/i.test(q)
-  ) {
+  const steps: string[] = [];
+
+  if (service === 'github') {
     steps.push('Connecting to GitHub...');
     steps.push('Loading Repository...');
     steps.push('Reading Source Files...');
@@ -825,30 +826,19 @@ export function deriveLiveOperationProgressSteps(
     if (/(?:fix|bug|বাগ|ঠিক|update|আপডেট|edit|পরিবর্তন)/i.test(q)) {
       steps.push('Preparing Code Changes...');
     }
-  } else if (
-    service === 'vercel' ||
-    /(?:vercel|ভার্সেল|deploy|ডিপ্লয়|build)/i.test(q)
-  ) {
+  } else if (service === 'vercel') {
     steps.push('Connecting to Vercel...');
     steps.push('Checking Project & Deployment Status...');
     steps.push('Verifying Deployment...');
-  } else if (
-    service === 'supabase' ||
-    /(?:supabase|সুপাবেস|database|ডাটাবেস|table|টেবিল|sql)/i.test(q)
-  ) {
+  } else if (service === 'supabase') {
     steps.push('Connecting to Supabase...');
     steps.push('Inspecting Database Schema & Tables...');
     if (/(?:create|alter|নতুন|তৈরি|migration)/i.test(q)) {
       steps.push('Preparing SQL Migration...');
     }
-  } else if (
-    service === 'google' ||
-    /(?:google|ড্রাইভ|drive|doc|sheet)/i.test(q)
-  ) {
+  } else if (service === 'google') {
     steps.push('Connecting to Google Workspace...');
     steps.push('Accessing Authorized Drive / Docs / Sheets...');
-  } else {
-    steps.push('Synthesizing Context-Aware Response...');
   }
 
   return steps;

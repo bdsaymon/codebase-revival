@@ -2430,12 +2430,13 @@ export default function App() {
       replyText: string,
       extraFields?: Partial<ChatMessage>
     ) => {
-      const t0 = Date.now();
       setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
+      setGenStepDetail(null);
       appendMessageToChat(targetChatId, {
         id: 'ai-' + Date.now(),
         role: 'ai',
         text: replyText,
+        thinking: undefined,
         ts: Date.now(),
         ...extraFields,
       });
@@ -2768,15 +2769,22 @@ export default function App() {
           )
         );
 
-        const liveSteps = deriveLiveOperationProgressSteps({
-          prompt: lastUserPrompt,
-          activeService:
-            resolvedServiceContext?.activeService ||
-            smartCtx.resolvedFollowUp.activeService,
-          hasHistory: historyMsgs.length > 1,
-        });
-        if (liveSteps.length > 0) {
-          setGenStepDetail(liveSteps[0]);
+        const explicitActiveService =
+          resolvedServiceContext?.activeService ||
+          smartCtx.resolvedFollowUp.activeService;
+        if (
+          explicitActiveService &&
+          !isDefaultUnlimitedProfile &&
+          activeProvider !== 'custom'
+        ) {
+          const liveSteps = deriveLiveOperationProgressSteps({
+            prompt: lastUserPrompt,
+            activeService: explicitActiveService,
+            hasHistory: historyMsgs.length > 1,
+          });
+          if (liveSteps.length > 0) {
+            setGenStepDetail(liveSteps[0]);
+          }
         }
       }
 
@@ -3172,6 +3180,7 @@ export default function App() {
                 sources?: Array<{ title: string; uri?: string; url?: string }>;
                 text?: string;
                 delta?: string;
+                thinking?: string;
                 reset?: string | boolean;
                 providerReasoning?: boolean;
               } | null = null;
@@ -3192,9 +3201,18 @@ export default function App() {
                 throw errObj;
               }
 
-              if (parsed.type === 'progress' && parsed.detail) {
-                setGenStepDetail(parsed.detail);
+              if (parsed.type === 'progress') {
+                // Bypass simulated progress/thinking steps for keyless & custom APIs
                 continue;
+              }
+
+              if (typeof parsed.thinking === 'string' && parsed.thinking) {
+                liveThinking += parsed.thinking;
+                if (!bubbleCreated) {
+                  flushStreamText();
+                } else {
+                  scheduleFlush();
+                }
               }
 
               if (parsed.type === 'meta' && parsed.requestId) {

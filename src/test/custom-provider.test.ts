@@ -11,7 +11,14 @@ import {
   persistSavedProfiles,
 } from '../smfta/src/utils/providers';
 import { getProviderCatalogItem } from '../smfta/src/data/providerCatalog';
-import { extractThinkingAndResponse } from '../smfta/src/components/InteractiveMessageContent';
+import {
+  extractThinkingAndResponse,
+  extractThinkingTopic,
+  formatThinkingHeadline,
+} from '../smfta/src/components/InteractiveMessageContent';
+import { deriveThinkingSteps } from '../smfta/src/utils/genPhase';
+import { deriveLiveOperationProgressSteps } from '../smfta/src/utils/conversationContextEngine';
+import { buildSystemInstruction } from '../smfta/server/systemPrompt';
 
 describe('custom provider routing', () => {
   it('strictly sets DEFAULT_PROVIDER_MODELS["mercury"] to "mercury-3"', () => {
@@ -60,6 +67,28 @@ describe('custom provider routing', () => {
     expect(parsed.cleanResponse).toBe('Here is the final answer.');
     expect(parsed.cleanResponse).not.toContain('<think>');
     expect(parsed.cleanResponse).not.toContain('</think>');
+  });
+  it('bypasses simulated thinking steps for xrahat and keyless/custom responses without <think> tags', () => {
+    expect(deriveThinkingSteps('Build a fullstack website')).toEqual([]);
+    expect(deriveLiveOperationProgressSteps('Explain how React hooks work')).toEqual([]);
+    const plain = extractThinkingAndResponse('Plain response without any reasoning tags.');
+    expect(plain.thinkingText).toBe('');
+    expect(plain.isThinkingActive).toBe(false);
+  });
+  it('extracts dynamic thinking topic and formats active and completed thinking headlines', () => {
+    const thinkBody = '1. Analyzing project requirements and database schema.\n2. Designing API routes.';
+    expect(extractThinkingTopic(thinkBody)).toBe('Analyzing project requirements and database schema');
+    expect(formatThinkingHeadline(thinkBody, true)).toBe(
+      'Thinking: Analyzing project requirements and database schema...'
+    );
+    expect(formatThinkingHeadline(thinkBody, false, 4)).toBe(
+      'Thought on Analyzing project requirements and database schema (4 seconds)'
+    );
+  });
+  it('includes explicit web browsing and live link visitation boundary in system prompt', () => {
+    const sys = buildSystemInstruction({ mode: 'balanced' });
+    expect(sys).toContain('WEB BROWSING & LIVE LINK VISITATION BOUNDARY');
+    expect(sys).toContain('do NOT have live web browsing, real-time URL inspection, or live internet scraping abilities');
   });
   it('classifies HTTP 401 and 404 from custom providers as non-retryable terminal errors', () => {
     const err401 = classifyProviderError({
