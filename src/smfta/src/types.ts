@@ -185,6 +185,14 @@ export interface ChatMessage {
   memoryAdded?: string[];
   /** v18.3.0 — the live reasoning trace captured while answering. */
   thinking?: string;
+  /** v20.0.0 — V2 Special Firebase AI live expandable pipeline stages. */
+  v2Stages?: Array<{
+    id: 'memory_retrieval' | 'quota_verification' | 'request_processing' | 'response_generation';
+    label: string;
+    detail: string;
+    status: 'pending' | 'active' | 'done' | 'error';
+    timestamp: number;
+  }>;
   selfUpdateSummary?: string;
   selfUpdateWidgetId?: string;
   /** v18.6.0 — files rewritten inside the loaded .zip by the assistant. */

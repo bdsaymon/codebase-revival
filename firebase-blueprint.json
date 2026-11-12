@@ -1,0 +1,283 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted administrator marker document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "role", "createdAt"]
+    },
+    "UserProfileDoc": {
+      "title": "UserProfileDoc",
+      "description": "User workspace profile and testing configuration without PII.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "testingBypass": {
+          "type": "boolean"
+        },
+        "testingAllowance": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "displayName", "testingBypass", "testingAllowance", "createdAt", "updatedAt"]
+    },
+    "ConversationDoc": {
+      "title": "ConversationDoc",
+      "description": "Persistent conversation session synchronized across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "conversationId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "systemVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "messagesPayload": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 250000
+        },
+        "messageCount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "conversationId",
+        "title",
+        "systemVersion",
+        "modelId",
+        "messagesPayload",
+        "messageCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MemoryDoc": {
+      "title": "MemoryDoc",
+      "description": "Persistent AI memory fact associated with a user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "memoryId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fact": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "sourceModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "memoryId", "fact", "topic", "sourceModel", "createdAt", "updatedAt"]
+    },
+    "DailyUsageDoc": {
+      "title": "DailyUsageDoc",
+      "description": "Per-user per-model daily request counter reset at Asia/Riyadh midnight.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "usageKey": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dateRiyadh": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "modelId": {
+          "type": "string",
+          "enum": ["smfta-v5", "smfta-v2-pro", "smfta-max"]
+        },
+        "count": {
+          "type": "number"
+        },
+        "dailyLimit": {
+          "type": "number"
+        },
+        "testingCount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "usageKey",
+        "dateRiyadh",
+        "modelId",
+        "count",
+        "dailyLimit",
+        "testingCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SystemConfigDoc": {
+      "title": "SystemConfigDoc",
+      "description": "Configurable V2 model daily usage limits and testing allowance.",
+      "type": "object",
+      "properties": {
+        "configId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "v5Limit": {
+          "type": "number"
+        },
+        "proLimit": {
+          "type": "number"
+        },
+        "maxLimit": {
+          "type": "number"
+        },
+        "testingAllowance": {
+          "type": "number"
+        },
+        "updatedBy": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "configId",
+        "v5Limit",
+        "proLimit",
+        "maxLimit",
+        "testingAllowance",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "AdminRecord",
+      "description": "Administrator registry for RBAC lookups."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfileDoc",
+      "description": "Root user workspace document required by subcollections."
+    },
+    "/users/{userId}/conversations/{conversationId}": {
+      "schema": "ConversationDoc",
+      "description": "Persistent conversations synchronized across sessions and devices."
+    },
+    "/users/{userId}/memories/{memoryId}": {
+      "schema": "MemoryDoc",
+      "description": "Persistent AI memory items automatically saved and retrieved."
+    },
+    "/users/{userId}/usage/{usageKey}": {
+      "schema": "DailyUsageDoc",
+      "description": "Per-user per-model daily quota tracking reset at Asia/Riyadh time."
+    },
+    "/system_configs/{configId}": {
+      "schema": "SystemConfigDoc",
+      "description": "Global V2 usage limit configuration managed by admins."
+    }
+  }
+}

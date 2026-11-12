@@ -51,13 +51,24 @@ export const BUILTIN_TIERS: BuiltinTier[] = [
 
 export const BUILTIN_TIER_MODELS = BUILTIN_TIERS.map((t) => t.model);
 
+export const V2_SPECIAL_MODEL_LABELS: Record<string, string> = {
+  'smfta-v5': 'SMFTA V5',
+  'smfta-v2-pro': 'SMFTA Pro',
+  'smfta-max': 'SMFTA Max',
+};
+
+export function isV2SpecialModel(model?: string | null): boolean {
+  const m = (model || '').trim().toLowerCase();
+  return Boolean(V2_SPECIAL_MODEL_LABELS[m]);
+}
+
 export function isBuiltinProviderId(id?: string | null): boolean {
   return id === 'xrahat' || id === 'smfta_cloud';
 }
 
 export function isBuiltinTierModel(model?: string | null): boolean {
   const m = (model || '').trim().toLowerCase();
-  return BUILTIN_TIER_MODELS.includes(m);
+  return BUILTIN_TIER_MODELS.includes(m) || isV2SpecialModel(m);
 }
 
 /** Resolve the tier for a built-in profile (migrates legacy placeholders). */
@@ -68,6 +79,30 @@ export function builtinTierForModel(
   const m = (model || '').trim().toLowerCase();
   const byModel = BUILTIN_TIERS.find((t) => t.model === m);
   if (byModel) return byModel;
+  if (m === 'smfta-v5') {
+    return {
+      id: 'fast',
+      model: 'smfta-v5',
+      label: 'SMFTA V5',
+      desc: 'Firebase AI Logic · Speed & everyday tasks',
+    };
+  }
+  if (m === 'smfta-v2-pro') {
+    return {
+      id: 'balanced',
+      model: 'smfta-v2-pro',
+      label: 'SMFTA Pro',
+      desc: 'Firebase AI Logic · Advanced reasoning & complex tasks',
+    };
+  }
+  if (m === 'smfta-max') {
+    return {
+      id: 'power',
+      model: 'smfta-max',
+      label: 'SMFTA Max',
+      desc: 'Firebase AI Logic · Deeper analysis & demanding tasks',
+    };
+  }
   if (mode === 'fast') return BUILTIN_TIERS[0];
   if (mode === 'power') return BUILTIN_TIERS[2];
   return BUILTIN_TIERS[1];
@@ -78,6 +113,10 @@ export function builtinTierLabel(
   model?: string | null,
   mode?: string | null
 ): string {
+  const m = (model || '').trim().toLowerCase();
+  if (V2_SPECIAL_MODEL_LABELS[m]) {
+    return V2_SPECIAL_MODEL_LABELS[m];
+  }
   return builtinTierForModel(model, mode).label;
 }
 
