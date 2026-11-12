@@ -82,7 +82,8 @@ export function builtinTierLabel(
 }
 
 export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  inceptionlabs: 'mercury-2',
+  mercury: 'mercury-3',
+  inceptionlabs: 'mercury-3',
   xrahat: '',
   smfta_cloud: '',
   unorouter: 'google/gemini-2.5-flash',
@@ -117,6 +118,7 @@ export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
 };
 
 export const DEFAULT_PROVIDER_BASE_URLS: Record<string, string> = {
+  mercury: 'https://api.inceptionlabs.ai/v1/chat/completions',
   inceptionlabs: 'https://api.inceptionlabs.ai/v1/chat/completions',
   xrahat: '',
   smfta_cloud: '',
@@ -143,7 +145,7 @@ export const DEFAULT_PROVIDER_BASE_URLS: Record<string, string> = {
   novita: 'https://api.novita.ai/v3/openai',
   hyperbolic: 'https://api.hyperbolic.xyz/v1',
   chutes: 'https://llm.chutes.ai/v1',
-  scaleway: 'https://api.scaleway.ai/v1',
+  scaleway: 'https://api.scaleway.com/v1',
   nebius: 'https://api.studio.nebius.ai/v1',
   cohere: 'https://api.cohere.ai/compatibility/v1',
   cloudflare: '',
@@ -152,7 +154,8 @@ export const DEFAULT_PROVIDER_BASE_URLS: Record<string, string> = {
 };
 
 export const QUICK_PROVIDER_CHIPS: Record<string, string[]> = {
-  inceptionlabs: ['mercury-2', 'mercury', 'mercury-coder'],
+  mercury: ['mercury-3', 'mercury', 'mercury-coder'],
+  inceptionlabs: ['mercury-3', 'mercury', 'mercury-coder'],
   xrahat: [
     'deepseek-r1',
     'gpt-4o',
@@ -216,51 +219,43 @@ export const QUICK_PROVIDER_CHIPS: Record<string, string[]> = {
   cloudflare: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
   lmstudio: ['local-model'],
   ollama: ['llama3.2', 'qwen2.5', 'deepseek-r1'],
-  custom: ['gpt-4o-mini', 'deepseek-r1', 'gemini-2.5-flash', 'claude-3.5-sonnet'],
+  custom: ['mercury-3', 'gpt-4o-mini', 'deepseek-r1', 'gemini-2.5-flash', 'claude-3.5-sonnet'],
 };
 
 export const PROVIDER_HELP_BN: Record<string, string> = {
-  xrahat:
-    'বিল্ট-ইন SMFTA Core Engine — কোনো API Key বা সাইন-আপ লাগে না।',
-  smfta_cloud:
-    'বিল্ট-ইন ক্লাউড ইঞ্জিন — কোনো কী লাগে না (সার্ভার-সাইড কী থাকলে Gemini, নাহলে ফ্রি ফলব্যাক)।',
-  custom:
-    'যেকোনো OpenAI-compatible Base URL দিন (যেমন https://api.example.com/v1) — কী ঐচ্ছিক।',
-  unorouter:
-    'কী পাবেন: https://unorouter.com · এন্ডপয়েন্ট: https://api.unorouter.com/v1',
-  codecraft:
-    'CodeCraft Dashboard → API Keys থেকে cc_... কী নিন · Base URL: https://codecraftapi.com/v1 · মডেল লোড করে সচল Model ID বেছে নিন।',
-  gemini_custom:
-    'কী পাবেন: https://aistudio.google.com/apikey (AIza...) · সরাসরি Google Gemini SDK',
-  gemini_openai:
-    'কী পাবেন: https://aistudio.google.com/apikey · এন্ডপয়েন্ট: v1beta/openai',
-  anthropic:
-    '🔑 কী পাবেন: https://console.anthropic.com (sk-ant-...)',
-  openrouter:
-    'কী পাবেন: https://openrouter.ai/keys (sk-or-...) · এন্ডপয়েন্ট: https://openrouter.ai/api/v1',
-  groq: '🔑 কী পাবেন: https://console.groq.com/keys (gsk_...)',
-  deepseek: '🔑 কী পাবেন: https://platform.deepseek.com/api_keys',
-  openai: '🔑 কী পাবেন: https://platform.openai.com/api-keys (sk-...)',
-  cerebras: '🔑 কী পাবেন: https://cloud.cerebras.ai (csk-...)',
-  mistral: '🔑 কী পাবেন: https://console.mistral.ai/api-keys',
-  fireworks: '🔑 কী পাবেন: https://fireworks.ai/account/api-keys (fw_...)',
-  together: '🔑 কী পাবেন: https://api.together.xyz/settings/api-keys',
-  perplexity: '🔑 কী পাবেন: https://www.perplexity.ai/settings/api (pplx-...)',
-  xai: '🔑 কী পাবেন: https://console.x.ai (xai-...)',
-  sambanova: '🔑 কী পাবেন: https://cloud.sambanova.ai',
-  github:
-    'কী পাবেন: https://github.com/settings/tokens (ghp_...) · এন্ডপয়েন্ট: models.inference.ai.azure.com',
-  nvidia: '🔑 কী পাবেন: https://build.nvidia.com (nvapi-...)',
-  huggingface: '🔑 কী পাবেন: https://huggingface.co/settings/tokens (hf_...)',
-  novita: '🔑 কী পাবেন: https://novita.ai/settings/key-management',
-  hyperbolic: '🔑 কী পাবেন: https://app.hyperbolic.xyz/settings',
-  chutes: '🔑 কী পাবেন: https://chutes.ai',
-  scaleway: '🔑 কী পাবেন: https://console.scaleway.com',
-  nebius: '🔑 কী পাবেন: https://studio.nebius.ai',
-  cohere: '🔑 কী পাবেন: https://dashboard.cohere.com/api-keys',
-  cloudflare: '🔑 Cloudflare Workers AI (CLOUDFLARE_ACCOUNT_ID সেট থাকলে)',
-  lmstudio: '💻 Keyless লোকাল সার্ভার · http://localhost:1234/v1',
-  ollama: '💻 Keyless লোকাল সার্ভার · http://localhost:11434/v1',
+  xrahat: 'Built-in keyless engine',
+  smfta_cloud: 'Built-in cloud engine',
+  mercury: 'Mercury 3 API',
+  inceptionlabs: 'Mercury 3 API',
+  custom: 'OpenAI-compatible endpoint',
+  unorouter: 'UnoRouter API',
+  codecraft: 'CodeCraft API',
+  gemini_custom: 'Google Gemini API',
+  gemini_openai: 'Gemini OpenAI-compatible API',
+  anthropic: 'Anthropic Claude API',
+  openrouter: 'OpenRouter API',
+  groq: 'Groq Cloud API',
+  deepseek: 'DeepSeek API',
+  openai: 'OpenAI API',
+  cerebras: 'Cerebras API',
+  mistral: 'Mistral AI API',
+  fireworks: 'Fireworks AI API',
+  together: 'Together AI API',
+  perplexity: 'Perplexity Sonar API',
+  xai: 'xAI Grok API',
+  sambanova: 'SambaNova API',
+  github: 'GitHub Models API',
+  nvidia: 'NVIDIA NIM API',
+  huggingface: 'Hugging Face Router',
+  novita: 'Novita AI API',
+  hyperbolic: 'Hyperbolic API',
+  chutes: 'Chutes AI API',
+  scaleway: 'Scaleway AI API',
+  nebius: 'Nebius AI Studio API',
+  cohere: 'Cohere API',
+  cloudflare: 'Cloudflare Workers AI',
+  lmstudio: 'LM Studio Local Server',
+  ollama: 'Ollama Local Server',
 };
 
 export type ProviderGroup = 'builtin' | 'popular' | 'custom' | 'local';
@@ -277,42 +272,30 @@ export interface ProviderCatalogEntry {
 }
 
 export const PROVIDER_GROUP_LABELS: Record<ProviderGroup, string> = {
-  builtin: '১. বিল্ট-ইন (কী লাগে না)',
-  popular: '২. জনপ্রিয় ক্লাউড API',
-  custom: '৩. কাস্টম ও অন্যান্য',
-  local: '৪. লোকাল সার্ভার',
+  builtin: 'Built-in',
+  popular: 'Cloud Providers',
+  custom: 'Custom & Gateways',
+  local: 'Local Servers',
 };
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
-    id: 'xrahat',
-    label: 'SMFTA Core Engine',
-    short: 'SMFTA Core',
-    group: 'builtin',
-    keyless: true,
-    note: 'ডিফল্ট ফ্রি ইঞ্জিন — সাইন-আপ, কার্ড বা কী ছাড়াই চলে।',
-  },
-  {
-    id: 'smfta_cloud',
-    label: 'SMFTA Cloud',
-    short: 'SMFTA Cloud',
-    group: 'builtin',
-    keyless: true,
-    note: 'সার্ভার-সাইড Gemini (কী থাকলে) — নাহলে ফ্রি ফলব্যাক।',
-  },
-  {
-    id: 'inceptionlabs', label: 'Inception Labs (Mercury)', short: 'Mercury',
-    group: 'popular', keyHint: 'Inception Labs API key',
-    docsUrl: 'https://docs.inceptionlabs.ai', note: 'Mercury chat completions',
-  },
-  {
-    id: 'codecraft',
-    label: 'CodeCraft API',
-    short: 'CodeCraft',
+    id: 'mercury',
+    label: 'Mercury (Inception Labs)',
+    short: 'Mercury',
     group: 'popular',
-    keyHint: 'cc_...',
-    docsUrl: 'https://codecraftapi.com/docs/chat-completions',
-    note: 'CodeCraft ড্যাশবোর্ডের কী · base: codecraftapi.com/v1',
+    keyHint: 'sk-...',
+    docsUrl: 'https://docs.inceptionlabs.ai',
+    note: 'Mercury 3',
+  },
+  {
+    id: 'inceptionlabs',
+    label: 'Inception Labs (Mercury)',
+    short: 'Mercury',
+    group: 'popular',
+    keyHint: 'sk-...',
+    docsUrl: 'https://docs.inceptionlabs.ai',
+    note: 'Mercury 3',
   },
   {
     id: 'gemini_custom',
@@ -321,52 +304,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'AIza...',
     docsUrl: 'https://aistudio.google.com/apikey',
-    note: 'সরাসরি Gemini SDK — দ্রুত ও সস্তা।',
-  },
-  {
-    id: 'gemini_openai',
-    label: 'Gemini (OpenAI endpoint)',
-    short: 'Gemini OA',
-    group: 'popular',
-    keyHint: 'AIza...',
-    docsUrl: 'https://aistudio.google.com/apikey',
-    note: 'একই কী, OpenAI-সদৃশ এন্ডপয়েন্ট।',
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic Claude',
-    short: 'Anthropic',
-    group: 'popular',
-    keyHint: 'sk-ant-...',
-    docsUrl: 'https://console.anthropic.com',
-    note: 'Claude Sonnet ও Haiku মডেল।',
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    short: 'OpenRouter',
-    group: 'popular',
-    keyHint: 'sk-or-...',
-    docsUrl: 'https://openrouter.ai/keys',
-    note: 'এক কী-তে শত শত মডেল।',
-  },
-  {
-    id: 'groq',
-    label: 'Groq Cloud',
-    short: 'Groq',
-    group: 'popular',
-    keyHint: 'gsk_...',
-    docsUrl: 'https://console.groq.com/keys',
-    note: 'সবচেয়ে দ্রুত ইনফারেন্স।',
-  },
-  {
-    id: 'deepseek',
-    label: 'DeepSeek',
-    short: 'DeepSeek',
-    group: 'popular',
-    keyHint: 'sk-...',
-    docsUrl: 'https://platform.deepseek.com/api_keys',
-    note: 'কোডিং ও রিজনিংয়ে শক্তিশালী।',
+    note: 'Gemini 2.5',
   },
   {
     id: 'openai',
@@ -375,7 +313,77 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'sk-proj-...',
     docsUrl: 'https://platform.openai.com/api-keys',
-    note: 'GPT মডেল পরিবার।',
+    note: 'GPT-4o',
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic Claude',
+    short: 'Anthropic',
+    group: 'popular',
+    keyHint: 'sk-ant-...',
+    docsUrl: 'https://console.anthropic.com',
+    note: 'Claude 4 Sonnet',
+  },
+  {
+    id: 'xrahat',
+    label: 'SMFTA Core Engine',
+    short: 'SMFTA Core',
+    group: 'builtin',
+    keyless: true,
+    note: 'Built-in free engine',
+  },
+  {
+    id: 'smfta_cloud',
+    label: 'SMFTA Cloud',
+    short: 'SMFTA Cloud',
+    group: 'builtin',
+    keyless: true,
+    note: 'Built-in cloud engine',
+  },
+  {
+    id: 'codecraft',
+    label: 'CodeCraft API',
+    short: 'CodeCraft',
+    group: 'popular',
+    keyHint: 'cc_...',
+    docsUrl: 'https://codecraftapi.com/docs/chat-completions',
+    note: 'CodeCraft API',
+  },
+  {
+    id: 'gemini_openai',
+    label: 'Gemini (OpenAI endpoint)',
+    short: 'Gemini OA',
+    group: 'popular',
+    keyHint: 'AIza...',
+    docsUrl: 'https://aistudio.google.com/apikey',
+    note: 'OpenAI-compatible Gemini',
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    short: 'OpenRouter',
+    group: 'popular',
+    keyHint: 'sk-or-...',
+    docsUrl: 'https://openrouter.ai/keys',
+    note: 'Multi-model router',
+  },
+  {
+    id: 'groq',
+    label: 'Groq Cloud',
+    short: 'Groq',
+    group: 'popular',
+    keyHint: 'gsk_...',
+    docsUrl: 'https://console.groq.com/keys',
+    note: 'Fast inference',
+  },
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    short: 'DeepSeek',
+    group: 'popular',
+    keyHint: 'sk-...',
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+    note: 'DeepSeek V3 & R1',
   },
   {
     id: 'cerebras',
@@ -384,7 +392,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'csk-...',
     docsUrl: 'https://cloud.cerebras.ai',
-    note: 'অতি-দ্রুত ইনফারেন্স।',
+    note: 'Fast inference',
   },
   {
     id: 'mistral',
@@ -393,7 +401,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: '...',
     docsUrl: 'https://console.mistral.ai/api-keys',
-    note: 'ইউরোপীয় ওপেন মডেল।',
+    note: 'Mistral models',
   },
   {
     id: 'fireworks',
@@ -402,7 +410,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'fw_...',
     docsUrl: 'https://fireworks.ai/account/api-keys',
-    note: 'দ্রুত ওপেন-ওয়েট ইনফারেন্স।',
+    note: 'Open-weight inference',
   },
   {
     id: 'together',
@@ -411,7 +419,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: '...',
     docsUrl: 'https://api.together.xyz/settings/api-keys',
-    note: 'ওপেন-সোর্স মডেল হোস্টিং।',
+    note: 'Open-source models',
   },
   {
     id: 'perplexity',
@@ -420,7 +428,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'pplx-...',
     docsUrl: 'https://www.perplexity.ai/settings/api',
-    note: 'সার্চ ও রিসার্চ মডেল।',
+    note: 'Search models',
   },
   {
     id: 'xai',
@@ -429,7 +437,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'xai-...',
     docsUrl: 'https://console.x.ai',
-    note: 'Grok মডেল।',
+    note: 'Grok models',
   },
   {
     id: 'sambanova',
@@ -438,16 +446,16 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: '...',
     docsUrl: 'https://cloud.sambanova.ai',
-    note: 'দ্রুত Llama 3.3 ইনফারেন্স।',
+    note: 'Llama 3.3 inference',
   },
   {
     id: 'github',
     label: 'GitHub Models',
     short: 'GitHub',
     group: 'popular',
-    keyHint: 'ghp_... / github_pat_...',
+    keyHint: 'ghp_...',
     docsUrl: 'https://github.com/settings/tokens',
-    note: 'GitHub টোকেন দিয়ে মডেল ব্যবহার।',
+    note: 'GitHub Models',
   },
   {
     id: 'nvidia',
@@ -456,7 +464,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'nvapi-...',
     docsUrl: 'https://build.nvidia.com',
-    note: 'NVIDIA-এর হোস্টেড মডেল।',
+    note: 'NVIDIA NIM',
   },
   {
     id: 'huggingface',
@@ -465,7 +473,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'popular',
     keyHint: 'hf_...',
     docsUrl: 'https://huggingface.co/settings/tokens',
-    note: 'Hugging Face Inference Router।',
+    note: 'HF Inference Router',
   },
   {
     id: 'novita',
@@ -474,7 +482,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: 'sk-...',
     docsUrl: 'https://novita.ai',
-    note: 'DeepSeek ও ওপেন মডেল।',
+    note: 'Novita AI',
   },
   {
     id: 'hyperbolic',
@@ -483,7 +491,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://app.hyperbolic.xyz',
-    note: 'হাই-পারফরম্যান্স ওপেন মডেল।',
+    note: 'Hyperbolic AI',
   },
   {
     id: 'chutes',
@@ -492,7 +500,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://chutes.ai',
-    note: 'DeepSeek-V3 ও ওপেন ইনফারেন্স।',
+    note: 'Chutes AI',
   },
   {
     id: 'scaleway',
@@ -501,7 +509,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://console.scaleway.com',
-    note: 'ইউরোপীয় ক্লাউড ইনফারেন্স।',
+    note: 'Scaleway AI',
   },
   {
     id: 'nebius',
@@ -510,7 +518,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://studio.nebius.ai',
-    note: 'Nebius ওপেন মডেল স্টুডিও।',
+    note: 'Nebius Studio',
   },
   {
     id: 'cohere',
@@ -519,7 +527,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://dashboard.cohere.com/api-keys',
-    note: 'Command R+ ও Command R মডেল।',
+    note: 'Command R+',
   },
   {
     id: 'cloudflare',
@@ -528,7 +536,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://developers.cloudflare.com/workers-ai',
-    note: 'Cloudflare এন্ডপয়েন্ট (Account ID সহ)।',
+    note: 'Workers AI',
   },
   {
     id: 'unorouter',
@@ -537,16 +545,16 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     group: 'custom',
     keyHint: '...',
     docsUrl: 'https://unorouter.com',
-    note: 'মাল্টি-প্রোভাইডার রাউটার।',
+    note: 'UnoRouter',
   },
   {
     id: 'custom',
     label: 'Custom API',
     short: 'Custom',
     group: 'custom',
-    keyHint: 'sk-... বা আপনার কাস্টম API Key দিন',
+    keyHint: 'sk-...',
     keyless: true,
-    note: 'যেকোনো OpenAI-compatible Base URL ও কাস্টম API Key ব্যবহার করুন।',
+    note: 'OpenAI-compatible endpoint',
   },
   {
     id: 'lmstudio',
@@ -554,7 +562,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     short: 'LM Studio',
     group: 'local',
     keyless: true,
-    note: 'লোকাল মডেল · localhost:1234/v1',
+    note: 'localhost:1234/v1',
   },
   {
     id: 'ollama',
@@ -562,7 +570,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     short: 'Ollama',
     group: 'local',
     keyless: true,
-    note: 'লোকাল মডেল · localhost:11434/v1',
+    note: 'localhost:11434/v1',
   },
 ];
 
@@ -739,6 +747,9 @@ export function loadSavedProfiles(
           externalBaseUrl:
             typeof p.externalBaseUrl === 'string' ? p.externalBaseUrl : '',
         };
+        if (typeof p.customHeaders === 'string' && p.customHeaders.trim()) {
+          item.customHeaders = p.customHeaders;
+        }
         if (Array.isArray(p.availableModels)) {
           item.availableModels = p.availableModels.filter(
             (m): m is string => typeof m === 'string' && Boolean(m.trim())

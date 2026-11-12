@@ -244,6 +244,7 @@ export interface UserProfile {
 export type ExternalProviderId =
   | 'xrahat'
   | 'smfta_cloud'
+  | 'mercury'
   | 'inceptionlabs'
   | 'unorouter'
   | 'codecraft'
@@ -290,6 +291,7 @@ export interface SavedProviderProfile {
   externalKeys: string;
   externalModel: string;
   externalBaseUrl: string;
+  customHeaders?: string;
   endpointMode?: 'base' | 'full';
   availableModels?: string[];
   verified?: boolean;
@@ -362,6 +364,7 @@ export interface AppSettings {
   externalKeys?: string;
   externalModel?: string;
   externalBaseUrl?: string;
+  customHeaders?: string;
   activeProfileId?: string;
   displayName?: string;
   allowKeylessFallback?: boolean;

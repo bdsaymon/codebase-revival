@@ -387,11 +387,20 @@ export async function runStandaloneClientSideAI(params: {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      lastOpenAIError = new Error(
+      const errMsg =
         data?.error?.message ||
-          data?.message ||
-          `Provider HTTP ${res.status}`
-      );
+        data?.message ||
+        `Provider HTTP ${res.status}`;
+      const openAiErr = new Error(
+        `HTTP ${res.status}: ${errMsg}`
+      ) as Error & { code?: string; status?: number };
+      openAiErr.status = res.status;
+      if (res.status === 401 || res.status === 403) {
+        openAiErr.code = 'AUTH_INVALID';
+      } else if (res.status === 404) {
+        openAiErr.code = 'MODEL_UNAVAILABLE';
+      }
+      lastOpenAIError = openAiErr;
       if (
         (res.status === 401 || res.status === 403 || res.status === 429) &&
         candidateKeys.length > 1

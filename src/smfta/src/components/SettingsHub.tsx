@@ -19,6 +19,7 @@ import {
   Bell,
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Cloud,
   Download,
@@ -95,6 +96,10 @@ import {
   persistSavedProfiles,
   providerEntry,
 } from '../utils/providers';
+import {
+  PRIMARY_PROVIDER_OPTIONS,
+  QUICK_PROVIDER_CHIPS,
+} from '../data/providerCatalog';
 import {
   fetchProviderModelsClientSide,
   isStandaloneApkEnv,
@@ -605,13 +610,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         : getInitialProviderProfiles(settings)
   );
 
-  // New-provider form state
+  // New-provider form state (Default Mercury -> mercury-3)
   const [newPropName, setNewPropName] = useState('');
-  const [newProviderId, setNewProviderId] = useState<ExternalProviderId>('codecraft');
+  const [newProviderId, setNewProviderId] = useState<ExternalProviderId>('mercury');
   const [newApiKey, setNewApiKey] = useState('');
   const [showNewKey, setShowNewKey] = useState(false);
-  const [newBaseUrl, setNewBaseUrl] = useState(DEFAULT_PROVIDER_BASE_URLS.codecraft || '');
-  const [newModel, setNewModel] = useState(DEFAULT_PROVIDER_MODELS.codecraft || '');
+  const [newBaseUrl, setNewBaseUrl] = useState(DEFAULT_PROVIDER_BASE_URLS.mercury || '');
+  const [newModel, setNewModel] = useState(DEFAULT_PROVIDER_MODELS.mercury || 'mercury-3');
+  const [newCustomHeaders, setNewCustomHeaders] = useState('');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [profileAdvancedOpen, setProfileAdvancedOpen] = useState<Record<string, boolean>>({});
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isVerifyingNew, setIsVerifyingNew] = useState(false);
@@ -992,14 +1000,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     baseUrl: string,
     apiKey: string
   ): string[] => {
-    if (providerId !== 'custom') return [];
+    if (providerId === 'mercury' || providerId === 'inceptionlabs') {
+      return ['mercury-3', 'mercury', 'mercury-coder'];
+    }
+    if (providerId !== 'custom') {
+      return QUICK_PROVIDER_CHIPS[providerId] || [DEFAULT_PROVIDER_MODELS[providerId]].filter(Boolean);
+    }
     const u = (baseUrl || '').toLowerCase();
     const k = (apiKey || '').toLowerCase();
     if (u.includes('codecraft') || k.startsWith('cc_')) {
       return ['gemini-3.7-flash', 'deepseek-v4-flash-0731', 'claude-sonnet-5', 'claude-opus-4.8'];
     }
     if (u.includes('inceptionlabs') || u.includes('mercury')) {
-      return ['mercury-2', 'mercury', 'mercury-coder'];
+      return ['mercury-3', 'mercury', 'mercury-coder'];
     }
     if (u.includes('groq')) {
       return ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
@@ -1007,7 +1020,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (u.includes('openrouter')) {
       return ['google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-chat'];
     }
-    return ['gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'llama-3.3-70b-versatile', 'gemini-2.5-flash'];
+    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-2.5-flash'];
   };
 
   const handleSaveWithoutVerification = () => {
@@ -1070,11 +1083,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalKeys: newApiKey.trim(),
       externalModel: workingModel,
       externalBaseUrl: effectiveBaseUrl,
+      ...(newCustomHeaders.trim() ? { customHeaders: newCustomHeaders.trim() } : {}),
       availableModels: mergedModels,
       verified: false,
       verificationStatus: 'untested',
       quotaExhausted: false,
-      statusMessage: `Not tested · ${workingModel} (Click Test to verify connection)`,
+      statusMessage: `Ready · ${workingModel}`,
     };
 
     const nextList = [...localProfiles, newProfile];
@@ -1088,23 +1102,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalKeys: newProfile.externalKeys,
       externalModel: newProfile.externalModel,
       externalBaseUrl: newProfile.externalBaseUrl,
+      customHeaders: newProfile.customHeaders,
     });
     commit(nextSettings);
-    // Explicit provider saves remain active even if the settings dialog is cancelled.
     if (initialSnapshotRef.current) {
       initialSnapshotRef.current.settings = nextSettings;
     }
     setNewVerifyResult({
       ok: true,
       workingModel,
-      message: `সংরক্ষিত ও সক্রিয়: "${cleanName}" — মডেল: ${workingModel}। কানেকশন এখনো যাচাই করা হয়নি; Test দিয়ে যাচাই করুন।`,
+      message: `Saved & activated "${cleanName}" (${workingModel})`,
     });
     setNewPropName('');
     setNewApiKey('');
+    setNewCustomHeaders('');
     setShowNewKey(false);
     setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
     setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || '');
-    notify?.(`Saved & activated "${cleanName}" (${workingModel}) — not tested`);
+    notify?.(`Saved & activated "${cleanName}" (${workingModel})`);
   };
 
   const handleVerifyAndAddProvider = async () => {
@@ -1254,6 +1269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalKeys: newApiKey.trim(),
         externalModel: workingModel,
         externalBaseUrl: effectiveBaseUrl,
+        ...(newCustomHeaders.trim() ? { customHeaders: newCustomHeaders.trim() } : {}),
         availableModels: mergedModels,
         verified: true,
         verificationStatus: 'verified',
@@ -1280,6 +1296,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalKeys: newProfile.externalKeys,
         externalModel: newProfile.externalModel,
         externalBaseUrl: newProfile.externalBaseUrl,
+        customHeaders: newProfile.customHeaders,
       });
       commit(nextSettings);
       if (initialSnapshotRef.current) {
@@ -1299,6 +1316,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
       setNewPropName('');
       setNewApiKey('');
+      setNewCustomHeaders('');
       setShowNewKey(false);
       setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
       setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || '');
@@ -1722,11 +1740,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     </>
   );
 
+  const selectProviderOption = (pid: ExternalProviderId) => {
+    setNewProviderId(pid);
+    setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[pid] || '');
+    setNewModel(
+      pid === 'mercury' || pid === 'inceptionlabs'
+        ? 'mercury-3'
+        : DEFAULT_PROVIDER_MODELS[pid] || ''
+    );
+    setDiscoveredModels([]);
+    setNewVerifyResult(null);
+    setDiscoveryWarning(null);
+  };
+
   const renderProviders = () => (
     <>
       <Card
-        title="Active engine"
-        description="The provider and model used for every request."
+        title="AI Provider Configuration"
+        description="Select a provider, model, and API key."
         icon={<Zap className="w-4 h-4" />}
       >
         <div className="cs-callout">
@@ -1735,24 +1766,285 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {providerEntry(activeProfile?.provider || 'xrahat')?.label || activeProfile?.provider} ·{' '}
             {isBuiltinProviderId(activeProfile?.provider)
               ? builtinTierLabel(activeProfile?.externalModel, draft.mode)
-              : activeProfile?.externalModel || activeProfileModels[0] || 'No model verified yet'}
+              : activeProfile?.externalModel || activeProfileModels[0] || DEFAULT_PROVIDER_MODELS[activeProfile?.provider || ''] || 'Auto'}
           </span>
         </div>
-        <ToggleRow
-          label="Keyless fallback"
-          description="If a custom provider fails, retry with the built-in free engine."
-          checked={Boolean(draft.allowKeylessFallback)}
-          onChange={(v) => patch({ allowKeylessFallback: v })}
-        />
-        <p className="cs-callout info">
-          <KeyRound className="w-3.5 h-3.5 shrink-0" />
-          API keys are AES-256-GCM encrypted on this device and proxied through the server. Secret keys are never exposed in public responses or exports.
-        </p>
+
+        <div className="cs-form-grid !mt-3">
+          {/* 1. Provider Selector (Mercury, Gemini, OpenAI, Anthropic, Custom) */}
+          <div className="cs-row cs-row-column">
+            <div className="cs-row-info">
+              <span className="cs-label">Provider</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-2" data-testid="provider-quick-selector">
+              {PRIMARY_PROVIDER_OPTIONS.map((opt) => {
+                const isSelected =
+                  newProviderId === opt.id ||
+                  (opt.id === 'mercury' && newProviderId === 'inceptionlabs');
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    data-testid={`provider-pill-${opt.id}`}
+                    onClick={() => selectProviderOption(opt.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                        : 'bg-[var(--bg-2)] text-[var(--text-2)] border-[var(--border)] hover:border-indigo-500/40'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <select
+              className="cs-select"
+              data-testid="provider-gateway-select"
+              value={newProviderId}
+              onChange={(e) => selectProviderOption(e.target.value as ExternalProviderId)}
+            >
+              {(['popular', 'builtin', 'custom', 'local'] as ProviderGroup[]).map((g) => (
+                <optgroup key={g} label={PROVIDER_GROUP_LABELS[g]}>
+                  {PROVIDER_CATALOG.filter((c) => c.group === g).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Model Name Input / Dropdown (Default Mercury to "mercury-3") */}
+          <div className="cs-row cs-row-column">
+            <div className="cs-row-info">
+              <span className="cs-label">Model</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 w-full">
+              <select
+                className="cs-select !w-full"
+                data-testid="new-provider-model-select"
+                value={candidateModelsForNew.includes(newModel) ? newModel : candidateModelsForNew[0] || ''}
+                onChange={(e) => setNewModel(e.target.value)}
+              >
+                {candidateModelsForNew.length === 0 && (
+                  <option value="" disabled>
+                    Select or enter model
+                  </option>
+                )}
+                {Array.from(new Set([newModel, ...candidateModelsForNew].filter(Boolean))).map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                data-testid="new-provider-model-input"
+                className="cs-input font-mono !w-full"
+                value={newModel}
+                placeholder={
+                  newProviderId === 'mercury' || newProviderId === 'inceptionlabs'
+                    ? 'mercury-3'
+                    : 'Model ID'
+                }
+                onChange={(e) => setNewModel(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary !px-2.5"
+                title="Fetch models"
+                disabled={isLoadingModels}
+                onClick={() => handleFetchNewModels()}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingModels ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* 3. API Key field (with Show/Hide toggle) */}
+          {!isBuiltinProviderId(newProviderId) && (
+            <div className="cs-row cs-row-column">
+              <div className="cs-row-info">
+                <span className="cs-label">API Key</span>
+              </div>
+              <div className="cs-key-input">
+                <input
+                  type={showNewKey ? 'text' : 'password'}
+                  data-testid="new-provider-api-key-input"
+                  className="cs-input font-mono"
+                  value={newApiKey}
+                  placeholder={providerEntry(newProviderId)?.keyHint || 'sk-...'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewApiKey(val);
+                    setNewVerifyResult(null);
+                    const detected = detectProviderFromKey(val);
+                    if (newProviderId === 'custom') {
+                      if (!newBaseUrl.trim()) {
+                        if (detected && DEFAULT_PROVIDER_BASE_URLS[detected]) {
+                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected]);
+                          if (!newModel || newModel === 'gpt-4o-mini') {
+                            setNewModel(DEFAULT_PROVIDER_MODELS[detected] || 'gpt-4o-mini');
+                          }
+                        } else if (val.trim().startsWith('sk-')) {
+                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1');
+                        }
+                      }
+                    } else if (
+                      detected &&
+                      detected !== newProviderId &&
+                      newProviderId !== 'mercury' &&
+                      newProviderId !== 'inceptionlabs' &&
+                      newProviderId !== 'ollama' &&
+                      newProviderId !== 'lmstudio'
+                    ) {
+                      setNewProviderId(detected);
+                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
+                      setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  data-testid="toggle-new-api-key-visibility"
+                  className="btn btn-secondary !px-2.5 flex items-center gap-1"
+                  aria-label={showNewKey ? 'Hide API key' : 'Show API key'}
+                  onClick={() => setShowNewKey((v) => !v)}
+                >
+                  {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span className="text-[11px]">{showNewKey ? 'Hide' : 'Show'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 4. Optional "Advanced Options" Accordion (closed by default) */}
+          <div className="border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--bg-2)]/40">
+            <button
+              type="button"
+              data-testid="advanced-options-toggle"
+              aria-expanded={showAdvancedOptions}
+              onClick={() => setShowAdvancedOptions((prev) => !prev)}
+              className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text-1)] transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <SlidersHorizontal className="w-3.5 h-3.5 opacity-75" />
+                <span>Advanced Options</span>
+              </span>
+              {showAdvancedOptions ? (
+                <ChevronDown className="w-4 h-4 opacity-70" />
+              ) : (
+                <ChevronRight className="w-4 h-4 opacity-70" />
+              )}
+            </button>
+
+            {showAdvancedOptions && (
+              <div
+                data-testid="advanced-options-content"
+                className="px-3.5 pb-3.5 pt-2 border-t border-[var(--border)] space-y-3"
+              >
+                <TextRow
+                  label="Base URL"
+                  mono
+                  value={newBaseUrl}
+                  placeholder={
+                    DEFAULT_PROVIDER_BASE_URLS[newProviderId] ||
+                    'https://api.inceptionlabs.ai/v1/chat/completions'
+                  }
+                  onChange={(v) => {
+                    setNewBaseUrl(v);
+                    setNewVerifyResult(null);
+                    if (newProviderId === 'custom' && (!newModel || newModel === 'gpt-4o-mini')) {
+                      const u = v.toLowerCase();
+                      if (u.includes('codecraft')) setNewModel('gemini-3.7-flash');
+                      else if (u.includes('inceptionlabs') || u.includes('mercury')) setNewModel('mercury-3');
+                      else if (u.includes('generativelanguage.googleapis.com')) setNewModel('gemini-2.5-flash');
+                      else if (u.includes('groq.com')) setNewModel('llama-3.3-70b-versatile');
+                      else if (u.includes('deepseek.com')) setNewModel('deepseek-chat');
+                      else if (u.includes('anthropic.com')) setNewModel('claude-sonnet-4-20250514');
+                      else if (u.includes('openrouter.ai')) setNewModel('google/gemini-2.5-flash');
+                    }
+                  }}
+                />
+                <div className="cs-row cs-row-column">
+                  <div className="cs-row-info">
+                    <span className="cs-label">Extra Headers (Optional)</span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    data-testid="new-provider-extra-headers"
+                    className="cs-textarea font-mono text-xs"
+                    value={newCustomHeaders}
+                    placeholder={'{"X-Custom-Header": "value"}'}
+                    onChange={(e) => setNewCustomHeaders(e.target.value)}
+                  />
+                </div>
+                <TextRow
+                  label="Profile Name (Optional)"
+                  value={newPropName}
+                  placeholder={`e.g. ${providerEntry(newProviderId)?.short || 'Mercury'}`}
+                  onChange={setNewPropName}
+                />
+                <ToggleRow
+                  label="Keyless fallback"
+                  description="Fallback to built-in engine if custom provider is unreachable."
+                  checked={Boolean(draft.allowKeylessFallback)}
+                  onChange={(v) => patch({ allowKeylessFallback: v })}
+                />
+              </div>
+            )}
+          </div>
+
+          {discoveryWarning && <p className="cs-callout warn !text-xs">{discoveryWarning}</p>}
+          {newVerifyResult && (
+            <div className={`cs-callout ${newVerifyResult.ok ? 'success' : 'warn'}`}>
+              <div className="flex items-start gap-2 w-full">
+                {newVerifyResult.ok ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs">{newVerifyResult.message}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="cs-form-actions">
+            <button
+              type="button"
+              className="btn btn-secondary flex items-center gap-1.5"
+              disabled={isVerifyingNew}
+              onClick={handleSaveWithoutVerification}
+            >
+              <Save className="w-4 h-4 text-emerald-500" /> Save &amp; Activate
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={isVerifyingNew}
+              onClick={handleVerifyAndAddProvider}
+            >
+              {isVerifyingNew ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4" /> Verify &amp; Connect
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Card>
 
       <Card
-        title={`Managed providers (${localProfiles.length})`}
-        description="Add, edit, test, enable, disable and switch between AI providers."
+        title={`Saved Profiles (${localProfiles.length})`}
+        description="Switch or manage saved provider configurations."
         icon={<Server className="w-4 h-4" />}
       >
         <div className="cs-provider-list">
@@ -1761,6 +2053,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             const pModels = getModelsForProfile(prof);
             const uiStatus = describeProviderStatus(prof);
             const isEnabled = prof.enabled !== false;
+            const isAdvOpen = Boolean(profileAdvancedOpen[prof.id]);
             return (
               <div key={prof.id} className={`cs-provider ${isCurrent ? 'active' : ''} ${!isEnabled ? 'opacity-65' : ''}`}>
                 <div className="cs-provider-head">
@@ -1775,14 +2068,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span className={`cs-pill ${uiStatus.toLowerCase().replace(/\s+/g, '-')}`}>
                       {uiStatus}
                     </span>
-                    <span className="cs-provider-tag" title="Streaming capability">
-                      {prof.supportsStreaming === false ? 'Batch' : 'SSE Stream'}
-                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <label
                       className="toggle-switch"
-                      title={isEnabled ? 'Disable this provider profile' : 'Enable this provider profile'}
+                      title={isEnabled ? 'Disable profile' : 'Enable profile'}
                     >
                       <input
                         type="checkbox"
@@ -1809,18 +2099,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
 
-                <div className="cs-provider-meta">
-                  <span className="truncate">
-                    {prof.quotaExhausted
-                      ? '⚠️ Quota exhausted — pick another provider'
-                      : prof.statusMessage || `${pModels.length} models available`}
-                  </span>
-                  {prof.externalKeys && (
+                {prof.externalKeys && (
+                  <div className="cs-provider-meta">
                     <span className="cs-key-chip">
                       {revealedKeyIds[prof.id] ? prof.externalKeys : maskKey(prof.externalKeys)}
                     </span>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {(uiStatus === 'Failed' ||
                   prof.verificationStatus === 'failed' ||
@@ -1833,34 +2118,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-[11px] uppercase tracking-wide opacity-80 mb-0.5">
-                            Provider Diagnostic ({prof.externalModel || 'No model'})
-                          </div>
                           <div>{prof.statusMessage}</div>
-                          {pModels.filter((m) => m && m !== prof.externalModel).length > 0 && (
-                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] opacity-80">
-                                Switch to valid model:
-                              </span>
-                              {pModels
-                                .filter((m) => m && m !== prof.externalModel)
-                                .slice(0, 4)
-                                .map((validModel) => (
-                                  <button
-                                    key={validModel}
-                                    type="button"
-                                    className="btn btn-secondary !py-0.5 !px-2 !text-[11px] font-mono"
-                                    onClick={() =>
-                                      updateSavedProfileField(prof.id, {
-                                        externalModel: validModel,
-                                      })
-                                    }
-                                  >
-                                    {validModel}
-                                  </button>
-                                ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -1875,7 +2133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                     <div className="cs-row cs-row-column">
                       <div className="cs-row-info">
-                        <span className="cs-label">API key</span>
+                        <span className="cs-label">API Key</span>
                       </div>
                       <div className="cs-key-input">
                         <input
@@ -1898,39 +2156,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </button>
                       </div>
                     </div>
-                    <TextRow
-                      label="Base URL"
-                      value={prof.externalBaseUrl || ''}
-                      mono
-                      placeholder={DEFAULT_PROVIDER_BASE_URLS[prof.provider] || 'https://api.example.com/v1'}
-                      onChange={(v) => updateSavedProfileField(prof.id, { externalBaseUrl: v })}
-                    />
-                    <SliderRow
-                      label="Context window (tokens)"
-                      description="Maximum input context window supported by this profile."
-                      value={prof.contextWindow ?? 32768}
-                      min={2048}
-                      max={128000}
-                      step={2048}
-                      onChange={(v) => updateSavedProfileField(prof.id, { contextWindow: v })}
-                    />
-                    <SliderRow
-                      label="Maximum response tokens"
-                      value={prof.maxOutputTokens ?? 4096}
-                      min={64}
-                      max={32768}
-                      step={64}
-                      onChange={(v) => updateSavedProfileField(prof.id, { maxOutputTokens: v })}
-                    />
-                    <ToggleRow
-                      label="SSE streaming support"
-                      description="Enable incremental token streaming when supported by this endpoint."
-                      checked={prof.supportsStreaming !== false}
-                      onChange={(v) => updateSavedProfileField(prof.id, { supportsStreaming: v })}
-                    />
+
+                    <div className="border border-[var(--border)] rounded-lg overflow-hidden mt-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProfileAdvancedOpen((prev) => ({ ...prev, [prof.id]: !prev[prof.id] }))
+                        }
+                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--text-2)]"
+                      >
+                        <span>Advanced Options</span>
+                        {isAdvOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      </button>
+                      {isAdvOpen && (
+                        <div className="p-3 border-t border-[var(--border)] space-y-2.5">
+                          <TextRow
+                            label="Base URL"
+                            value={prof.externalBaseUrl || ''}
+                            mono
+                            placeholder={DEFAULT_PROVIDER_BASE_URLS[prof.provider] || 'https://api.inceptionlabs.ai/v1'}
+                            onChange={(v) => updateSavedProfileField(prof.id, { externalBaseUrl: v })}
+                          />
+                          <TextRow
+                            label="Extra Headers"
+                            value={prof.customHeaders || ''}
+                            mono
+                            placeholder={'{"X-Header": "value"}'}
+                            onChange={(v) => updateSavedProfileField(prof.id, { customHeaders: v })}
+                          />
+                          <SliderRow
+                            label="Context window (tokens)"
+                            value={prof.contextWindow ?? 32768}
+                            min={2048}
+                            max={128000}
+                            step={2048}
+                            onChange={(v) => updateSavedProfileField(prof.id, { contextWindow: v })}
+                          />
+                          <SliderRow
+                            label="Maximum response tokens"
+                            value={prof.maxOutputTokens ?? 4096}
+                            min={64}
+                            max={32768}
+                            step={64}
+                            onChange={(v) => updateSavedProfileField(prof.id, { maxOutputTokens: v })}
+                          />
+                          <ToggleRow
+                            label="SSE streaming support"
+                            checked={prof.supportsStreaming !== false}
+                            onChange={(v) => updateSavedProfileField(prof.id, { supportsStreaming: v })}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
-
 
                 <div className="cs-provider-controls">
                   <select
@@ -1942,7 +2221,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                     {pModels.length === 0 && (
                       <option value="" disabled>
-                        No verified model — type or fetch one
+                        Select model
                       </option>
                     )}
                     {Array.from(new Set([prof.externalModel, ...pModels].filter(Boolean) as string[])).map(
@@ -1959,7 +2238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="text"
                     className="cs-input !py-1 !text-[11px] w-28 sm:w-36"
                     value={prof.externalModel || ''}
-                    placeholder="Custom model ID"
+                    placeholder="Model ID"
                     onChange={(e) =>
                       updateSavedProfileField(prof.id, { externalModel: e.target.value })
                     }
@@ -2010,281 +2289,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             );
           })}
-        </div>
-      </Card>
-
-      <Card
-        title="Connect new provider"
-        description="Verify the connection, or save it as untested and test it later."
-        icon={<Plus className="w-4 h-4" />}
-      >
-        <div className="cs-form-grid">
-          <TextRow
-            label="Display name"
-            value={newPropName}
-            placeholder="e.g. My OpenAI"
-            onChange={setNewPropName}
-          />
-          <div className="cs-row cs-row-column">
-            <div className="cs-row-info">
-              <span className="cs-label">Provider gateway</span>
-            </div>
-            <select
-              className="cs-select"
-              value={newProviderId}
-              onChange={(e) => {
-                const pid = e.target.value as ExternalProviderId;
-                setNewProviderId(pid);
-                setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[pid] || '');
-                setNewModel(DEFAULT_PROVIDER_MODELS[pid] || '');
-                setDiscoveredModels([]);
-                setNewVerifyResult(null);
-              }}
-            >
-              {(['builtin', 'popular', 'custom', 'local'] as ProviderGroup[]).map((g) => (
-                <optgroup key={g} label={PROVIDER_GROUP_LABELS[g]}>
-                  {PROVIDER_CATALOG.filter((c) => c.group === g).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-
-          {!isBuiltinProviderId(newProviderId) && (
-            <div className="cs-row cs-row-column">
-              <div className="cs-row-info">
-                <span className="cs-label">API key</span>
-                <span className="cs-desc">
-                  {providerEntry(newProviderId)?.keyHint ||
-                    'Paste your API key (encrypted locally)'}
-                </span>
-              </div>
-              <div className="cs-key-input">
-                <input
-                  type={showNewKey ? 'text' : 'password'}
-                  data-testid="new-provider-api-key-input"
-                  className="cs-input font-mono"
-                  value={newApiKey}
-                  placeholder={
-                    newProviderId === 'custom'
-                      ? 'Paste Custom API key (e.g. sk-...)'
-                      : 'Paste secret key'
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setNewApiKey(val);
-                    setNewVerifyResult(null);
-                    const detected = detectProviderFromKey(val);
-                    if (newProviderId === 'custom') {
-                      if (!newBaseUrl.trim()) {
-                        if (detected && DEFAULT_PROVIDER_BASE_URLS[detected]) {
-                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected]);
-                          if (!newModel || newModel === 'gpt-4o-mini') {
-                            setNewModel(DEFAULT_PROVIDER_MODELS[detected] || 'gpt-4o-mini');
-                          }
-                        } else if (val.trim().startsWith('sk-')) {
-                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1');
-                        }
-                      }
-                    } else if (
-                      detected &&
-                      detected !== newProviderId &&
-                      newProviderId !== 'ollama' &&
-                      newProviderId !== 'lmstudio'
-                    ) {
-                      setNewProviderId(detected);
-                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
-                      setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-secondary !px-2"
-                  aria-label={showNewKey ? 'Hide API key' : 'Show API key'}
-                  onClick={() => setShowNewKey((v) => !v)}
-                >
-                  {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              {newProviderId === 'custom' && detectedProviderFromNewKey && (
-                <div className="cs-callout info !mt-2 !py-1.5 !px-2.5 flex items-center justify-between gap-2 text-xs">
-                  <span>
-                    💡 <strong>{providerEntry(detectedProviderFromNewKey)?.label}</strong> key detected.
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-primary !py-0.5 !px-2 !text-[11px]"
-                    onClick={() => {
-                      setNewProviderId(detectedProviderFromNewKey as ExternalProviderId);
-                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detectedProviderFromNewKey] || '');
-                      setNewModel(DEFAULT_PROVIDER_MODELS[detectedProviderFromNewKey] || '');
-                    }}
-                  >
-                    Switch to {providerEntry(detectedProviderFromNewKey)?.short || 'Provider'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <TextRow
-            label="Base URL"
-            description={
-              newProviderId === 'custom'
-                ? 'Your provider endpoint, e.g. https://api.openai.com/v1 (Replace example.com with your real host)'
-                : undefined
-            }
-            mono
-            value={newBaseUrl}
-            placeholder="https://api.example.com/v1"
-            onChange={(v) => {
-              setNewBaseUrl(v);
-              setNewVerifyResult(null);
-              if (newProviderId === 'custom' && (!newModel || newModel === 'gpt-4o-mini')) {
-                const u = v.toLowerCase();
-                if (u.includes('codecraft')) setNewModel('gemini-3.7-flash');
-                else if (u.includes('inceptionlabs') || u.includes('mercury')) setNewModel('mercury-2');
-                else if (u.includes('generativelanguage.googleapis.com')) setNewModel('gemini-2.5-flash');
-                else if (u.includes('groq.com')) setNewModel('llama-3.3-70b-versatile');
-                else if (u.includes('deepseek.com')) setNewModel('deepseek-chat');
-                else if (u.includes('anthropic.com')) setNewModel('claude-sonnet-4-20250514');
-                else if (u.includes('openrouter.ai')) setNewModel('google/gemini-2.5-flash');
-                else if (u.includes('cerebras.ai')) setNewModel('llama-3.3-70b');
-                else if (u.includes('mistral.ai')) setNewModel('mistral-small-latest');
-              }
-            }}
-          />
-          {newProviderId === 'custom' && /example\.com/i.test(newBaseUrl) && (
-            <p className="cs-callout warn !mt-1 !text-xs">
-              ⚠️ <code>api.example.com</code> is a placeholder example. Replace it with your actual provider host (e.g. <code>https://api.openai.com/v1</code>, <code>https://openrouter.ai/api/v1</code>, or <code>https://api.groq.com/openai/v1</code>).
-            </p>
-          )}
-          {(newProviderId === 'ollama' ||
-            newProviderId === 'lmstudio' ||
-            /localhost|127\.0\.0\.1/i.test(newBaseUrl)) && (
-            <p className="cs-callout warn">
-              On a phone, localhost means the phone itself. Use a LAN IP
-              (e.g. http://192.168.1.x:11434/v1) or a secure tunnel.
-            </p>
-          )}
-
-          <div className="cs-row cs-row-column">
-            <div className="cs-row-info">
-              <span className="cs-label">Model</span>
-            </div>
-            <div className="cs-key-input">
-              <select
-                className="cs-select"
-                value={candidateModelsForNew.includes(newModel) ? newModel : candidateModelsForNew[0] || ''}
-                onChange={(e) => setNewModel(e.target.value)}
-              >
-                {candidateModelsForNew.length === 0 && (
-                  <option value="" disabled>
-                    Fetch models or type an ID →
-                  </option>
-                )}
-                {Array.from(new Set([newModel, ...candidateModelsForNew].filter(Boolean))).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                className="cs-input"
-                value={newModel}
-                placeholder="Type model ID"
-                onChange={(e) => setNewModel(e.target.value)}
-              />
-              <button
-                type="button"
-                className="btn btn-secondary !px-2"
-                title="Fetch models"
-                disabled={isLoadingModels}
-                onClick={() => handleFetchNewModels()}
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingModels ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
-
-          {discoveryWarning && <p className="cs-callout warn">{discoveryWarning}</p>}
-          {newVerifyResult && (
-            <div className={`cs-callout ${newVerifyResult.ok ? 'success' : 'warn'}`}>
-              <div className="flex items-start gap-2 w-full">
-                {newVerifyResult.ok ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs">{newVerifyResult.message}</p>
-                  {!newVerifyResult.ok && (
-                    <div className="mt-2 pt-2 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-[11px] text-[var(--text-3)]">
-                        আপনার API Key ও URL অন্য কোথাও ঠিক থাকলে সরাসরি যুক্ত করতে পারেন:
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-primary !py-1 !px-2.5 !text-[11px] font-semibold flex items-center gap-1.5"
-                        onClick={handleSaveWithoutVerification}
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                        যাচাই ছাড়া সংরক্ষণ করুন (Save untested)
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="cs-form-actions">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setNewPropName('');
-                setNewApiKey('');
-                setShowNewKey(false);
-                setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
-                setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || '');
-                setDiscoveredModels([]);
-                setNewVerifyResult(null);
-              }}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary flex items-center gap-1.5"
-              disabled={isVerifyingNew}
-              onClick={handleSaveWithoutVerification}
-              title="যাচাই না করে সরাসরি প্রোফাইল যুক্ত ও সক্রিয় করুন (যদি আপনি নিশ্চিত হন যে API Key ও URL সঠিক)"
-            >
-              <Save className="w-4 h-4 text-emerald-500" /> Save &amp; activate (untested)
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={isVerifyingNew}
-              onClick={handleVerifyAndAddProvider}
-            >
-              {isVerifyingNew ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4" /> Verify &amp; connect
-                </>
-              )}
-            </button>
-          </div>
         </div>
       </Card>
 

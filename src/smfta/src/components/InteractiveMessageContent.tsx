@@ -13,6 +13,7 @@ import {
   Lightbulb,
   ArrowRight,
   Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
 import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
@@ -25,6 +26,7 @@ import { InlineCodePreview } from './CodeWorkspace';
 interface InteractiveMessageContentProps {
   messageId: string;
   text: string;
+  thinking?: string;
   isStreaming?: boolean;
   proactiveSuggestions?: ProactiveSuggestion[];
   revisions?: InlineRevision[];
@@ -57,6 +59,81 @@ interface ParsedBlock {
   type: 'code' | 'text';
   content: string;
   lang?: string;
+}
+
+export interface ExtractedThinkingResult {
+  thinkingText: string;
+  cleanResponse: string;
+  isThinkingActive: boolean;
+}
+
+/**
+ * Extracts `<think>...</think>`, `<thinking>...</thinking>`, or `◁think▷...◁/think▷`
+ * blocks (including unclosed streaming `<think>` blocks and orphan `</think>` tags)
+ * and merges with `explicitThinking` so raw `<think>` tags never bleed into the response.
+ */
+export function extractThinkingAndResponse(
+  rawText: string,
+  explicitThinking?: string
+): ExtractedThinkingResult {
+  let working = String(rawText || '');
+  const extractedParts: string[] = [];
+  let isThinkingActive = false;
+
+  // 1. Closed <think>...</think>, <thinking>...</thinking>, or ◁think▷...◁/think▷
+  const closedThinkRegex =
+    /(?:<think(?:ing)?\b[^>]*>|◁think▷)([\s\S]*?)(?:<\/think(?:ing)?>|◁\/think▷)/gi;
+  working = working.replace(closedThinkRegex, (_full, inner: string) => {
+    const trimmed = (inner || '').trim();
+    if (trimmed) extractedParts.push(trimmed);
+    return '\n\n';
+  });
+
+  // 2. Unclosed <think>... at end of stream
+  const openMatch = /(?:<think(?:ing)?\b[^>]*>|◁think▷)([\s\S]*)$/i.exec(working);
+  if (openMatch && openMatch.index !== undefined) {
+    isThinkingActive = true;
+    const partial = (openMatch[1] || '').trim();
+    if (partial) extractedParts.push(partial);
+    working = working.slice(0, openMatch.index);
+  }
+
+  // 3. Orphan closing </think> when opening tag was omitted
+  const orphanClose = /([\s\S]*?)(?:<\/think(?:ing)?>|◁\/think▷)/i.exec(working);
+  if (orphanClose) {
+    const before = (orphanClose[1] || '').trim();
+    if (before) extractedParts.push(before);
+    working = working.slice((orphanClose.index || 0) + orphanClose[0].length);
+  }
+
+  // 4. Strip any remaining stray <think> or </think> tags
+  const cleanResponse = working
+    .replace(/<\/?think(?:ing)?\b[^>]*>|◁\/?think▷/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  const explicit = String(explicitThinking || '')
+    .replace(/<\/?think(?:ing)?\b[^>]*>|◁\/?think▷/gi, '')
+    .trim();
+  const inlineJoined = extractedParts.join('\n\n').trim();
+
+  let thinkingText = '';
+  if (explicit && inlineJoined) {
+    thinkingText =
+      explicit.includes(inlineJoined)
+        ? explicit
+        : inlineJoined.includes(explicit)
+        ? inlineJoined
+        : `${explicit}\n\n${inlineJoined}`;
+  } else {
+    thinkingText = explicit || inlineJoined;
+  }
+
+  return {
+    thinkingText,
+    cleanResponse,
+    isThinkingActive,
+  };
 }
 
 function parseBlocks(markdown: string): ParsedBlock[] {
@@ -371,6 +448,7 @@ const CODE_EXTS: Record<string, string> = {
 export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps> = ({
   messageId,
   text,
+  thinking,
   isStreaming = false,
   proactiveSuggestions = [],
   revisions = [],
@@ -398,6 +476,12 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   const [expandedCodeBlocks, setExpandedCodeBlocks] = useState<Record<number, boolean>>({});
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
   const [showRevisions, setShowRevisions] = useState<boolean>(false);
+  const [isThinkingExpanded, setIsThinkingExpanded] = useState<boolean>(false);
+
+  const { thinkingText, cleanResponse, isThinkingActive } = extractThinkingAndResponse(
+    text,
+    thinking
+  );
 
   const isWebCodeLang = (lang?: string): boolean => {
     const l = (lang || '').toLowerCase().trim();
@@ -447,8 +531,8 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   // are displayed literally, exactly as the model wrote them).
   const blocks: ParsedBlock[] =
     renderMarkdown === false
-      ? [{ type: text ? 'text' : 'text', content: text }]
-      : parseBlocks(text);
+      ? [{ type: 'text', content: cleanResponse }]
+      : parseBlocks(cleanResponse);
 
   // Everything the Live Preview needs, computed once per render.
   const codeBlocks = blocks
@@ -594,6 +678,45 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
 
   return (
     <div className="msg-prose space-y-1.5 text-[var(--text)]">
+      {/* Modern Collapsible "Thinking" UI with Gradient Glow */}
+      {(Boolean(thinkingText) || isThinkingActive) && (
+        <div
+          data-testid="thinking-accordion"
+          className="mb-3 rounded-xl p-[1px] bg-gradient-to-r from-purple-500/45 via-indigo-500/45 to-blue-500/45 shadow-[0_0_16px_-3px_rgba(139,92,246,0.3)] transition-all"
+        >
+          <div className="rounded-[11px] bg-[var(--surface)] overflow-hidden">
+            <button
+              type="button"
+              data-testid="thinking-accordion-toggle"
+              aria-expanded={isThinkingExpanded}
+              onClick={() => setIsThinkingExpanded((prev) => !prev)}
+              className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse shrink-0" />
+                <span className="truncate font-medium bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+                  Thinking process...
+                </span>
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 text-purple-400/80 shrink-0 transition-transform duration-200 ${
+                  isThinkingExpanded ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {isThinkingExpanded && (
+              <div
+                data-testid="thinking-accordion-content"
+                className="px-3.5 py-3 border-t border-purple-500/20 bg-muted/40 font-mono text-xs leading-relaxed text-[var(--text-2)] max-h-60 overflow-y-auto whitespace-pre-wrap"
+              >
+                {thinkingText || 'Thinking...'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Proactive Suggestions Banner if AI found inline improvements */}
       {!isStreaming && proactiveSuggestions.length > 0 && (
         <div className="mb-3 rounded-xl border border-[var(--primary-border)] bg-[var(--primary-soft)] p-3">

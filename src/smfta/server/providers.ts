@@ -209,12 +209,19 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     url: 'https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1/chat/completions',
     defaultModel: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
   },
+  mercury: {
+    id: 'mercury',
+    name: 'Mercury (Inception Labs)',
+    url: 'https://api.inceptionlabs.ai/v1/chat/completions',
+    defaultModel: 'mercury-3',
+    fallbackModels: ['mercury-3', 'mercury', 'mercury-coder', 'mercury-2'],
+  },
   inceptionlabs: {
     id: 'inceptionlabs',
     name: 'Inception Labs (Mercury)',
     url: 'https://api.inceptionlabs.ai/v1/chat/completions',
-    defaultModel: 'mercury-2',
-    fallbackModels: ['mercury-2', 'mercury', 'mercury-coder'],
+    defaultModel: 'mercury-3',
+    fallbackModels: ['mercury-3', 'mercury', 'mercury-coder', 'mercury-2'],
   },
   lmstudio: {
     id: 'lmstudio',
@@ -748,7 +755,7 @@ export function inferModelForCustomBaseUrl(baseUrl?: string): string {
   if (!baseUrl) return 'gpt-4o-mini';
   const u = baseUrl.toLowerCase();
   if (u.includes('codecraft')) return 'gemini-3.7-flash';
-  if (u.includes('inceptionlabs') || u.includes('mercury')) return 'mercury-2';
+  if (u.includes('inceptionlabs') || u.includes('mercury')) return 'mercury-3';
   if (u.includes('generativelanguage.googleapis.com')) return 'gemini-2.5-flash';
   if (u.includes('groq.com')) return 'llama-3.3-70b-versatile';
   if (u.includes('deepseek.com')) return 'deepseek-chat';

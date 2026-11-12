@@ -89,6 +89,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const VALID_PROVIDERS: ReadonlyArray<NonNullable<AppSettings['provider']>> = [
   'xrahat',
   'smfta_cloud',
+  'mercury',
   'inceptionlabs',
   'custom',
   'gemini_custom',
@@ -262,6 +263,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
     externalKeys,
     externalModel,
     externalBaseUrl: str(raw.externalBaseUrl, '').slice(0, 500),
+    customHeaders: str(raw.customHeaders, '').slice(0, 2000),
     activeProfileId: str(raw.activeProfileId, '').trim().slice(0, 120),
     displayName: str(raw.displayName, '').trim().slice(0, 80),
     allowKeylessFallback: bool(

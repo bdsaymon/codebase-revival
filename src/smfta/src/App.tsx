@@ -2997,6 +2997,7 @@ export default function App() {
       let revealLast = 0;
       let revealFinishing = false;
       let revealDoneCb: (() => void) | null = null;
+      let liveThinking = '';
 
       const scheduleReveal = (): number => {
         if (typeof window.requestAnimationFrame === 'function') {
@@ -3025,6 +3026,7 @@ export default function App() {
             id: aiMsgId,
             role: 'ai',
             text: visible || ' ',
+            thinking: liveThinking || undefined,
             ts: reqStart,
             turnId,
             status: 'streaming',
@@ -3040,6 +3042,7 @@ export default function App() {
           updateMessageInChat(chatId, aiMsgId, (m) => ({
             ...m,
             text: visible || ' ',
+            thinking: liveThinking || m.thinking,
           }));
         }
         scrollToBottom(false);
@@ -3087,13 +3090,20 @@ export default function App() {
           ? parseFileEdits(accumulated).cleanText
           : accumulated;
         const parsedTags = parseAIControlTags(liveAnswer || accumulated);
+        if (parsedTags.thinking) {
+          liveThinking = parsedTags.thinking;
+        }
         const displayTxt = parsedTags.cleanText;
         if (displayTxt !== revealTarget) {
           revealTarget = displayTxt;
           if (revealShown > revealTarget.length) revealShown = revealTarget.length;
         }
-        // v18.11 — Streaming Reveal off: render every chunk instantly.
-        if (flushNow || settings.streamingReveal === false) {
+        // v18.11 — Streaming Reveal off: render every chunk instantly, or paint immediately while thinking is streaming
+        if (
+          flushNow ||
+          settings.streamingReveal === false ||
+          (Boolean(liveThinking) && !displayTxt)
+        ) {
           revealShown = revealTarget.length;
           paintReveal();
           return;
@@ -3413,8 +3423,14 @@ export default function App() {
         );
       }
 
-      const { cleanText, memories, selfUpdate, notes: aiNotes, skills: aiSkills } =
-        parseAIControlTags(textWithoutFileBlocks || accumulated);
+      const {
+        cleanText,
+        thinking: extractedThinking,
+        memories,
+        selfUpdate,
+        notes: aiNotes,
+        skills: aiSkills,
+      } = parseAIControlTags(textWithoutFileBlocks || accumulated);
       const conciseMode =
         settings.style !== 'detailed' && settings.mode !== 'power';
       const polished = polishReply(cleanText, { concise: conciseMode });
@@ -3596,7 +3612,8 @@ export default function App() {
 
       updateMessageInChat(chatId, aiMsgId, (m) => ({
         ...m,
-        text: finalText || accumulated,
+        text: finalText || cleanText || accumulated,
+        thinking: extractedThinking || liveThinking || m.thinking || undefined,
         status: 'complete',
         turnId,
         requestId: responderMeta.requestId,
@@ -3734,6 +3751,22 @@ export default function App() {
         const finalErrText = cleanErr.startsWith('⚠️')
           ? cleanErr
           : `⚠️ ${cleanErr}`;
+
+        // Toast alert on custom provider HTTP 401 / 404 or connection failure
+        if (errCode === 'AUTH_INVALID') {
+          showToast(
+            `⚠️ HTTP 401 Unauthorized: Invalid API key for ${activeDisplayName || activeProvider}.`,
+            5000
+          );
+        } else if (errCode === 'MODEL_UNAVAILABLE') {
+          showToast(
+            `⚠️ HTTP 404 Model Not Found: "${effectiveExternalModel || activeModelName}" on ${activeDisplayName || activeProvider}.`,
+            5000
+          );
+        } else {
+          showToast(finalErrText.slice(0, 140), 4500);
+        }
+
         setProviderTestStatus({
           ok: false,
           message: finalErrText,
@@ -5002,6 +5035,7 @@ export default function App() {
                           <InteractiveMessageContent
                             messageId={m.id}
                             text={m.text}
+                            thinking={m.thinking}
                             isStreaming={streamingMsgId === m.id}
                             proactiveSuggestions={m.proactiveSuggestions}
                             revisions={m.revisions}

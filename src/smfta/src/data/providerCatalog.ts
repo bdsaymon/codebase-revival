@@ -52,15 +52,31 @@ function resolveProtocol(id: ExternalProviderId): ProviderProtocol {
   return 'openai_compatible';
 }
 
+export const PRIMARY_PROVIDER_OPTIONS: Array<{
+  id: ExternalProviderId;
+  label: string;
+  short: string;
+  defaultModel: string;
+}> = [
+  { id: 'mercury', label: 'Mercury', short: 'Mercury', defaultModel: 'mercury-3' },
+  { id: 'gemini_custom', label: 'Gemini', short: 'Gemini', defaultModel: 'gemini-2.5-flash' },
+  { id: 'openai', label: 'OpenAI', short: 'OpenAI', defaultModel: 'gpt-4o-mini' },
+  { id: 'anthropic', label: 'Anthropic', short: 'Anthropic', defaultModel: 'claude-sonnet-4-20250514' },
+  { id: 'custom', label: 'Custom', short: 'Custom', defaultModel: 'mercury-3' },
+];
+
 export const UNIFIED_PROVIDER_CATALOG: UnifiedProviderCatalogItem[] =
   PROVIDER_CATALOG.map((entry) => ({
     ...entry,
     tier: mapGroupToTier(entry.group),
     protocol: resolveProtocol(entry.id),
-    defaultModel: DEFAULT_PROVIDER_MODELS[entry.id] || '',
+    defaultModel:
+      entry.id === 'mercury' || entry.id === 'inceptionlabs'
+        ? 'mercury-3'
+        : DEFAULT_PROVIDER_MODELS[entry.id] || '',
     defaultBaseUrl: DEFAULT_PROVIDER_BASE_URLS[entry.id] || '',
     curatedModels: QUICK_PROVIDER_CHIPS[entry.id] || [],
-    helpTextBn: PROVIDER_HELP_BN[entry.id] || entry.note,
+    helpTextBn: '',
   }));
 
 export function getProviderCatalogItem(
