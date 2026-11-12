@@ -10,7 +10,10 @@ import {
   hydrateSavedProfiles,
   persistSavedProfiles,
 } from '../smfta/src/utils/providers';
-import { getProviderCatalogItem } from '../smfta/src/data/providerCatalog';
+import {
+  PRIMARY_PROVIDER_OPTIONS,
+  getProviderCatalogItem,
+} from '../smfta/src/data/providerCatalog';
 import {
   extractThinkingAndResponse,
   extractThinkingTopic,
@@ -19,6 +22,11 @@ import {
 import { deriveThinkingSteps } from '../smfta/src/utils/genPhase';
 import { deriveLiveOperationProgressSteps } from '../smfta/src/utils/conversationContextEngine';
 import { buildSystemInstruction } from '../smfta/server/systemPrompt';
+import { buildSelfAnswer, isSelfQuestion } from '../smfta/src/utils/selfAnswer';
+import {
+  clearEntireMemoryBank,
+  retrieveRelevantMemories,
+} from '../smfta/src/utils/memoryBank';
 
 describe('custom provider routing', () => {
   it('strictly sets DEFAULT_PROVIDER_MODELS["mercury"] to "mercury-3"', () => {
@@ -26,6 +34,13 @@ describe('custom provider routing', () => {
     expect(DEFAULT_PROVIDER_MODELS['inceptionlabs']).toBe('mercury-3');
     expect(getProviderCatalogItem('mercury')?.defaultModel).toBe('mercury-3');
     expect(inferModelForCustomBaseUrl('https://api.inceptionlabs.ai/v1')).toBe('mercury-3');
+    expect(PRIMARY_PROVIDER_OPTIONS.map((p) => p.label)).toEqual([
+      'Mercury',
+      'Gemini',
+      'OpenAI',
+      'Anthropic',
+      'Custom / OpenRouter',
+    ]);
   });
   it('preserves Mercury when saving settings', () => {
     expect(sanitizeSettings({ provider: 'mercury', externalModel: 'mercury-3' }).provider).toBe('mercury');
@@ -89,6 +104,45 @@ describe('custom provider routing', () => {
     const sys = buildSystemInstruction({ mode: 'balanced' });
     expect(sys).toContain('WEB BROWSING & LIVE LINK VISITATION BOUNDARY');
     expect(sys).toContain('do NOT have live web browsing, real-time URL inspection, or live internet scraping abilities');
+  });
+  it('disables local answer interception so conversational queries route to the AI model stream', () => {
+    expect(isSelfQuestion('তোমাকে কখন update করা হয়েছে?')).toBe(false);
+    expect(isSelfQuestion('what is your version?')).toBe(false);
+    expect(isSelfQuestion('who made you?')).toBe(false);
+    expect(buildSelfAnswer({ query: 'তোমাকে কখন update করা হয়েছে?' })).toBeNull();
+    expect(buildSelfAnswer({ query: 'what is your version?' })).toBeNull();
+    expect(buildSelfAnswer({ query: 'who made you?' })).toBeNull();
+  });
+  it('filters memory facts by active topic and prevents conflicting or unrelated facts from polluting prompts', () => {
+    const facts = [
+      'নাম: সায়মন',
+      'নাম: পুরোনো নাম', // Conflicting duplicate key
+      'পছন্দ: React এবং TypeScript প্রজেক্ট',
+      'অপ্রাসঙ্গিক তথ্য: ২০২২ সালে একটি পুরোনো সাইকেল কিনেছিলাম',
+    ];
+    const filtered = retrieveRelevantMemories('React দিয়ে কম্পোনেন্ট তৈরি করো', facts, 8);
+    expect(filtered).toContain('নাম: সায়মন');
+    expect(filtered).not.toContain('নাম: পুরোনো নাম');
+    expect(filtered).toContain('পছন্দ: React এবং TypeScript প্রজেক্ট');
+    expect(filtered).not.toContain('অপ্রাসঙ্গিক তথ্য: ২০২২ সালে একটি পুরোনো সাইকেল কিনেছিলাম');
+
+    const sys = buildSystemInstruction({
+      mode: 'balanced',
+      memory: facts,
+      recentTranscript: [{ role: 'user', content: 'React দিয়ে কম্পোনেন্ট তৈরি করো' }],
+    });
+    expect(sys).not.toContain('USER MEMORY — FULL BANK');
+    expect(sys).not.toContain('২০২২ সালে একটি পুরোনো সাইকেল কিনেছিলাম');
+  });
+  it('wipes both smfta_memory and smfta_memory_backup in clearEntireMemoryBank()', () => {
+    localStorage.setItem('smfta_memory', JSON.stringify(['নাম: সায়মন']));
+    localStorage.setItem(
+      'smfta_memory_backup',
+      JSON.stringify({ facts: ['নাম: সায়মন'], savedAt: Date.now() })
+    );
+    clearEntireMemoryBank();
+    expect(localStorage.getItem('smfta_memory')).toBeNull();
+    expect(localStorage.getItem('smfta_memory_backup')).toBeNull();
   });
   it('classifies HTTP 401 and 404 from custom providers as non-retryable terminal errors', () => {
     const err401 = classifyProviderError({

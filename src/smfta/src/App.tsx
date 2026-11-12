@@ -72,7 +72,6 @@ import {
   parseAIControlTags,
   sanitizeProprietaryOutput,
   setClientCachedReply,
-  tryFastDecisionResponse,
   tryLocalMath,
 } from './utils/helpers';
 import {
@@ -103,7 +102,6 @@ import {
   sanitizeSettingsForExport,
 } from './utils/exportData';
 import { InteractiveMessageContent } from './components/InteractiveMessageContent';
-import { buildSelfAnswer } from './utils/selfAnswer';
 import {
   Project,
   buildProjectPreview,
@@ -144,7 +142,6 @@ import {
 import {
   buildSmartConversationContext,
   deriveLiveOperationProgressSteps,
-  isFollowUpQuery,
 } from './utils/conversationContextEngine';
 import { flushOfflineSyncQueue } from './utils/cloudSync';
 import {
@@ -175,10 +172,11 @@ import {
 } from './utils/documentReader';
 import {
   addFacts,
+  clearEntireMemoryBank,
   extractMemoryCandidates,
   factsToText,
   migrateMemory,
-  recallFromMemory,
+  retrieveRelevantMemories,
   MEMORY_MAX,
 } from './utils/memoryBank';
 import {
@@ -935,14 +933,16 @@ export default function App() {
   useEffect(() => {
     try {
       const ranked = factsToText(migrateMemory(memory).facts, MEMORY_MAX);
+      if (ranked.length === 0) {
+        clearEntireMemoryBank();
+        return;
+      }
       // Primary + backup copy: memory must survive a single corrupted/cleared key.
       localStorage.setItem(LS_KEYS.memory, JSON.stringify(ranked));
-      if (ranked.length > 0) {
-        localStorage.setItem(
-          LS_KEYS.memoryBackup,
-          JSON.stringify({ facts: ranked, savedAt: Date.now() })
-        );
-      }
+      localStorage.setItem(
+        LS_KEYS.memoryBackup,
+        JSON.stringify({ facts: ranked, savedAt: Date.now() })
+      );
     } catch {
       // Storage full/blocked: the in-memory copy still works this session.
     }
@@ -952,12 +952,7 @@ export default function App() {
   const forgetAllMemory = () => {
     memoryRef.current = [];
     setMemory([]);
-    try {
-      localStorage.removeItem(LS_KEYS.memory);
-      localStorage.removeItem(LS_KEYS.memoryBackup);
-    } catch {
-      // storage blocked — in-memory wipe still applies
-    }
+    clearEntireMemoryBank();
   };
 
   /** Central memory writer: de-dupes, merges same-key facts, caps at MEMORY_MAX.
@@ -2420,11 +2415,6 @@ export default function App() {
         settings.externalBaseUrl?.trim() ||
         activeProfile?.externalBaseUrl?.trim()
     );
-    const isNonDefaultModelAlias = Boolean(
-      settings.externalModel?.trim() &&
-        settings.externalModel.trim() !== 'gpt-4o-mini' &&
-        !isBuiltinTierModel(settings.externalModel)
-    );
 
     const deliverLocalReplyWithThinking = async (
       replyText: string,
@@ -2443,53 +2433,6 @@ export default function App() {
       scrollToBottom(false);
     };
 
-    // Once a chat has started, every message goes to the AI with the full
-    // conversation — canned local replies ignore context and broke memory.
-    const isMultiTurnFollowUp =
-      activeChat.msgs.length > 0 || isFollowUpQuery(rawTxt);
-    const hasActiveServiceSelection = Boolean(
-      activeChat.serviceContext?.activeService
-    );
-
-    // 2d. v18.6.0 — SELF / SYSTEM QUESTIONS ARE ANSWERED EXACTLY (only when default engine is active and not a follow-up in an ongoing conversation).
-    const asksAboutFiles = /(zip|জিপ|প্রজেক্ট|project|ফাইল|file|\.html|\.js|\.css)/i.test(rawTxt);
-    if (
-      !isCustomProviderOrKey &&
-      !asksAboutFiles &&
-      !isMultiTurnFollowUp &&
-      !hasActiveServiceSelection &&
-      imgs.length === 0 &&
-      files.length === 0
-    ) {
-      const selfReply = buildSelfAnswer({
-        query: rawTxt,
-        version: APP_VERSION,
-        userName: profile.name || '',
-        memory,
-        theme: settings.theme,
-        mode: settings.mode,
-        providerLabel: activeModelName,
-        driveConnected: Boolean(connections.drive.connected),
-        githubConnected: Boolean(connections.github.connected),
-        skillCount: skills.length,
-        noteCount: notes.length,
-        projectName: project?.name,
-        projectFiles: project?.files.length,
-        webSearch,
-      });
-      if (selfReply && !mentionsPastedCode(rawTxt)) {
-        appendMessageToChat(targetChatId, {
-          id: 'ai-' + Date.now(),
-          role: 'ai',
-          text: selfReply,
-          ts: Date.now(),
-        });
-        setInputText('');
-        scrollToBottom(true);
-        return;
-      }
-    }
-
     // 3. Check Instant Local Math (ONLY in Default Profile so Custom API Keys are always invoked)
     const mathVal =
       !isCustomProviderOrKey && isToolEnabled('calculate', settings.enabledTools)
@@ -2507,29 +2450,6 @@ export default function App() {
       /(আগে কী|আগে কি|কী কথা|কি কথা|কী চ্যাট|কি চ্যাট|মনে আছে|মনে রাখতে|কী বলেছিলাম|কি বলেছিলাম|কী বলেছি|কি বলেছি|আগের চ্যাট|পূর্বের চ্যাট|কোন মডেল|কাস্টম মডেল|what did we|what did i say|do you remember|previous chat|earlier chat|talked about|which model|what model)/i.test(
         rawTxt
       );
-
-    // 3b. Check Fast-Decision Local Router (ONLY when no custom provider/key is selected and not in an active multi-turn follow-up or service session)
-    if (
-      imgs.length === 0 &&
-      files.length === 0 &&
-      !isCustomProviderOrKey &&
-      !isNonDefaultModelAlias &&
-      !isRecallQuery &&
-      !isMultiTurnFollowUp &&
-      !hasActiveServiceSelection &&
-      !selfUpdCheck.isSelfUpdateIntent
-    ) {
-      const fastLocalReply = tryFastDecisionResponse(
-        rawTxt,
-        settings.fastDecision !== false ? settings.trainingData : undefined,
-        settings.replyLang || 'auto',
-        profile.name
-      );
-      if (fastLocalReply) {
-        await deliverLocalReplyWithThinking(fastLocalReply);
-        return;
-      }
-    }
 
     // 3c. Check High-Speed Client System Memory LRU Cache (ONLY when no custom API key/service is active)
     const clientCacheModeKey = `${settings.provider || 'xrahat'}:${settings.externalModel || ''}:${settings.mode}`;
@@ -2550,11 +2470,9 @@ export default function App() {
       }
     }
 
-    // 4. Auto-extract implicit user memory (v18.2.0 memory bank: dedupe, merge
-    //    same-key facts, cap 200, always persisted). Runs even when the user
-    //    turned auto-memory off — a name/job stated in chat is never lost again.
+    // 4. Auto-extract implicit user memory when autoMemory is enabled
     let currentMemory = [...memory];
-    {
+    if (settings.autoMemory !== false) {
       const implicit = extractImplicitUserMemory(rawTxt);
       if (implicit.detectedName) {
         setProfile((prev) => ({ ...prev, name: implicit.detectedName as string }));
@@ -2568,19 +2486,10 @@ export default function App() {
         });
         if (res.added.length > 0) {
           currentMemory = factsToText(res.facts, MEMORY_MAX);
+          memoryRef.current = currentMemory;
           setMemory(currentMemory);
         }
       }
-    }
-
-    // 4b. INSTANT MEMORY RECALL — "আমার নাম কী?" is answered from the
-    //     local bank, so memory works even when every provider is slow/down.
-    const recallAnswer = !isCustomProviderOrKey
-      ? recallFromMemory(rawTxt, migrateMemory(currentMemory).facts, profile.name)
-      : null;
-    if (recallAnswer) {
-      await deliverLocalReplyWithThinking(recallAnswer);
-      return;
     }
 
       // Initialize Multi-Step Task Plan if request describes a workflow or multiple steps
@@ -2706,6 +2615,11 @@ export default function App() {
       );
 
       const targetSession = chats.find((c) => c.id === chatId) || activeChat;
+      const contextRelevantMemory = retrieveRelevantMemories(
+        lastUserPrompt,
+        latestMemory || memory,
+        12
+      );
 
       // Build 7-Layer Smart Conversation Context (Parts 7–10)
       const smartCtx =
@@ -2715,7 +2629,7 @@ export default function App() {
               messages: historyMsgs,
               currentPrompt: lastUserPrompt,
               existingSummary: targetSession?.conversationSummary,
-              memoryFacts: latestMemory || memory,
+              memoryFacts: contextRelevantMemory,
               connections,
               serviceContext: targetSession?.serviceContext,
               activeTaskPlan,
@@ -2881,7 +2795,7 @@ export default function App() {
         // v18.11 personalization signals for the server-side system prompt.
         responseTone: settings.responseTone || 'friendly',
         codingPrefs: settings.codingPrefs || '',
-        memory: latestMemory || memory,
+        memory: contextRelevantMemory,
         autoMemory: settings.autoMemory !== false,
         includeHistory: settings.includeHistory !== false,
         activeWidgets: selfWidgets.map((w) => w.title),
@@ -4671,7 +4585,10 @@ export default function App() {
               setSettings({ ...DEFAULT_SETTINGS });
               showToast('Default settings restored ↺');
             }}
-            onUpdateMemory={(next) => setMemory(next)}
+            onUpdateMemory={(next) => {
+              memoryRef.current = next;
+              setMemory(next);
+            }}
             onClearMemory={() => {
               forgetAllMemory();
               showToast('Memory cleared');
@@ -6095,7 +6012,10 @@ export default function App() {
           setSettings({ ...DEFAULT_SETTINGS });
           showToast('Default settings restored ↺');
         }}
-        onUpdateMemory={(next) => setMemory(next)}
+        onUpdateMemory={(next) => {
+          memoryRef.current = next;
+          setMemory(next);
+        }}
         onClearMemory={() => {
           forgetAllMemory();
           showToast('Memory cleared');

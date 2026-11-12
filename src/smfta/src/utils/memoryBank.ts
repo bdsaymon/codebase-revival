@@ -216,34 +216,71 @@ export function factsToText(facts: MemoryFact[], limit = MEMORY_MAX): string[] {
 }
 
 /**
- * Compact, high-priority prompt block. Kept short (prompt budget!) and placed
- * at the very top of the system instruction by the server.
+ * Deduplicates facts by normalized text and by structured `key: value` prefix
+ * so obsolete or conflicting facts (e.g. older `নাম: ...` entries) never pollute prompts.
+ */
+export function deduplicateFactsList(facts: MemoryFact[]): MemoryFact[] {
+  const seenNorm = new Set<string>();
+  const seenKeys = new Set<string>();
+  const out: MemoryFact[] = [];
+  for (const fact of facts) {
+    const cleanText = (fact.text || '').replace(/^📌\s*/, '').trim();
+    if (!cleanText) continue;
+    const norm = normalizeFact(cleanText);
+    if (!norm || seenNorm.has(norm)) continue;
+    const key = factKey(cleanText);
+    const hasExplicitKeyValue = cleanText.includes(':') || cleanText.includes('—') || cleanText.includes('=');
+    if (hasExplicitKeyValue && key && seenKeys.has(key)) {
+      continue;
+    }
+    seenNorm.add(norm);
+    if (hasExplicitKeyValue && key) {
+      seenKeys.add(key);
+    }
+    out.push(fact);
+  }
+  return out;
+}
+
+/**
+ * Compact, context-aware prompt block. Filters facts against the current
+ * conversation topic (`activeQuery`) and prevents obsolete, duplicated, or
+ * conflicting facts from polluting the prompt.
  */
 export function buildMemoryPromptBlock(
   facts: MemoryFact[],
-  opts: { userName?: string; limit?: number; maxChars?: number } = {}
+  opts: { userName?: string; limit?: number; maxChars?: number; activeQuery?: string } = {}
 ): string {
   const limit = opts.limit ?? MEMORY_PROMPT_LIMIT;
   const maxChars = opts.maxChars ?? 1400;
-  const pinned = facts.filter((f) => f.pinned);
-  const ranked = [
-    ...pinned,
-    ...facts
-      .filter((f) => !f.pinned)
-      .slice()
-      .sort((a, b) => (b.hits || 0) - (a.hits || 0) || b.updatedAt - a.updatedAt),
-  ];
+  const deduped = deduplicateFactsList(facts);
+
+  let candidateTexts: string[];
+  if (typeof opts.activeQuery === 'string' && opts.activeQuery.trim().length > 0) {
+    candidateTexts = retrieveRelevantMemories(opts.activeQuery, deduped, limit);
+  } else {
+    const pinned = deduped.filter((f) => f.pinned);
+    const ranked = [
+      ...pinned,
+      ...deduped
+        .filter((f) => !f.pinned)
+        .slice()
+        .sort((a, b) => (b.hits || 0) - (a.hits || 0) || b.updatedAt - a.updatedAt),
+    ];
+    candidateTexts = ranked.slice(0, Math.min(limit, 12)).map((f) => f.text);
+  }
+
   const lines: string[] = [];
   let used = 0;
-  for (const fact of ranked.slice(0, limit)) {
-    const line = `- ${fact.text}`;
+  for (const text of candidateTexts.slice(0, limit)) {
+    const line = `- ${text}`;
     if (used + line.length + 1 > maxChars) continue;
     lines.push(line);
     used += line.length + 1;
   }
   if (lines.length === 0 && !opts.userName) return '';
   return (
-    `\nMEMORY (authoritative — the user told you these; recall them instantly and never claim you forgot):` +
+    `\nMEMORY (context-relevant user facts — use naturally when relevant):` +
     (opts.userName ? `\n- ইউজারের নাম: ${opts.userName}` : '') +
     (lines.length ? `\n${lines.join('\n')}` : '')
   );
@@ -375,6 +412,8 @@ export function isSensitiveFact(text: string): boolean {
 
 /**
  * Smart semantic & token relevance ranking to inject only pertinent memory facts into context.
+ * Deduplicates conflicting/duplicate facts and filters out unrelated facts that do not match
+ * the active conversation topic (unless pinned or core identity).
  */
 export function retrieveRelevantMemories(
   query: string,
@@ -382,48 +421,96 @@ export function retrieveRelevantMemories(
   limit = 8
 ): string[] {
   const q = (query || '').toLowerCase().trim();
-  const normalizedFacts = rawFacts.map((f) => {
-    if (typeof f === 'string') {
-      const isPinned = f.startsWith('📌 ');
-      return {
-        text: isPinned ? f.slice(3) : f,
-        pinned: isPinned,
-        raw: f,
-      };
+  const seenNorm = new Set<string>();
+  const seenKeys = new Set<string>();
+
+  const normalizedFacts: Array<{ text: string; pinned: boolean; raw: string; key: string }> = [];
+  for (const f of rawFacts) {
+    const rawStr = typeof f === 'string' ? f : f.pinned ? `📌 ${f.text}` : f.text;
+    const isPinned = typeof f === 'string' ? f.startsWith('📌 ') : Boolean(f.pinned) || f.text.startsWith('📌 ');
+    const cleanText = (typeof f === 'string' ? (isPinned ? f.slice(3) : f) : f.text.replace(/^📌\s*/, '')).trim();
+    if (!cleanText || isSensitiveFact(cleanText)) continue;
+
+    const norm = normalizeFact(cleanText);
+    if (!norm || seenNorm.has(norm)) continue;
+
+    const key = factKey(cleanText);
+    const hasExplicitKeyValue = cleanText.includes(':') || cleanText.includes('—') || cleanText.includes('=');
+    if (hasExplicitKeyValue && key && seenKeys.has(key)) {
+      continue;
     }
-    return {
-      text: f.text,
-      pinned: Boolean(f.pinned),
-      raw: f.pinned ? `📌 ${f.text}` : f.text,
-    };
-  });
+    seenNorm.add(norm);
+    if (hasExplicitKeyValue && key) {
+      seenKeys.add(key);
+    }
+
+    normalizedFacts.push({
+      text: cleanText,
+      pinned: isPinned,
+      raw: rawStr,
+      key,
+    });
+  }
 
   if (!q) {
-    // Return pinned facts followed by latest
     return normalizedFacts
       .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0))
       .slice(0, limit)
       .map((f) => f.raw);
   }
 
-  const qTokens = q.split(/[\s,।!?.]+/).filter((t) => t.length > 2);
+  const isExplicitMemoryQuery =
+    /(?:মনে|মেমোরি|memory|remember|know about me|আমার সম্পর্কে|who am i|what is my|আমার\s*(?:নাম|পেশা|শহর|দেশ|লক্ষ্য|পছন্দ|ব্যবসা))/i.test(
+      q
+    );
+  const coreIdentityKeys = new Set(['নাম', 'পেশা', 'ভাষা', 'name', 'profession', 'language', 'role']);
+  const stopWords = new Set([
+    'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one',
+    'our', 'out', 'day', 'get', 'has', 'him', 'his', 'how', 'man', 'new', 'now', 'old', 'see',
+    'two', 'way', 'who', 'boy', 'did', 'its', 'let', 'put', 'say', 'she', 'too', 'use', 'what',
+    'when', 'where', 'which', 'with', 'this', 'that', 'from', 'have', 'আমি', 'তুমি', 'আপনি',
+    'আমার', 'তোমার', 'কী', 'কি', 'কেন', 'কিভাবে', 'কখন', 'একটি', 'একটা', 'জন্য', 'এবং', 'করে', 'করো',
+  ]);
+  const qTokens = q
+    .split(/[\s,।!?.:;'"()[\]{}\-_/]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !stopWords.has(t));
 
   const scored = normalizedFacts.map((item) => {
-    let score = item.pinned ? 5 : 0;
+    let score = 0;
+    if (item.pinned) score += 6;
+    if (coreIdentityKeys.has(item.key)) score += 2;
+    if (isExplicitMemoryQuery) score += 4;
+
     const lower = item.text.toLowerCase();
-    if (lower.includes(q)) {
-      score += 10;
+    if (q.length >= 3 && lower.includes(q)) {
+      score += 12;
     }
     for (const t of qTokens) {
       if (lower.includes(t)) {
-        score += 2;
+        score += 4;
       }
     }
     return { item, score };
   });
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((s) => s.item.raw);
+  const relevant = scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return relevant.slice(0, limit).map((s) => s.item.raw);
+}
+
+/**
+ * Completely wipes both primary and backup memory keys from localStorage.
+ */
+export function clearEntireMemoryBank(): void {
+  try {
+    localStorage.removeItem('smfta_memory');
+    localStorage.removeItem('smfta_memory_backup');
+  } catch (e) {
+    console.warn('Failed to clear memory localStorage', e);
+  }
 }
 
 /**

@@ -183,14 +183,20 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     `\nLIVE PREVIEW RULE (v${APP_VERSION}): whenever the user asks for a website, page, UI, design, widget, game or any front-end code, reply with ONE complete standalone \`\`\`html document (doctype + inline CSS + inline JS, no build step, no external imports) OR incremental project files (\`\`\`html, \`\`\`css, \`\`\`js, \`\`\`ts, \`\`\`tsx, or ⟦FILE:path⟧...⟦/FILE⟧) so the app can run it live inside its sandboxed Full-Screen Live Preview Workspace and can be downloaded as a real .zip project from that preview. When modifying an existing website project, edit only the relevant files and preserve untouched files. Build it like a professional designer, not a placeholder: real copy in the user's language, a clear hierarchy (hero → content → call to action → footer), a consistent type scale and spacing system, tasteful colour used for meaning, responsive layout that works at 360px, keyboard focus states, and no lorem ipsum, no TODO comments and no broken images (use inline SVG or CSS shapes instead of external URLs).` +
     `\nOutput style: answer what was asked, complete but never padded; no preamble, no closing offers, never stop mid-answer. Start writing the answer immediately — the first token is the answer, not a plan.`;
 
-  // ★ MEMORY FIRST — the memory bank is placed immediately after the control
-  // protocol (top of prompt) so prompt truncation can never erase what the user
-  // told us. This is what makes recall survive across sessions.
+  // ★ CONTEXT-AWARE MEMORY — filter stored facts against the active conversation
+  // topic so only relevant, non-conflicting facts are injected into the prompt.
+  const activeQuery = (opts.recentTranscript || [])
+    .filter((m) => m.role === 'user')
+    .slice(-2)
+    .map((m) => m.content || '')
+    .join(' ')
+    .trim();
   const memoryBank = migrateMemory(opts.memory || []).facts;
   const memoryFirstBlock = buildMemoryPromptBlock(memoryBank, {
     userName: opts.userName,
-    limit: 60,
-    maxChars: 1100,
+    limit: 10,
+    maxChars: 900,
+    activeQuery,
   });
 
   let prompt =
@@ -301,12 +307,7 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
       .join('\n---\n');
     prompt += `\nRETRAINED MODEL WEIGHTS & DOMAIN KNOWLEDGE:\n${formattedExamples}`;
   }
-  if (opts.memory && opts.memory.length > 0) {
-    // Newest / most-used facts first (the client ranks them before sending).
-    prompt += `\nUSER MEMORY — FULL BANK (${opts.memory.length} facts; use silently to personalize & recall; NEVER say you forgot):\n- ${opts.memory
-      .slice(0, 150)
-      .join('\n- ')}`;
-  }
+  // Note: Context-relevant memory facts are already injected via memoryFirstBlock above.
   if (opts.chatHistorySummary && opts.chatHistorySummary.trim()) {
     prompt += `\nPREVIOUS CHAT SESSIONS SUMMARY (RECALL WHEN USER ASKS ABOUT EARLIER CHATS):\n${opts.chatHistorySummary.trim()}`;
   }

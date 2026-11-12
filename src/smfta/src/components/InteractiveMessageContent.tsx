@@ -784,9 +784,9 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
               data-testid="thinking-accordion-toggle"
               aria-expanded={isThinkingExpanded}
               onClick={() => setIsThinkingExpanded((prev) => !prev)}
-              className="w-full flex items-center justify-between gap-2.5 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
+              className="w-full min-w-0 flex items-center justify-between gap-2 text-xs sm:text-[13px] font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
             >
-              <span className="flex items-center gap-2 min-w-0">
+              <span className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
                 <Brain
                   className={`w-3.5 h-3.5 text-pink-400 shrink-0 ${
                     isReasoningNow ? 'animate-pulse' : ''
@@ -799,7 +799,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                 />
                 <span
                   data-testid="thinking-accordion-headline"
-                  className="truncate font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(139,92,246,0.45)]"
+                  className="truncate text-left font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(139,92,246,0.45)]"
                 >
                   {thinkingHeadline}
                 </span>

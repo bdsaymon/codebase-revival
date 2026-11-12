@@ -68,10 +68,15 @@ const WORLD_TASK_TOPIC =
   /(গল্প|কবিতা|রচনা|প্রবন্ধ|চিঠি|দরখাস্ত|আর্টিকেল|প্যারাগ্রাফ|অনুবাদ|পাইথন|জাভাস্ক্রিপ্ট|ফাংশন|প্রোগ্রাম|স্ক্রিপ্ট|অ্যালগরিদম|সমীকরণ|রান্না|ইতিহাস|বিজ্ঞান|ভূগোল|রাজধানী|আবহাওয়া|খবর|্র ক্রিকেট|ফুটবল|জীবনী|story|poem|essay|article|letter|translate|python|javascript|react|function|algorithm|equation|recipe|history|science|capital|weather|news|biography)/i;
 
 /**
- * Is this question about the assistant itself (rather than the world)?
- * Deliberately strict — we only short-circuit questions we can answer exactly.
+ * Local self-question interception is disabled so all conversational queries
+ * (e.g. "তোমাকে কখন update করা হয়েছে?", "what is your version?", "who made you?")
+ * are routed directly to the active AI provider/model stream.
  */
-export function isSelfQuestion(query: string): boolean {
+export function isSelfQuestion(_query: string): boolean {
+  return false;
+}
+
+export function matchesSelfTopic(query: string): boolean {
   const q = norm(query);
   if (!q || q.length > 220) return false;
   if (WORLD_TASK_TOPIC.test(q) && !/(তোমাকে|নিজেকে|তোমার সিস্টেম|your system|zip|জিপ)/.test(q)) {
@@ -255,14 +260,15 @@ function buildHowTo(q: string, ctx: SelfAnswerContext): string | null {
 }
 
 /**
- * A **relevant** answer for a self/system question, or `null` when the question
- * is about something else (so the real model handles it).
+ * Local answer interception is disabled for live queries — returns `null` unless
+ * explicitly invoked in offline fallback mode (`ctx.online === false`).
  */
 export function buildSelfAnswer(ctx: SelfAnswerContext): string | null {
+  if (ctx.online !== false) return null;
   const query = ctx.query || '';
   const q = norm(query);
   if (!q) return null;
-  if (!isSelfQuestion(query)) return null;
+  if (!matchesSelfTopic(query)) return null;
 
   const bn = isBengali(query);
   const has = (...w: string[]) => w.some((x) => q.includes(x));

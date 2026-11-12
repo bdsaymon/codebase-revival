@@ -1,185 +1,159 @@
-/**
- * SettingsHub — Claude-style professional settings surface (v18.12).
- *
- * Eight focused sections with a quiet left navigation and a single content
- * panel: General · Appearance · AI Providers · Chat · Privacy & Data ·
- * Cloud Connectors · AI Permissions · Account.
- *
- * Design rules:
- * - small heading + one-line description per card, controls on the right
- * - no duplicated options, no giant paragraphs, no dead toggles
- * - every control writes through `onSave` immediately, so a refresh keeps it
- * - Cancel restores the opening snapshot; Save closes; Reset restores defaults
- * - legacy deep-link ids (engine/tune/data/self/…) still resolve via normalizeTab
- */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  AlertTriangle,
-  ArrowLeft,
-  Bell,
-  Bot,
-  CheckCircle2,
+  Check,
   ChevronDown,
   ChevronRight,
-  Cloud,
-  Download,
-  Edit3,
+  Cpu,
   Eye,
   EyeOff,
-  KeyRound,
+  Globe,
+  Key,
+  Layers,
   Loader2,
-  Lock,
-  LogOut,
   Moon,
-  Sun,
-  Languages,
-  MessageSquare,
-  Palette,
-  Pin,
-  PinOff,
   Plus,
   RefreshCw,
-  RotateCcw,
-  Save,
-  Search,
-  Server,
-  Settings as SettingsIcon,
-  ShieldCheck,
-  SlidersHorizontal,
+  Shield,
+  Sliders,
   Sparkles,
+  Sun,
   Trash2,
-  Upload,
-  User,
-  Wrench,
   X,
-  Zap,
 } from 'lucide-react';
 import {
-  addManualMemoryFact,
-  updateMemoryFact,
-  deleteMemoryFact,
-  toggleMemoryPin,
-  searchMemoryFacts,
-} from '../utils/memoryBank';
-import {
   AppSettings,
+  AutonomyLevel,
+  ConnectionsState,
   ExternalProviderId,
-  NotebookNote,
+  NotebookEntry,
   ProviderTestStatus,
   SavedProviderProfile,
+  SelfSkill,
   SelfUpdateWidget,
   UserProfile,
 } from '../types';
-import { VaultConnections } from '../utils/cloudVault';
-import {
-  AutonomyLevel,
-  SelfSkill,
-  runSelfCheck,
-} from '../utils/selfEngine';
-import { VaultConnectionsPanel } from './VaultConnectionsPanel';
 import { sanitizeSettings } from '../utils/settings';
 import {
-  BUILTIN_TIERS,
   DEFAULT_BUILTIN_PROFILE,
   DEFAULT_PROVIDER_BASE_URLS,
   DEFAULT_PROVIDER_MODELS,
   PROVIDER_CATALOG,
   PROVIDER_GROUP_LABELS,
   ProviderGroup,
-  builtinTierLabel,
+  QUICK_PROVIDER_CHIPS,
   detectProviderFromKey,
   getInitialProviderProfiles,
   getModelsForProfile,
   isBuiltinProviderId,
   isKeylessProviderId,
-  maskKey,
   persistSavedProfiles,
   providerEntry,
 } from '../utils/providers';
-import {
-  PRIMARY_PROVIDER_OPTIONS,
-  QUICK_PROVIDER_CHIPS,
-} from '../data/providerCatalog';
+import { PRIMARY_PROVIDER_OPTIONS } from '../data/providerCatalog';
 import {
   fetchProviderModelsClientSide,
   isStandaloneApkEnv,
   testProviderClientSide,
 } from '../utils/apkClientFallback';
-import { playNotifChime } from '../utils/notify';
-import { useAuth } from '../context/AuthContext';
-import { APP_VERSION } from '../version';
 import {
-  TOOL_CAPABILITY_REGISTRY,
-  WORKSPACE_RUNTIME_CAPABILITIES,
-  isToolEnabled,
-} from '../utils/capabilityRegistry';
-import { SETTINGS_SCHEMA_VERSION } from '../utils/settings';
+  addManualMemoryFact,
+  clearEntireMemoryBank,
+  deleteMemoryFact,
+} from '../utils/memoryBank';
 
-/** Legacy deep-link ids accepted by callers (App.tsx, command palette). */
-export type SettingsTabId =
-  | 'general'
-  | 'appearance'
-  | 'engine'
-  | 'tune'
-  | 'performance'
-  | 'data'
-  | 'account'
-  | 'connections'
-  | 'self'
-  | 'voice'
-  | 'accessibility'
-  | 'advanced'
-  | 'about';
-
-/** Settings sections (v19.0.0 complete system settings). */
-export type SectionId =
-  | 'general'
-  | 'appearance'
-  | 'providers'
-  | 'performance'
-  | 'chat'
-  | 'privacy'
-  | 'connectors'
-  | 'permissions'
-  | 'accessibility'
-  | 'advanced'
-  | 'account';
-
-function normalizeTab(tabId?: SettingsTabId | SectionId | string): SectionId {
-  const map: Record<string, SectionId> = {
-    general: 'general',
-    appearance: 'appearance',
-    engine: 'providers',
-    tune: 'providers',
-    providers: 'providers',
-    models: 'providers',
-    performance: 'performance',
-    chat: 'chat',
-    data: 'privacy',
-    privacy: 'privacy',
-    security: 'privacy',
-    memory: 'privacy',
-    connections: 'connectors',
-    integrations: 'connectors',
-    self: 'permissions',
-    automation: 'permissions',
-    permissions: 'permissions',
-    accessibility: 'accessibility',
-    advanced: 'advanced',
-    account: 'account',
-    about: 'account',
-    usage: 'account',
-    notifications: 'chat',
-    personalization: 'general',
-    voice: 'general',
-  };
-  return (tabId && map[tabId]) || 'general';
+function maskApiKey(key?: string): string {
+  const k = (key || '').trim();
+  if (!k) return '';
+  if (k.length <= 8) return '••••••••';
+  return `${k.slice(0, 4)}••••${k.slice(-4)}`;
 }
 
+export type SettingsTabId =
+  | 'providers'
+  | 'general'
+  | 'privacy'
+  | 'memory'
+  // Legacy aliases mapped cleanly into the 3 core tabs
+  | 'account'
+  | 'appearance'
+  | 'ai'
+  | 'personalization'
+  | 'shortcuts'
+  | 'notifications'
+  | 'accessibility'
+  | 'data'
+  | 'integrations'
+  | 'performance'
+  | 'security'
+  | 'about'
+  | 'profile'
+  | 'engine'
+  | 'weights'
+  | 'connectors'
+  | 'self'
+  | 'upgrade';
+
+type SectionId = 'providers' | 'general' | 'privacy';
+
+const SECTION_ORDER: SectionId[] = ['providers', 'general', 'privacy'];
+
+const SECTION_META: Record<
+  SectionId,
+  {
+    label: string;
+    labelBn: string;
+    icon: React.ComponentType<{ className?: string }>;
+    hint: string;
+  }
+> = {
+  providers: {
+    label: 'AI Providers',
+    labelBn: 'AI প্রোভাইডার ও মডেল',
+    icon: Cpu,
+    hint: 'Mercury, Gemini, OpenAI, Anthropic & Custom API',
+  },
+  general: {
+    label: 'General & Appearance',
+    labelBn: 'সাধারণ ও থিম',
+    icon: Sliders,
+    hint: 'Theme, language & AI system persona',
+  },
+  privacy: {
+    label: 'Memory & Privacy',
+    labelBn: 'মেমোরি ও প্রাইভেসি',
+    icon: Shield,
+    hint: 'Auto-memory toggle, saved facts & full reset',
+  },
+};
+
+function normalizeTab(t?: SettingsTabId): SectionId {
+  switch (t) {
+    case 'providers':
+    case 'engine':
+    case 'ai':
+    case 'weights':
+    case 'performance':
+      return 'providers';
+    case 'privacy':
+    case 'memory':
+    case 'data':
+    case 'security':
+      return 'privacy';
+    case 'general':
+    case 'appearance':
+    case 'personalization':
+    case 'account':
+    case 'profile':
+    default:
+      return 'general';
+  }
+}
 
 export interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: SettingsTabId;
+  variant?: 'modal' | 'inline';
   profile: UserProfile;
   settings: AppSettings;
   memory: string[];
@@ -187,10 +161,9 @@ export interface SettingsModalProps {
   onUpdateProfiles?: (profiles: SavedProviderProfile[]) => void;
   onSelectProfile?: (profile: SavedProviderProfile) => void;
   onSave: (newProfile: UserProfile, newSettings: AppSettings) => void;
-  onProviderTestResult?: (status: ProviderTestStatus) => void;
   onResetSettings?: () => void;
-  onClearMemory: () => void;
   onUpdateMemory?: (next: string[]) => void;
+  onClearMemory: () => void;
   onExportBackup: () => void;
   onImportBackup: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onSaveRollbackPoint?: () => void;
@@ -198,298 +171,97 @@ export interface SettingsModalProps {
   hasRollbackPoint?: boolean;
   onClearAllData: () => void;
   onOpenWhatsNew: () => void;
-  initialTab?: SettingsTabId;
-  isInline?: boolean;
-  connections?: VaultConnections;
-  onUpdateConnections?: (next: VaultConnections) => void;
-  notes?: NotebookNote[];
+  connections?: ConnectionsState;
+  onUpdateConnections?: (next: ConnectionsState) => void;
+  notes?: NotebookEntry[];
   onOpenNotebook?: () => void;
   selfWidgets?: SelfUpdateWidget[];
   onUpdateWidgets?: (next: SelfUpdateWidget[]) => void;
-  onOpenWidget?: (widget: SelfUpdateWidget) => void;
+  onOpenWidget?: (w: SelfUpdateWidget) => void;
   notify?: (msg: string) => void;
-  onBackupToGithub?: () => void | Promise<void>;
+  onBackupToGithub?: () => void;
   skills?: SelfSkill[];
   onUpdateSkills?: (next: SelfSkill[]) => void;
   autonomy?: AutonomyLevel;
-  onAutonomyChange?: (level: AutonomyLevel) => void;
+  onAutonomyChange?: (next: AutonomyLevel) => void;
   onSelfRepair?: () => void;
-  onOpenSkill?: (skill: SelfSkill) => void;
+  onProviderTestResult?: (status: ProviderTestStatus) => void;
   keystoreEphemeral?: boolean;
-  usageToday?: number;
+  usageToday?: { date: string; requests: number; chars: number };
+  onOpenSkill?: (skill: SelfSkill) => void;
 }
 
-// ── Compact, reusable Claude-style primitives ──────────────────────────────
+const Card: React.FC<{
+  title: string;
+  description?: string;
+  icon?: React.ReactNode;
+  rightSlot?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ title, description, icon, rightSlot, children }) => (
+  <section className="cs-card rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+    <header className="flex items-start justify-between gap-3 pb-3 mb-3 border-b border-[var(--border)]">
+      <div className="flex items-start gap-2.5 min-w-0">
+        {icon ? (
+          <span className="mt-0.5 text-[var(--primary)] shrink-0">{icon}</span>
+        ) : null}
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-[var(--text)]">{title}</h3>
+          {description ? (
+            <p className="text-xs text-[var(--text-3)] mt-0.5">{description}</p>
+          ) : null}
+        </div>
+      </div>
+      {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
+    </header>
+    <div>{children}</div>
+  </section>
+);
 
 const ToggleRow: React.FC<{
   label: string;
   description?: string;
   checked: boolean;
   onChange: (next: boolean) => void;
-  disabled?: boolean;
-}> = ({ label, description, checked, onChange, disabled }) => (
-  <div className="cs-row">
-    <div className="cs-row-info">
-      <span className={`cs-label ${disabled ? 'opacity-50' : ''}`}>{label}</span>
-      {description && <span className="cs-desc">{description}</span>}
-    </div>
-    <label className={`toggle-switch ${disabled ? 'opacity-50' : ''}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className="slider" />
-    </label>
-  </div>
-);
-
-const SelectRow: React.FC<{
-  label: string;
-  description?: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-}> = ({ label, description, value, options, onChange }) => (
-  <div className="cs-row">
-    <div className="cs-row-info">
-      <span className="cs-label">{label}</span>
-      {description && <span className="cs-desc">{description}</span>}
-    </div>
-    <select
-      className="cs-select"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  </div>
-);
-
-const TextRow: React.FC<{
-  label: string;
-  description?: string;
-  value: string;
-  placeholder?: string;
-  type?: string;
-  maxLength?: number;
-  mono?: boolean;
-  onChange: (value: string) => void;
-}> = ({ label, description, value, placeholder, type = 'text', maxLength, mono, onChange }) => (
-  <div className="cs-row cs-row-column">
-    <div className="cs-row-info">
-      <span className="cs-label">{label}</span>
-      {description && <span className="cs-desc">{description}</span>}
-    </div>
-    <input
-      type={type}
-      className={`cs-input ${mono ? 'font-mono' : ''}`}
-      value={value}
-      placeholder={placeholder}
-      maxLength={maxLength}
-      onChange={(e) => onChange(e.target.value)}
-    />
-  </div>
-);
-
-const SliderRow: React.FC<{
-  label: string;
-  description?: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format?: (v: number) => string;
-  onChange: (value: number) => void;
-}> = ({ label, description, value, min, max, step, format, onChange }) => (
-  <div className="cs-row">
-    <div className="cs-row-info">
-      <span className="cs-label">{label}</span>
-      {description && <span className="cs-desc">{description}</span>}
-    </div>
-    <div className="cs-slider-wrap">
-      <input
-        type="range"
-        className="cs-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      <span className="cs-slider-value">
-        {format ? format(value) : value}
-      </span>
-    </div>
-  </div>
-);
-
-const SegmentedRow: React.FC<{
-  label: string;
-  description?: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-}> = ({ label, description, value, options, onChange }) => (
-  <div className="cs-row cs-row-column">
-    <div className="cs-row-info">
-      <span className="cs-label">{label}</span>
-      {description && <span className="cs-desc">{description}</span>}
-    </div>
-    <div className="cs-segmented">
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          className={value === o.value ? 'active' : ''}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
-const Card: React.FC<{
-  title: string;
-  description?: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, description, icon, children }) => (
-  <section className="cs-card">
-    <header className="cs-card-head">
-      {icon && <span className="cs-card-icon">{icon}</span>}
-      <div>
-        <h3>{title}</h3>
-        {description && <p>{description}</p>}
+  testId?: string;
+}> = ({ label, description, checked, onChange, testId }) => (
+  <div className="flex items-center justify-between gap-4 py-2">
+    <div className="min-w-0">
+      <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
+        {label}
       </div>
-    </header>
-    <div className="cs-card-body">{children}</div>
-  </section>
+      {description ? (
+        <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
+          {description}
+        </div>
+      ) : null}
+    </div>
+    <button
+      type="button"
+      role="switch"
+      data-testid={testId}
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors ${
+        checked
+          ? 'bg-[var(--primary)] border-[var(--primary)]'
+          : 'bg-[var(--surface-2)] border-[var(--border)]'
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-1'
+        }`}
+      />
+    </button>
+  </div>
 );
-
-type ProviderUiStatus = 'Connected' | 'Failed' | 'Disabled' | 'Not Tested';
-
-function describeProviderStatus(prof: SavedProviderProfile): ProviderUiStatus {
-  if (prof.enabled === false) return 'Disabled';
-  if (prof.verificationStatus === 'verified' || prof.verified === true) {
-    return 'Connected';
-  }
-  if (
-    prof.verificationStatus === 'failed' ||
-    prof.verificationStatus === 'degraded' ||
-    (prof.verified === false && prof.lastTestedAt)
-  ) {
-    return 'Failed';
-  }
-  if (
-    prof.verificationStatus === 'untested' ||
-    prof.verificationStatus === 'stale' ||
-    !prof.lastTestedAt
-  ) {
-    return 'Not Tested';
-  }
-  if (isBuiltinProviderId(prof.provider)) return 'Connected';
-  if (!prof.externalKeys && !isKeylessProviderId(prof.provider)) return 'Disabled';
-  return 'Not Tested';
-}
-
-const SECTION_META: Record<
-  SectionId,
-  { label: string; hint: string; keywords: string; icon: React.ReactNode }
-> = {
-  general: {
-    label: 'General',
-    hint: 'Language, profile and response defaults',
-    keywords: 'general সাধারণ ভাষা language profile name persona voice speech send enter conversation',
-    icon: <SettingsIcon className="w-4 h-4" />,
-  },
-  appearance: {
-    label: 'Appearance',
-    hint: 'Theme, color, typography and layout',
-    keywords: 'appearance থিম theme dark light accent font radius density motion css spacing code',
-    icon: <Palette className="w-4 h-4" />,
-  },
-  providers: {
-    label: 'AI Providers',
-    hint: 'Providers, keys, models and testing',
-    keywords: 'provider এপিআই api key secret model মডেল groq gemini openai test temperature token context',
-    icon: <Server className="w-4 h-4" />,
-  },
-  performance: {
-    label: 'Responses',
-    hint: 'Speed modes, streaming, tokens, retries and fallback',
-    keywords: 'performance response fast balanced quality streaming token timeout retry fallback latency',
-    icon: <Zap className="w-4 h-4" />,
-  },
-  chat: {
-    label: 'Chat',
-    hint: 'History, streaming, composer and alerts',
-    keywords: 'chat চ্যাট history streaming markdown scroll timestamp notification upload search',
-    icon: <MessageSquare className="w-4 h-4" />,
-  },
-  privacy: {
-    label: 'Privacy & Data',
-    hint: 'Memory, retention, backups and reset',
-    keywords: 'privacy প্রাইভেসি data memory retention backup export import reset delete encryption keystore',
-    icon: <Lock className="w-4 h-4" />,
-  },
-  connectors: {
-    label: 'Connections',
-    hint: 'Google Drive, GitHub and cloud sync',
-    keywords: 'cloud connector drive github sync কানেক্ট integration vault',
-    icon: <Cloud className="w-4 h-4" />,
-  },
-  permissions: {
-    label: 'Tools & Permissions',
-    hint: 'Autonomy, tool permissions and self-control',
-    keywords: 'permission autonomy authority retry timeout skill widget self repair capability gpu tools',
-    icon: <ShieldCheck className="w-4 h-4" />,
-  },
-  accessibility: {
-    label: 'Accessibility',
-    hint: 'Contrast, focus rings, touch targets and readability',
-    keywords: 'accessibility contrast focus ring keyboard touch target screen reader unicode',
-    icon: <Eye className="w-4 h-4" />,
-  },
-  advanced: {
-    label: 'Advanced',
-    hint: 'Streaming diagnostics, capability registry and schema',
-    keywords: 'advanced diagnostics debug capability registry runtime sandbox schema',
-    icon: <SlidersHorizontal className="w-4 h-4" />,
-  },
-  account: {
-    label: 'Profile & About',
-    hint: 'Profile, usage and app version',
-    keywords: 'profile avatar usage about version',
-    icon: <User className="w-4 h-4" />,
-  },
-};
-
-const SECTION_ORDER: SectionId[] = [
-  'general',
-  'appearance',
-  'providers',
-  'performance',
-  'chat',
-  'privacy',
-  'connectors',
-  'permissions',
-  'accessibility',
-  'advanced',
-  'account',
-];
-
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
+  initialTab,
+  variant = 'modal',
   profile,
   settings,
   memory,
@@ -497,109 +269,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateProfiles,
   onSelectProfile,
   onSave,
-  onProviderTestResult,
-  onResetSettings,
-  onClearMemory,
   onUpdateMemory,
-  onExportBackup,
-  onImportBackup,
-  onSaveRollbackPoint,
-  onRollback,
-  hasRollbackPoint,
-  onClearAllData,
-  onOpenWhatsNew,
-  initialTab = 'general',
-  isInline = false,
-  connections,
-  onUpdateConnections,
-  notes = [],
-  onOpenNotebook,
-  selfWidgets = [],
-  onUpdateWidgets,
-  onOpenWidget,
+  onClearMemory,
   notify,
-  onBackupToGithub,
-  skills = [],
-  onUpdateSkills,
-  autonomy = 'full',
-  onAutonomyChange,
-  onSelfRepair,
-  onOpenSkill,
-  keystoreEphemeral = false,
-  usageToday = 0,
+  onProviderTestResult,
 }) => {
-  const auth = useAuth();
+  const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
-  const [navQuery, setNavQuery] = useState('');
-  const [mobileNavOpen, setMobileNavOpen] = useState(true);
 
-  const [confirmClearAll, setConfirmClearAll] = useState(false);
-  const [confirmClearMemory, setConfirmClearMemory] = useState(false);
-  const [memorySearchQuery, setMemorySearchQuery] = useState('');
-  const [newMemoryFact, setNewMemoryFact] = useState('');
-  const [editingFactIndex, setEditingFactIndex] = useState<number | null>(null);
-  const [editingFactText, setEditingFactText] = useState('');
-  const [memoryError, setMemoryError] = useState<string | null>(null);
   useEffect(() => {
-    if (!confirmClearAll) return;
-    const t = window.setTimeout(() => setConfirmClearAll(false), 4000);
-    return () => window.clearTimeout(t);
-  }, [confirmClearAll]);
-  useEffect(() => {
-    if (!confirmClearMemory) return;
-    const t = window.setTimeout(() => setConfirmClearMemory(false), 4000);
-    return () => window.clearTimeout(t);
-  }, [confirmClearMemory]);
-
-  // ── Notification capability (honest browser probing) ─────────────────────
-  const ttsSupported =
-    typeof window !== 'undefined' && 'speechSynthesis' in window;
-  const notifSupport =
-    typeof window !== 'undefined' && 'Notification' in window;
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
-    () =>
-      typeof window !== 'undefined' && 'Notification' in window
-        ? Notification.permission
-        : 'denied'
-  );
-  useEffect(() => {
-    if (!isOpen && !isInline) return;
-    if (notifSupport) setNotifPermission(Notification.permission);
-    setMobileNavOpen(true);
-    setTab(normalizeTab(initialTab));
-    setNavQuery('');
-  }, [isOpen, isInline, initialTab, notifSupport]);
-
-  const requestNotifPermission = async () => {
-    if (!notifSupport) return;
-    try {
-      if (Notification.permission === 'denied') {
-        notify?.('Notifications blocked — enable them in browser site settings.');
-        return;
-      }
-      const result = await Notification.requestPermission();
-      setNotifPermission(result);
-      if (result === 'granted') {
-        patch({ notifEnabled: true });
-        notify?.('Browser notifications enabled.');
-      }
-    } catch {
-      notify?.('Could not request notification permission.');
-    }
-  };
-
-  const sendTestNotification = () => {
-    if (!notifSupport || Notification.permission !== 'granted') {
-      notify?.('Allow notification permission first.');
-      return;
-    }
-    try {
-      new Notification('SMFTA AI', { body: 'Notifications are working.' });
-      if (draft.notifSound) playNotifChime();
-    } catch {
-      notify?.('Test notification failed.');
-    }
-  };
+    if (initialTab) setTab(normalizeTab(initialTab));
+  }, [initialTab]);
 
   const [draft, setDraft] = useState<AppSettings>(() => sanitizeSettings(settings));
   const [profileName, setProfileName] = useState(profile.name || '');
@@ -610,7 +290,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         : getInitialProviderProfiles(settings)
   );
 
-  // New-provider form state (Default Mercury -> mercury-3)
+  // Provider configuration form state (Default Mercury -> mercury-3)
   const [newPropName, setNewPropName] = useState('');
   const [newProviderId, setNewProviderId] = useState<ExternalProviderId>('mercury');
   const [newApiKey, setNewApiKey] = useState('');
@@ -635,13 +315,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [revealedKeyIds, setRevealedKeyIds] = useState<Record<string, boolean>>({});
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
 
-  // Account password change
-
-  const initialSnapshotRef = React.useRef<{
-    settings: AppSettings;
-    profileName: string;
-    profiles: SavedProviderProfile[];
-  } | null>(null);
+  // Memory & Privacy state
+  const [newMemoryFact, setNewMemoryFact] = useState('');
+  const [confirmingClearMemory, setConfirmingClearMemory] = useState(false);
 
   useEffect(() => {
     if (!isOpen && !isInline) return;
@@ -653,26 +329,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDraft(cleanSettings);
     setProfileName(profile.name || '');
     setLocalProfiles(initialProfiles);
-    initialSnapshotRef.current = {
-      settings: cleanSettings,
-      profileName: profile.name || 'Boss',
-      profiles: initialProfiles.map((p) => ({ ...p })),
-    };
+    setConfirmingClearMemory(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isInline]);
-
-  const filteredSections = useMemo(() => {
-    const q = navQuery.trim().toLowerCase();
-    if (!q) return SECTION_ORDER;
-    return SECTION_ORDER.filter((id) => {
-      const meta = SECTION_META[id];
-      return (
-        meta.label.toLowerCase().includes(q) ||
-        meta.keywords.toLowerCase().includes(q) ||
-        meta.hint.toLowerCase().includes(q)
-      );
-    });
-  }, [navQuery]);
 
   if (!isOpen && !isInline) return null;
 
@@ -680,14 +339,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setLocalProfiles(nextList);
     persistSavedProfiles(nextList);
     onUpdateProfiles?.(nextList);
-    if (initialSnapshotRef.current) {
-      initialSnapshotRef.current.profiles = nextList.map((p) => ({ ...p }));
-    }
   };
 
   const commit = (nextSettings: AppSettings, nextName: string = profileName) => {
     const clean = sanitizeSettings(nextSettings);
     setDraft(clean);
+    try {
+      localStorage.setItem('smfta_settings', JSON.stringify(clean));
+    } catch {
+      // ignore storage errors
+    }
     onSave({ name: nextName.trim() || 'Boss' }, clean);
   };
 
@@ -718,11 +379,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalKeys: prof.externalKeys,
       externalModel: prof.externalModel,
       externalBaseUrl: prof.externalBaseUrl,
+      customHeaders: prof.customHeaders,
     });
     commit(nextSettings);
-    if (initialSnapshotRef.current) {
-      initialSnapshotRef.current.settings = nextSettings;
-    }
   };
 
   const updateSavedProfileField = (
@@ -734,9 +393,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         'externalKeys' in changes ||
         'externalModel' in changes ||
         'externalBaseUrl' in changes ||
-        'contextWindow' in changes ||
-        'maxOutputTokens' in changes ||
-        'supportsStreaming' in changes) &&
+        'customHeaders' in changes) &&
       !('verified' in changes);
     const nextList = localProfiles.map((p) =>
       p.id === id
@@ -764,6 +421,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalKeys: updated.externalKeys,
         externalModel: updated.externalModel,
         externalBaseUrl: updated.externalBaseUrl,
+        customHeaders: updated.customHeaders,
       });
     }
   };
@@ -1004,7 +662,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return ['mercury-3', 'mercury', 'mercury-coder'];
     }
     if (providerId !== 'custom') {
-      return QUICK_PROVIDER_CHIPS[providerId] || [DEFAULT_PROVIDER_MODELS[providerId]].filter(Boolean);
+      return (
+        QUICK_PROVIDER_CHIPS[providerId] ||
+        [DEFAULT_PROVIDER_MODELS[providerId]].filter(Boolean)
+      );
     }
     const u = (baseUrl || '').toLowerCase();
     const k = (apiKey || '').toLowerCase();
@@ -1062,7 +723,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       discoveredModels[0] ||
       starterModels[0] ||
       DEFAULT_PROVIDER_MODELS[newProviderId] ||
-      'gpt-4o-mini'
+      'mercury-3'
     ).trim();
 
     const mergedModels = Array.from(
@@ -1105,9 +766,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       customHeaders: newProfile.customHeaders,
     });
     commit(nextSettings);
-    if (initialSnapshotRef.current) {
-      initialSnapshotRef.current.settings = nextSettings;
-    }
     setNewVerifyResult({
       ok: true,
       workingModel,
@@ -1118,7 +776,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setNewCustomHeaders('');
     setShowNewKey(false);
     setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
-    setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || '');
+    setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || 'mercury-3');
     notify?.(`Saved & activated "${cleanName}" (${workingModel})`);
   };
 
@@ -1210,7 +868,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           setDiscoveredModels(fetchedModels);
         }
         const msgText =
-          testData?.message || testData?.error ||
+          testData?.message ||
+          testData?.error ||
           'Verification failed. Check API Key, Base URL or quota. Provider was NOT added.';
         const suggestionSuffix =
           Array.isArray(testData?.suggestedModels) &&
@@ -1235,23 +894,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         newModel.trim() ||
         fetchedModels[0] ||
         DEFAULT_PROVIDER_MODELS[newProviderId] ||
-        ''
+        'mercury-3'
       ).trim();
-      if (!workingModel) {
-        // Never invent a model id: require a discovered or explicitly typed one.
-        setNewVerifyResult({
-          ok: false,
-          message:
-            'Model ID required — fetch the model list or type a valid model ID. Provider was NOT added.',
-        });
-        onProviderTestResult?.({
-          ok: false,
-          message: 'Model ID required before adding provider',
-          testedAt: Date.now(),
-          provider: newProviderId,
-        });
-        return;
-      }
       const mergedModels = Array.from(
         new Set(
           [workingModel, newModel.trim(), ...fetchedModels, ...discoveredModels]
@@ -1299,9 +943,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         customHeaders: newProfile.customHeaders,
       });
       commit(nextSettings);
-      if (initialSnapshotRef.current) {
-        initialSnapshotRef.current.settings = nextSettings;
-      }
       setNewVerifyResult({
         ok: true,
         workingModel,
@@ -1319,7 +960,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewCustomHeaders('');
       setShowNewKey(false);
       setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
-      setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || '');
+      setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || 'mercury-3');
       setDiscoveredModels([]);
       setDiscoveryWarning(null);
     } catch (err: unknown) {
@@ -1330,59 +971,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleAvatarPick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.type)) {
-      notify?.('Avatar must be a PNG, JPEG, WebP or GIF image.');
-      return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      notify?.('Avatar image is too large (max 2MB).');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '');
-      if (dataUrl.length > 115_000) {
-        notify?.('Image is too detailed — pick a smaller one.');
-        return;
-      }
-      patch({ avatarDataUrl: dataUrl });
-      notify?.('Avatar updated.');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDiscardAndClose = () => {
-    const snap = initialSnapshotRef.current;
-    if (snap) {
-      setDraft(snap.settings);
-      setProfileName(snap.profileName);
-      syncProfiles(snap.profiles);
-      onSave({ name: snap.profileName }, snap.settings);
-    }
-    onClose();
-  };
-
-  const handleSaveAndClose = () => {
-    commit(draft, profileName);
-    initialSnapshotRef.current = {
-      settings: sanitizeSettings(draft),
-      profileName: profileName.trim() || 'Boss',
-      profiles: localProfiles.map((p) => ({ ...p })),
-    };
-    onClose();
-  };
-
-  const handleResetDefaults = () => {
-    onResetSettings?.();
-    setDraft(sanitizeSettings({}));
-    notify?.('Default settings restored.');
-  };
-
-  // Offer discovered models or standard popular starter models for Custom API
+  // Offer discovered models or standard popular starter models
   const popularStarterModels = getPopularStarterModels(
     newProviderId,
     newBaseUrl,
@@ -1393,404 +982,77 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
   const detectedProviderFromNewKey = detectProviderFromKey(newApiKey);
 
-  const storedKeyCount =
-    (draft.externalKeys ? 1 : 0) +
-    localProfiles.filter((p) => Boolean(p.externalKeys)).length;
-
-  const openSection = (id: SectionId) => {
-    setTab(id);
-    setMobileNavOpen(false);
+  // Memory handlers
+  const handleAddMemoryItem = () => {
+    const res = addManualMemoryFact(memory, newMemoryFact);
+    if (res.error) {
+      notify?.(res.error);
+      return;
+    }
+    onUpdateMemory?.(res.updated);
+    setNewMemoryFact('');
+    notify?.('Memory saved');
   };
 
-  const selfCheck = () => {
-    const report = runSelfCheck({
-      settings: draft,
-      memory,
-      notes: notes.length,
-      widgets: selfWidgets,
-      skills,
-      driveConnected: Boolean(connections?.drive.connected),
-      githubConnected: Boolean(connections?.github.connected),
-      autonomy,
-    });
-    onSelfRepair?.();
-    notify?.(`Self-check ${report.score}% complete.`);
+  const handleDeleteSingleMemory = (factText: string) => {
+    const next = deleteMemoryFact(memory, factText);
+    if (next.length === 0) {
+      clearEntireMemoryBank();
+    }
+    onUpdateMemory?.(next);
   };
 
-  // ── Panel renderers ──────────────────────────────────────────────────────
-
-  const renderGeneral = () => (
-    <>
-      <Card title="Profile" description="How the workspace addresses you." icon={<User className="w-4 h-4" />}>
-        <TextRow
-          label="Your name"
-          value={profileName}
-          placeholder="e.g. Saymon"
-          maxLength={80}
-          onChange={handleNameChange}
-        />
-        <TextRow
-          label="AI display name"
-          description="Name the assistant introduces itself with."
-          value={draft.displayName || ''}
-          maxLength={80}
-          onChange={(v) => patch({ displayName: v })}
-        />
-        <SelectRow
-          label="App language"
-          value={draft.appLanguage || 'bn'}
-          options={[
-            { value: 'bn', label: 'বাংলা' },
-            { value: 'en', label: 'English' },
-            { value: 'hi', label: 'हिन्दी' },
-          ]}
-          onChange={(v) => patch({ appLanguage: v as AppSettings['appLanguage'] })}
-        />
-        <SelectRow
-          label="Reply language"
-          value={draft.replyLang}
-          options={[
-            { value: 'auto', label: 'Auto (match my language)' },
-            { value: 'bn', label: 'বাংলা' },
-            { value: 'en', label: 'English' },
-          ]}
-          onChange={(v) => patch({ replyLang: v as AppSettings['replyLang'] })}
-        />
-        <ToggleRow
-          label="Enter to send"
-          description="Enter sends, Shift+Enter adds a new line."
-          checked={Boolean(draft.sendOnEnter)}
-          onChange={(v) => patch({ sendOnEnter: v })}
-        />
-        <ToggleRow
-          label="Auto-scroll conversation"
-          description="Automatically follow new messages and streaming tokens."
-          checked={draft.autoScroll !== false}
-          onChange={(v) => patch({ autoScroll: v })}
-        />
-      </Card>
-
-      <Card title="Response defaults" description="Default reasoning style and conversation behavior." icon={<Sparkles className="w-4 h-4" />}>
-        <SegmentedRow
-          label="Reasoning depth"
-          value={draft.mode}
-          options={[
-            { value: 'fast', label: 'Fast' },
-            { value: 'balanced', label: 'Balanced' },
-            { value: 'power', label: 'Power' },
-          ]}
-          onChange={(v) => patch({ mode: v as AppSettings['mode'] })}
-        />
-        <SelectRow
-          label="Default new chat mode"
-          description="Which reasoning mode to use when starting a new conversation."
-          value={draft.newChatDefaultMode || 'last'}
-          options={[
-            { value: 'last', label: 'Keep last selected mode' },
-            { value: 'fast', label: 'Always start in Fast mode' },
-            { value: 'balanced', label: 'Always start in Balanced mode' },
-            { value: 'power', label: 'Always start in High-Quality mode' },
-          ]}
-          onChange={(v) => patch({ newChatDefaultMode: v as AppSettings['newChatDefaultMode'] })}
-        />
-        <SegmentedRow
-          label="Response detail"
-          value={draft.style}
-          options={[
-            { value: 'concise', label: 'Concise' },
-            { value: 'detailed', label: 'Detailed' },
-          ]}
-          onChange={(v) => patch({ style: v as AppSettings['style'] })}
-        />
-        <SegmentedRow
-          label="Chat density"
-          description="Compact or comfortable spacing across conversations."
-          value={draft.density || 'cozy'}
-          options={[
-            { value: 'compact', label: 'Compact' },
-            { value: 'cozy', label: 'Comfortable' },
-            { value: 'spacious', label: 'Spacious' },
-          ]}
-          onChange={(v) => patch({ density: v as AppSettings['density'] })}
-        />
-        <SelectRow
-          label="Work persona"
-          value={draft.workPersona || 'allrounder'}
-          options={[
-            { value: 'allrounder', label: 'All-rounder' },
-            { value: 'office', label: 'Office' },
-            { value: 'developer', label: 'Developer' },
-            { value: 'content', label: 'Content creator' },
-            { value: 'academic', label: 'Academic' },
-          ]}
-          onChange={(v) => patch({ workPersona: v as AppSettings['workPersona'] })}
-        />
-      </Card>
-
-      <Card title="Voice" description="Spoken replies and read-aloud behavior." icon={<Bell className="w-4 h-4" />}>
-        {!ttsSupported && (
-          <p className="cs-callout warn">Speech synthesis is not available in this browser.</p>
-        )}
-        <ToggleRow
-          label="Auto-read replies aloud"
-          checked={Boolean(draft.autoVoice)}
-          disabled={!ttsSupported}
-          onChange={(v) => patch({ autoVoice: v })}
-        />
-        <SelectRow
-          label="Voice language"
-          value={draft.vlang}
-          options={[
-            { value: 'bn-BD', label: 'বাংলা (Bangladesh)' },
-            { value: 'en-US', label: 'English (US)' },
-            { value: 'hi-IN', label: 'हिन्दी (India)' },
-          ]}
-          onChange={(v) => patch({ vlang: v as AppSettings['vlang'] })}
-        />
-        <SliderRow
-          label="Speech speed"
-          value={draft.voiceSpeed ?? 1}
-          min={0.5}
-          max={2}
-          step={0.1}
-          format={(v) => `${v.toFixed(1)}×`}
-          onChange={(v) => patch({ voiceSpeed: v })}
-        />
-      </Card>
-    </>
-  );
-
-  const renderAppearance = () => (
-    <>
-      <Card title="Theme" description="Light, dark or follow the system preference." icon={<Palette className="w-4 h-4" />}>
-        <SegmentedRow
-          label="Theme mode"
-          value={draft.themeMode || 'system'}
-          options={[
-            { value: 'system', label: 'System' },
-            { value: 'light', label: 'Light' },
-            { value: 'dark', label: 'Dark' },
-          ]}
-          onChange={(v) => {
-            const mode = v as 'system' | 'light' | 'dark';
-            patch({
-              themeMode: mode,
-              theme: mode === 'system' ? draft.theme : mode,
-            });
-          }}
-        />
-      </Card>
-
-      <Card title="Accent color" description="Used across buttons, links and highlights.">
-        <div className="cs-accent-grid">
-          {[
-            { id: 'indigo', color: '#6366f1' },
-            { id: 'emerald', color: '#10b981' },
-            { id: 'sky', color: '#0ea5e9' },
-            { id: 'rose', color: '#f43f5e' },
-            { id: 'amber', color: '#f59e0b' },
-            { id: 'teal', color: '#14b8a6' },
-          ].map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className={`cs-accent-dot ${draft.accent === a.id ? 'active' : ''}`}
-              style={{ background: a.color }}
-              title={a.id}
-              onClick={() => patch({ accent: a.id as AppSettings['accent'] })}
-            >
-              {draft.accent === a.id && <CheckCircle2 className="w-3.5 h-3.5" />}
-            </button>
-          ))}
-        </div>
-        <TextRow
-          label="Custom accent hex"
-          description="Used when accent is set to custom."
-          value={draft.accent === 'custom' ? draft.accentCustom || '' : ''}
-          placeholder="#6366f1"
-          mono
-          maxLength={7}
-          onChange={(v) => patch({ accent: 'custom', accentCustom: v })}
-        />
-        <ToggleRow
-          label="Monochrome accent"
-          description="Use a neutral grayscale accent."
-          checked={Boolean(draft.mono)}
-          onChange={(v) => patch({ mono: v })}
-        />
-      </Card>
-
-      <Card title="Typography & layout" description="Text size, code formatting, message spacing and layout width.">
-        <SelectRow
-          label="Font family"
-          value={draft.fontFamily || 'geist'}
-          options={[
-            { value: 'geist', label: 'Geist (default)' },
-            { value: 'inter', label: 'Inter' },
-            { value: 'system', label: 'System UI' },
-            { value: 'mono', label: 'Monospace' },
-          ]}
-          onChange={(v) => patch({ fontFamily: v as AppSettings['fontFamily'] })}
-        />
-        <SegmentedRow
-          label="Font size"
-          value={draft.fontsize}
-          options={[
-            { value: 'small', label: 'Small' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'large', label: 'Large' },
-          ]}
-          onChange={(v) => patch({ fontsize: v as AppSettings['fontsize'] })}
-        />
-        <SegmentedRow
-          label="Code font size"
-          description="Font size inside chat code blocks and the Code Workspace."
-          value={draft.codeFontSize || 'normal'}
-          options={[
-            { value: 'small', label: 'Small' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'large', label: 'Large' },
-          ]}
-          onChange={(v) => patch({ codeFontSize: v as AppSettings['codeFontSize'] })}
-        />
-        <SelectRow
-          label="Code block appearance"
-          value={draft.codeBlockTheme || 'dark'}
-          options={[
-            { value: 'dark', label: 'Dark studio (default)' },
-            { value: 'high-contrast', label: 'High contrast terminal' },
-            { value: 'minimal', label: 'Minimal bordered' },
-          ]}
-          onChange={(v) => patch({ codeBlockTheme: v as AppSettings['codeBlockTheme'] })}
-        />
-        <SegmentedRow
-          label="Chat message spacing"
-          value={draft.messageSpacing || 'normal'}
-          options={[
-            { value: 'compact', label: 'Compact' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'relaxed', label: 'Relaxed' },
-          ]}
-          onChange={(v) => patch({ messageSpacing: v as AppSettings['messageSpacing'] })}
-        />
-        <SegmentedRow
-          label="Desktop & mobile layout width"
-          value={draft.layoutWidth || 'standard'}
-          options={[
-            { value: 'standard', label: 'Standard' },
-            { value: 'wide', label: 'Wide' },
-            { value: 'full', label: 'Full width' },
-          ]}
-          onChange={(v) => patch({ layoutWidth: v as AppSettings['layoutWidth'] })}
-        />
-        <SelectRow
-          label="Chat bubble style"
-          value={draft.bubbleStyle || 'rounded'}
-          options={[
-            { value: 'rounded', label: 'Rounded' },
-            { value: 'sharp', label: 'Sharp' },
-            { value: 'minimal', label: 'Minimal' },
-          ]}
-          onChange={(v) => patch({ bubbleStyle: v as AppSettings['bubbleStyle'] })}
-        />
-        <SegmentedRow
-          label="Corner radius"
-          value={draft.radius || 'soft'}
-          options={[
-            { value: 'sharp', label: 'Sharp' },
-            { value: 'soft', label: 'Soft' },
-            { value: 'round', label: 'Round' },
-          ]}
-          onChange={(v) => patch({ radius: v as AppSettings['radius'] })}
-        />
-        <SegmentedRow
-          label="Density"
-          value={draft.density || 'cozy'}
-          options={[
-            { value: 'compact', label: 'Compact' },
-            { value: 'cozy', label: 'Cozy' },
-            { value: 'spacious', label: 'Spacious' },
-          ]}
-          onChange={(v) => patch({ density: v as AppSettings['density'] })}
-        />
-        <ToggleRow
-          label="Reduce motion"
-          description="Minimize animations and transitions."
-          checked={Boolean(draft.reducedMotion)}
-          onChange={(v) => patch({ reducedMotion: v })}
-        />
-      </Card>
-
-      <Card title="Advanced styling" description="Custom CSS is applied to the whole workspace.">
-        <div className="cs-row cs-row-column">
-          <div className="cs-row-info">
-            <span className="cs-label">Custom CSS</span>
-            <span className="cs-desc">Leave empty unless you know CSS.</span>
-          </div>
-          <textarea
-            className="cs-input cs-textarea font-mono"
-            rows={4}
-            value={draft.customCss || ''}
-            maxLength={20000}
-            placeholder=":root { --accent: #10a37f; }"
-            onChange={(e) => patch({ customCss: e.target.value })}
-          />
-        </div>
-      </Card>
-    </>
-  );
-
-  const selectProviderOption = (pid: ExternalProviderId) => {
-    setNewProviderId(pid);
-    setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[pid] || '');
-    setNewModel(
-      pid === 'mercury' || pid === 'inceptionlabs'
-        ? 'mercury-3'
-        : DEFAULT_PROVIDER_MODELS[pid] || ''
-    );
-    setDiscoveredModels([]);
-    setNewVerifyResult(null);
-    setDiscoveryWarning(null);
+  const handleConfirmClearAllMemory = () => {
+    clearEntireMemoryBank();
+    onUpdateMemory?.([]);
+    onClearMemory();
+    setConfirmingClearMemory(false);
+    notify?.('All memory wiped / সব মেমোরি মুছে ফেলা হয়েছে');
   };
+
+  // ── TAB 1: AI Providers ──────────────────────────────────────────────────
 
   const renderProviders = () => (
     <>
       <Card
-        title="AI Provider Configuration"
-        description="Select a provider, model, and API key."
-        icon={<Zap className="w-4 h-4" />}
+        title="Configure AI Provider"
+        description="Select a provider, model (Mercury defaults to mercury-3), and API key."
+        icon={<Plus className="w-4 h-4" />}
       >
-        <div className="cs-callout">
-          <strong>{activeProfile?.name || 'Default'}</strong>
-          <span>
-            {providerEntry(activeProfile?.provider || 'xrahat')?.label || activeProfile?.provider} ·{' '}
-            {isBuiltinProviderId(activeProfile?.provider)
-              ? builtinTierLabel(activeProfile?.externalModel, draft.mode)
-              : activeProfile?.externalModel || activeProfileModels[0] || DEFAULT_PROVIDER_MODELS[activeProfile?.provider || ''] || 'Auto'}
-          </span>
-        </div>
-
-        <div className="cs-form-grid !mt-3">
-          {/* 1. Provider Selector (Mercury, Gemini, OpenAI, Anthropic, Custom) */}
-          <div className="cs-row cs-row-column">
-            <div className="cs-row-info">
-              <span className="cs-label">Provider</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5 mb-2" data-testid="provider-quick-selector">
+        <div className="space-y-4">
+          {/* Quick Provider Selector Pills */}
+          <div>
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)] mb-2">
+              Provider
+            </label>
+            <div
+              className="grid grid-cols-2 sm:grid-cols-5 gap-2"
+              data-testid="provider-selector-pills"
+            >
               {PRIMARY_PROVIDER_OPTIONS.map((opt) => {
-                const isSelected =
-                  newProviderId === opt.id ||
-                  (opt.id === 'mercury' && newProviderId === 'inceptionlabs');
+                const isSelected = newProviderId === opt.id;
                 return (
                   <button
                     key={opt.id}
                     type="button"
                     data-testid={`provider-pill-${opt.id}`}
-                    onClick={() => selectProviderOption(opt.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                    onClick={() => {
+                      const nextId = opt.id;
+                      const defModel =
+                        nextId === 'mercury'
+                          ? 'mercury-3'
+                          : DEFAULT_PROVIDER_MODELS[nextId] || opt.defaultModel;
+                      setNewProviderId(nextId);
+                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[nextId] || '');
+                      setNewModel(defModel);
+                      setDiscoveredModels([]);
+                      setDiscoveryWarning(null);
+                      setNewVerifyResult(null);
+                    }}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
-                        : 'bg-[var(--bg-2)] text-[var(--text-2)] border-[var(--border)] hover:border-indigo-500/40'
+                        ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)] shadow-xs'
+                        : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-[var(--primary-border)]'
                     }`}
                   >
                     {opt.label}
@@ -1798,1578 +1060,1041 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 );
               })}
             </div>
-            <select
-              className="cs-select"
-              data-testid="provider-gateway-select"
-              value={newProviderId}
-              onChange={(e) => selectProviderOption(e.target.value as ExternalProviderId)}
-            >
-              {(['popular', 'builtin', 'custom', 'local'] as ProviderGroup[]).map((g) => (
-                <optgroup key={g} label={PROVIDER_GROUP_LABELS[g]}>
-                  {PROVIDER_CATALOG.filter((c) => c.group === g).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <div className="mt-2">
+              <select
+                aria-label="Provider selector"
+                data-testid="provider-select-dropdown"
+                value={newProviderId}
+                onChange={(e) => {
+                  const nextId = e.target.value as ExternalProviderId;
+                  setNewProviderId(nextId);
+                  setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[nextId] || '');
+                  setNewModel(
+                    nextId === 'mercury' || nextId === 'inceptionlabs'
+                      ? 'mercury-3'
+                      : DEFAULT_PROVIDER_MODELS[nextId] || ''
+                  );
+                  setDiscoveredModels([]);
+                  setDiscoveryWarning(null);
+                  setNewVerifyResult(null);
+                }}
+                className="cs-input w-full text-xs"
+              >
+                {(['popular', 'custom', 'local', 'builtin'] as ProviderGroup[]).map(
+                  (grp) => (
+                    <optgroup key={grp} label={PROVIDER_GROUP_LABELS[grp]}>
+                      {PROVIDER_CATALOG.filter((p) => p.group === grp).map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )
+                )}
+              </select>
+            </div>
           </div>
 
-          {/* 2. Model Name Input / Dropdown (Default Mercury to "mercury-3") */}
-          <div className="cs-row cs-row-column">
-            <div className="cs-row-info">
-              <span className="cs-label">Model</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 w-full">
-              <select
-                className="cs-select !w-full"
-                data-testid="new-provider-model-select"
-                value={candidateModelsForNew.includes(newModel) ? newModel : candidateModelsForNew[0] || ''}
-                onChange={(e) => setNewModel(e.target.value)}
-              >
-                {candidateModelsForNew.length === 0 && (
-                  <option value="" disabled>
-                    Select or enter model
-                  </option>
-                )}
-                {Array.from(new Set([newModel, ...candidateModelsForNew].filter(Boolean))).map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                data-testid="new-provider-model-input"
-                className="cs-input font-mono !w-full"
-                value={newModel}
-                placeholder={
-                  newProviderId === 'mercury' || newProviderId === 'inceptionlabs'
-                    ? 'mercury-3'
-                    : 'Model ID'
-                }
-                onChange={(e) => setNewModel(e.target.value)}
-              />
+          {/* Model Name Input + Quick Chips */}
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)]">
+                Model Name
+              </label>
               <button
                 type="button"
-                className="btn btn-secondary !px-2.5"
-                title="Fetch models"
-                disabled={isLoadingModels}
                 onClick={() => handleFetchNewModels()}
+                disabled={isLoadingModels}
+                className="text-[11px] font-semibold text-[var(--primary)] hover:underline inline-flex items-center gap-1 cursor-pointer"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingModels ? 'animate-spin' : ''}`} />
+                {isLoadingModels ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3 h-3" />
+                )}
+                Fetch Models
               </button>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="text"
+                data-testid="provider-model-input"
+                value={newModel}
+                onChange={(e) => setNewModel(e.target.value)}
+                placeholder={
+                  newProviderId === 'mercury'
+                    ? 'mercury-3'
+                    : DEFAULT_PROVIDER_MODELS[newProviderId] || 'Enter model ID'
+                }
+                className="cs-input font-mono text-xs"
+              />
+              {candidateModelsForNew.length > 0 && (
+                <select
+                  aria-label="Quick select model"
+                  data-testid="provider-model-dropdown"
+                  value={candidateModelsForNew.includes(newModel) ? newModel : ''}
+                  onChange={(e) => {
+                    if (e.target.value) setNewModel(e.target.value);
+                  }}
+                  className="cs-input font-mono text-xs"
+                >
+                  <option value="" disabled>
+                    Select preset model...
+                  </option>
+                  {candidateModelsForNew.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            {discoveryWarning && (
+              <div className="text-[11px] text-amber-500 mt-1">{discoveryWarning}</div>
+            )}
           </div>
 
-          {/* 3. API Key field (with Show/Hide toggle) */}
-          {!isBuiltinProviderId(newProviderId) && (
-            <div className="cs-row cs-row-column">
-              <div className="cs-row-info">
-                <span className="cs-label">API Key</span>
-              </div>
-              <div className="cs-key-input">
+          {/* API Key Input with Show/Hide Toggle */}
+          {!isKeylessProviderId(newProviderId) && (
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)] mb-1.5">
+                API Key
+              </label>
+              <div className="flex items-center gap-2">
                 <input
                   type={showNewKey ? 'text' : 'password'}
-                  data-testid="new-provider-api-key-input"
-                  className="cs-input font-mono"
+                  data-testid="provider-api-key-input"
                   value={newApiKey}
-                  placeholder={providerEntry(newProviderId)?.keyHint || 'sk-...'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setNewApiKey(val);
-                    setNewVerifyResult(null);
                     const detected = detectProviderFromKey(val);
-                    if (newProviderId === 'custom') {
-                      if (!newBaseUrl.trim()) {
-                        if (detected && DEFAULT_PROVIDER_BASE_URLS[detected]) {
-                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected]);
-                          if (!newModel || newModel === 'gpt-4o-mini') {
-                            setNewModel(DEFAULT_PROVIDER_MODELS[detected] || 'gpt-4o-mini');
-                          }
-                        } else if (val.trim().startsWith('sk-')) {
-                          setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1');
-                        }
-                      }
-                    } else if (
+                    if (
                       detected &&
                       detected !== newProviderId &&
-                      newProviderId !== 'mercury' &&
-                      newProviderId !== 'inceptionlabs' &&
-                      newProviderId !== 'ollama' &&
-                      newProviderId !== 'lmstudio'
+                      (newProviderId === 'xrahat' || newProviderId === 'smfta_cloud')
                     ) {
                       setNewProviderId(detected);
                       setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
                       setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
                     }
                   }}
+                  placeholder={
+                    providerEntry(newProviderId)?.keyHint || 'Paste your API key'
+                  }
+                  className="cs-input flex-1 font-mono text-xs"
                 />
                 <button
                   type="button"
-                  data-testid="toggle-new-api-key-visibility"
-                  className="btn btn-secondary !px-2.5 flex items-center gap-1"
-                  aria-label={showNewKey ? 'Hide API key' : 'Show API key'}
+                  data-testid="provider-api-key-toggle"
                   onClick={() => setShowNewKey((v) => !v)}
+                  className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title={showNewKey ? 'Hide API Key' : 'Show API Key'}
                 >
-                  {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  <span className="text-[11px]">{showNewKey ? 'Hide' : 'Show'}</span>
+                  {showNewKey ? (
+                    <EyeOff className="w-3.5 h-3.5" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                  <span>{showNewKey ? 'Hide' : 'Show'}</span>
                 </button>
               </div>
+              {detectedProviderFromNewKey &&
+                detectedProviderFromNewKey !== newProviderId && (
+                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-[var(--text-2)]">
+                    <span>
+                      Key matches{' '}
+                      <strong>
+                        {providerEntry(detectedProviderFromNewKey)?.label ||
+                          detectedProviderFromNewKey}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewProviderId(detectedProviderFromNewKey);
+                        setNewBaseUrl(
+                          DEFAULT_PROVIDER_BASE_URLS[detectedProviderFromNewKey] || ''
+                        );
+                        setNewModel(
+                          DEFAULT_PROVIDER_MODELS[detectedProviderFromNewKey] || ''
+                        );
+                      }}
+                      className="text-[var(--primary)] font-semibold hover:underline cursor-pointer"
+                    >
+                      Switch
+                    </button>
+                  </div>
+                )}
             </div>
           )}
 
-          {/* 4. Optional "Advanced Options" Accordion (closed by default) */}
-          <div className="border border-[var(--border)] rounded-xl overflow-hidden bg-[var(--bg-2)]/40">
+          {/* Optional Advanced Options Accordion (Closed by Default) */}
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
             <button
               type="button"
-              data-testid="advanced-options-toggle"
+              data-testid="provider-advanced-toggle"
               aria-expanded={showAdvancedOptions}
               onClick={() => setShowAdvancedOptions((prev) => !prev)}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-[var(--text-2)] hover:text-[var(--text-1)] transition-colors"
+              className="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
             >
-              <span className="flex items-center gap-2">
-                <SlidersHorizontal className="w-3.5 h-3.5 opacity-75" />
-                <span>Advanced Options</span>
-              </span>
-              {showAdvancedOptions ? (
-                <ChevronDown className="w-4 h-4 opacity-70" />
-              ) : (
-                <ChevronRight className="w-4 h-4 opacity-70" />
-              )}
+              <span>Advanced Options (Base URL, Extra Headers & Profile Name)</span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform duration-200 ${
+                  showAdvancedOptions ? 'rotate-180' : ''
+                }`}
+              />
             </button>
-
             {showAdvancedOptions && (
               <div
-                data-testid="advanced-options-content"
+                data-testid="provider-advanced-panel"
                 className="px-3.5 pb-3.5 pt-2 border-t border-[var(--border)] space-y-3"
               >
-                <TextRow
-                  label="Base URL"
-                  mono
-                  value={newBaseUrl}
-                  placeholder={
-                    DEFAULT_PROVIDER_BASE_URLS[newProviderId] ||
-                    'https://api.inceptionlabs.ai/v1/chat/completions'
-                  }
-                  onChange={(v) => {
-                    setNewBaseUrl(v);
-                    setNewVerifyResult(null);
-                    if (newProviderId === 'custom' && (!newModel || newModel === 'gpt-4o-mini')) {
-                      const u = v.toLowerCase();
-                      if (u.includes('codecraft')) setNewModel('gemini-3.7-flash');
-                      else if (u.includes('inceptionlabs') || u.includes('mercury')) setNewModel('mercury-3');
-                      else if (u.includes('generativelanguage.googleapis.com')) setNewModel('gemini-2.5-flash');
-                      else if (u.includes('groq.com')) setNewModel('llama-3.3-70b-versatile');
-                      else if (u.includes('deepseek.com')) setNewModel('deepseek-chat');
-                      else if (u.includes('anthropic.com')) setNewModel('claude-sonnet-4-20250514');
-                      else if (u.includes('openrouter.ai')) setNewModel('google/gemini-2.5-flash');
-                    }
-                  }}
-                />
-                <div className="cs-row cs-row-column">
-                  <div className="cs-row-info">
-                    <span className="cs-label">Extra Headers (Optional)</span>
-                  </div>
-                  <textarea
-                    rows={2}
-                    data-testid="new-provider-extra-headers"
-                    className="cs-textarea font-mono text-xs"
-                    value={newCustomHeaders}
-                    placeholder={'{"X-Custom-Header": "value"}'}
-                    onChange={(e) => setNewCustomHeaders(e.target.value)}
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
+                    Profile Label (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={newPropName}
+                    onChange={(e) => setNewPropName(e.target.value)}
+                    placeholder={`e.g. My ${
+                      providerEntry(newProviderId)?.short || 'Custom'
+                    } Profile`}
+                    className="cs-input w-full text-xs"
                   />
                 </div>
-                <TextRow
-                  label="Profile Name (Optional)"
-                  value={newPropName}
-                  placeholder={`e.g. ${providerEntry(newProviderId)?.short || 'Mercury'}`}
-                  onChange={setNewPropName}
-                />
-                <ToggleRow
-                  label="Keyless fallback"
-                  description="Fallback to built-in engine if custom provider is unreachable."
-                  checked={Boolean(draft.allowKeylessFallback)}
-                  onChange={(v) => patch({ allowKeylessFallback: v })}
-                />
+                {!isKeylessProviderId(newProviderId) && (
+                  <div>
+                    <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
+                      Base URL
+                    </label>
+                    <input
+                      type="text"
+                      data-testid="provider-base-url-input"
+                      value={newBaseUrl}
+                      onChange={(e) => setNewBaseUrl(e.target.value)}
+                      placeholder={
+                        DEFAULT_PROVIDER_BASE_URLS[newProviderId] ||
+                        'https://api.inceptionlabs.ai/v1'
+                      }
+                      className="cs-input w-full font-mono text-xs"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
+                    Extra Headers (JSON, Optional)
+                  </label>
+                  <input
+                    type="text"
+                    data-testid="provider-extra-headers-input"
+                    value={newCustomHeaders}
+                    onChange={(e) => setNewCustomHeaders(e.target.value)}
+                    placeholder='{"HTTP-Referer": "https://example.com"}'
+                    className="cs-input w-full font-mono text-xs"
+                  />
+                </div>
               </div>
             )}
           </div>
 
-          {discoveryWarning && <p className="cs-callout warn !text-xs">{discoveryWarning}</p>}
           {newVerifyResult && (
-            <div className={`cs-callout ${newVerifyResult.ok ? 'success' : 'warn'}`}>
-              <div className="flex items-start gap-2 w-full">
-                {newVerifyResult.ok ? (
-                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs">{newVerifyResult.message}</p>
-                </div>
-              </div>
+            <div
+              className={`px-3 py-2 rounded-xl text-xs font-medium border ${
+                newVerifyResult.ok
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-400'
+                  : 'border-rose-500/35 bg-rose-500/10 text-rose-400'
+              }`}
+            >
+              {newVerifyResult.message}
             </div>
           )}
 
-          <div className="cs-form-actions">
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             <button
               type="button"
-              className="btn btn-secondary flex items-center gap-1.5"
-              disabled={isVerifyingNew}
               onClick={handleSaveWithoutVerification}
+              disabled={isVerifyingNew}
+              className="px-3.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] hover:border-[var(--primary-border)] cursor-pointer"
             >
-              <Save className="w-4 h-4 text-emerald-500" /> Save &amp; Activate
+              Save Profile
             </button>
             <button
               type="button"
-              className="btn btn-primary"
-              disabled={isVerifyingNew}
               onClick={handleVerifyAndAddProvider}
+              disabled={isVerifyingNew}
+              className="px-4 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer"
             >
               {isVerifyingNew ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying…
-                </>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <>
-                  <Zap className="w-4 h-4" /> Verify &amp; Connect
-                </>
+                <Check className="w-3.5 h-3.5" />
               )}
+              {isVerifyingNew ? 'Testing...' : 'Verify & Connect'}
             </button>
           </div>
         </div>
       </Card>
 
+      {/* Active & Saved Profiles */}
       <Card
         title={`Saved Profiles (${localProfiles.length})`}
-        description="Switch or manage saved provider configurations."
-        icon={<Server className="w-4 h-4" />}
+        description="Switch active profile, update model or API key, or test connection."
+        icon={<Layers className="w-4 h-4" />}
       >
-        <div className="cs-provider-list">
+        <div className="space-y-2.5">
           {localProfiles.map((prof) => {
-            const isCurrent = activeProfile?.id === prof.id;
-            const pModels = getModelsForProfile(prof);
-            const uiStatus = describeProviderStatus(prof);
-            const isEnabled = prof.enabled !== false;
-            const isAdvOpen = Boolean(profileAdvancedOpen[prof.id]);
+            const isSelected = activeProfile?.id === prof.id;
+            const isEditing = editingProfileId === prof.id;
+            const isBuiltin =
+              prof.isBuiltin || isBuiltinProviderId(prof.provider);
+            const isKeyRevealed = Boolean(revealedKeyIds[prof.id]);
+            const isTesting = testingProfileId === prof.id;
+            const isRefreshing = loadingModelsForId === prof.id;
+            const modelsForProf = getModelsForProfile(prof);
+            const vStatus =
+              prof.verificationStatus ||
+              (prof.verified ? 'verified' : 'untested');
+
             return (
-              <div key={prof.id} className={`cs-provider ${isCurrent ? 'active' : ''} ${!isEnabled ? 'opacity-65' : ''}`}>
-                <div className="cs-provider-head">
-                  <div className="cs-provider-title">
+              <div
+                key={prof.id}
+                className={`rounded-xl border p-3 transition-colors ${
+                  isSelected
+                    ? 'border-[var(--primary)] bg-[var(--primary-soft)]'
+                    : 'border-[var(--border)] bg-[var(--bg)]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => activateSavedProfile(prof)}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+                  >
                     <span
-                      className={`cs-status-dot ${uiStatus.toLowerCase().replace(/\s+/g, '-')}`}
-                    />
-                    <span className="truncate">{prof.name}</span>
-                    <span className="cs-provider-tag">
-                      {providerEntry(prof.provider)?.short || prof.provider}
-                    </span>
-                    <span className={`cs-pill ${uiStatus.toLowerCase().replace(/\s+/g, '-')}`}>
-                      {uiStatus}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label
-                      className="toggle-switch"
-                      title={isEnabled ? 'Disable profile' : 'Enable profile'}
+                      className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? 'border-[var(--primary)] bg-[var(--primary)]'
+                          : 'border-[var(--text-3)]'
+                      }`}
                     >
-                      <input
-                        type="checkbox"
-                        aria-label={`Enable ${prof.name}`}
-                        checked={isEnabled}
-                        onChange={(e) =>
-                          updateSavedProfileField(prof.id, { enabled: e.target.checked })
-                        }
-                      />
-                      <span className="slider" />
-                    </label>
-                    {isCurrent ? (
-                      <span className="cs-active-badge">Active</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-primary !py-1 !px-2.5 !text-[11px]"
-                        disabled={!isEnabled}
-                        onClick={() => activateSavedProfile(prof)}
-                      >
-                        Connect
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {prof.externalKeys && (
-                  <div className="cs-provider-meta">
-                    <span className="cs-key-chip">
-                      {revealedKeyIds[prof.id] ? prof.externalKeys : maskKey(prof.externalKeys)}
-                    </span>
-                  </div>
-                )}
-
-                {(uiStatus === 'Failed' ||
-                  prof.verificationStatus === 'failed' ||
-                  prof.verificationStatus === 'degraded') &&
-                  prof.statusMessage && (
-                    <div
-                      data-testid="provider-error-banner"
-                      className="cs-callout warn !mt-2 !py-2 !px-3 text-xs leading-relaxed whitespace-pre-wrap break-words"
-                    >
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-                        <div className="flex-1 min-w-0">
-                          <div>{prof.statusMessage}</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                {editingProfileId === prof.id && (
-                  <div className="cs-edit-drawer">
-                    <TextRow
-                      label="Display name"
-                      value={prof.name}
-                      onChange={(v) => updateSavedProfileField(prof.id, { name: v })}
-                    />
-                    <div className="cs-row cs-row-column">
-                      <div className="cs-row-info">
-                        <span className="cs-label">API Key</span>
-                      </div>
-                      <div className="cs-key-input">
-                        <input
-                          type={revealedKeyIds[prof.id] ? 'text' : 'password'}
-                          value={prof.externalKeys || ''}
-                          placeholder="Paste API key…"
-                          className="cs-input font-mono"
-                          onChange={(e) =>
-                            updateSavedProfileField(prof.id, { externalKeys: e.target.value })
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-secondary !px-2"
-                          onClick={() =>
-                            setRevealedKeyIds((prev) => ({ ...prev, [prof.id]: !prev[prof.id] }))
-                          }
-                        >
-                          {revealedKeyIds[prof.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="border border-[var(--border)] rounded-lg overflow-hidden mt-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setProfileAdvancedOpen((prev) => ({ ...prev, [prof.id]: !prev[prof.id] }))
-                        }
-                        className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[var(--text-2)]"
-                      >
-                        <span>Advanced Options</span>
-                        {isAdvOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                      </button>
-                      {isAdvOpen && (
-                        <div className="p-3 border-t border-[var(--border)] space-y-2.5">
-                          <TextRow
-                            label="Base URL"
-                            value={prof.externalBaseUrl || ''}
-                            mono
-                            placeholder={DEFAULT_PROVIDER_BASE_URLS[prof.provider] || 'https://api.inceptionlabs.ai/v1'}
-                            onChange={(v) => updateSavedProfileField(prof.id, { externalBaseUrl: v })}
-                          />
-                          <TextRow
-                            label="Extra Headers"
-                            value={prof.customHeaders || ''}
-                            mono
-                            placeholder={'{"X-Header": "value"}'}
-                            onChange={(v) => updateSavedProfileField(prof.id, { customHeaders: v })}
-                          />
-                          <SliderRow
-                            label="Context window (tokens)"
-                            value={prof.contextWindow ?? 32768}
-                            min={2048}
-                            max={128000}
-                            step={2048}
-                            onChange={(v) => updateSavedProfileField(prof.id, { contextWindow: v })}
-                          />
-                          <SliderRow
-                            label="Maximum response tokens"
-                            value={prof.maxOutputTokens ?? 4096}
-                            min={64}
-                            max={32768}
-                            step={64}
-                            onChange={(v) => updateSavedProfileField(prof.id, { maxOutputTokens: v })}
-                          />
-                          <ToggleRow
-                            label="SSE streaming support"
-                            checked={prof.supportsStreaming !== false}
-                            onChange={(v) => updateSavedProfileField(prof.id, { supportsStreaming: v })}
-                          />
-                        </div>
+                      {isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
                       )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold text-[var(--text)]">
+                        <span className="truncate">{prof.name}</span>
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--text-2)] border border-[var(--border)]">
+                          {providerEntry(prof.provider)?.short || prof.provider}
+                        </span>
+                        {isBuiltin && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--primary-soft)] text-[var(--primary)]">
+                            Built-in
+                          </span>
+                        )}
+                        {!isBuiltin && vStatus === 'verified' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
+                            Verified
+                          </span>
+                        )}
+                        {!isBuiltin && vStatus === 'failed' && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/15 text-rose-400">
+                            Failed
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-3)] mt-0.5">
+                        <span className="font-mono">
+                          {prof.externalModel ||
+                            DEFAULT_PROVIDER_MODELS[prof.provider] ||
+                            'Auto'}
+                        </span>
+                        {!isBuiltin && prof.externalKeys && (
+                          <span> · Key: {maskApiKey(prof.externalKeys)}</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  </button>
 
-                <div className="cs-provider-controls">
-                  <select
-                    className="cs-select !py-1 !text-[11px]"
-                    value={pModels.includes(prof.externalModel || '') ? prof.externalModel : pModels[0] || ''}
-                    onChange={(e) =>
-                      updateSavedProfileField(prof.id, { externalModel: e.target.value })
-                    }
-                  >
-                    {pModels.length === 0 && (
-                      <option value="" disabled>
-                        Select model
-                      </option>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!isBuiltin && (
+                      <button
+                        type="button"
+                        onClick={() => handleTestExistingProfile(prof)}
+                        disabled={isTesting}
+                        className="px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        {isTesting ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3 h-3" />
+                        )}
+                        Test
+                      </button>
                     )}
-                    {Array.from(new Set([prof.externalModel, ...pModels].filter(Boolean) as string[])).map(
-                      (m) => (
-                        <option key={m} value={m}>
-                          {isBuiltinProviderId(prof.provider)
-                            ? BUILTIN_TIERS.find((t) => t.model === m)?.label || m
-                            : m}
-                        </option>
-                      )
-                    )}
-                  </select>
-                  <input
-                    type="text"
-                    className="cs-input !py-1 !text-[11px] w-28 sm:w-36"
-                    value={prof.externalModel || ''}
-                    placeholder="Model ID"
-                    onChange={(e) =>
-                      updateSavedProfileField(prof.id, { externalModel: e.target.value })
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-secondary !py-1 !px-2 !text-[11px]"
-                    title="Refresh models"
-                    disabled={loadingModelsForId === prof.id}
-                    onClick={() => handleRefreshProfileModels(prof)}
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loadingModelsForId === prof.id ? 'animate-spin' : ''}`} />
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary !py-1 !px-2 !text-[11px]"
-                    title="Test connection"
-                    disabled={testingProfileId === prof.id}
-                    onClick={() => handleTestExistingProfile(prof)}
-                  >
-                    {testingProfileId === prof.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Zap className="w-3.5 h-3.5" />
-                    )}
-                    <span>Test</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary !py-1 !px-2 !text-[11px]"
-                    onClick={() =>
-                      setEditingProfileId((cur) => (cur === prof.id ? null : prof.id))
-                    }
-                  >
-                    {editingProfileId === prof.id ? 'Done' : 'Edit'}
-                  </button>
-                  {localProfiles.length > 1 && (
                     <button
                       type="button"
-                      className="btn btn-secondary !py-1 !px-2 !text-[11px] !text-rose-500"
-                      title="Delete provider"
-                      onClick={() => deleteSavedProfile(prof.id)}
+                      onClick={() =>
+                        setEditingProfileId(isEditing ? null : prof.id)
+                      }
+                      className="px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1 cursor-pointer"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      {isEditing ? 'Close' : 'Edit'}
+                      <ChevronRight
+                        className={`w-3 h-3 transition-transform ${
+                          isEditing ? 'rotate-90' : ''
+                        }`}
+                      />
                     </button>
-                  )}
+                    {!isBuiltin && localProfiles.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => deleteSavedProfile(prof.id)}
+                        className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                        title="Delete profile"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
 
-      <Card
-        title="Model parameters"
-        description="Sampling controls sent with every request to the selected model."
-        icon={<SlidersHorizontal className="w-4 h-4" />}
-      >
-        <SegmentedRow
-          label="Creativity"
-          value={draft.creativity}
-          options={[
-            { value: 'precise', label: 'Precise' },
-            { value: 'balanced', label: 'Balanced' },
-            { value: 'creative', label: 'Creative' },
-          ]}
-          onChange={(v) => patch({ creativity: v as AppSettings['creativity'] })}
-        />
-        <SegmentedRow
-          label="Thinking Mode & Reasoning Effort"
-          description="Controls how deeply the model analyzes and plans before answering."
-          value={draft.thinkingMode || 'medium'}
-          options={[
-            { value: 'off', label: 'Off' },
-            { value: 'low', label: 'Low' },
-            { value: 'medium', label: 'Medium' },
-            { value: 'high', label: 'High' },
-          ]}
-          onChange={(v) => patch({ thinkingMode: v as AppSettings['thinkingMode'] })}
-        />
-        <SliderRow
-          label="Temperature"
-          value={draft.weightTemp ?? 0.7}
-          min={0.1}
-          max={1.2}
-          step={0.05}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => patch({ weightTemp: v })}
-        />
-        <SliderRow
-          label="Top P"
-          value={draft.topP ?? 0.9}
-          min={0.1}
-          max={1}
-          step={0.05}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => patch({ topP: v })}
-        />
-        <SliderRow
-          label="Max output tokens"
-          value={draft.maxOutputTokens ?? 1024}
-          min={256}
-          max={32768}
-          step={256}
-          onChange={(v) => patch({ maxOutputTokens: v })}
-        />
-        <div className="cs-row cs-row-column">
-          <div className="cs-row-info">
-            <span className="cs-label">Training / context notes</span>
-            <span className="cs-desc">Extra guidance the model should always consider.</span>
-          </div>
-          <textarea
-            className="cs-input cs-textarea"
-            rows={3}
-            value={draft.trainingData || ''}
-            maxLength={4000}
-            onChange={(e) => patch({ trainingData: e.target.value })}
-          />
-        </div>
-      </Card>
-    </>
-  );
-
-  const renderChat = () => (
-    <>
-      <Card title="History & saving" description="How conversations are stored and recalled." icon={<MessageSquare className="w-4 h-4" />}>
-        <ToggleRow
-          label="Auto-save conversations"
-          description="Persist chats locally and to your cloud account."
-          checked={draft.autoSaveChat !== false}
-          onChange={(v) => patch({ autoSaveChat: v })}
-        />
-        <ToggleRow
-          label="Include chat history"
-          description="Send recent messages as context with each request."
-          checked={draft.includeHistory !== false}
-          onChange={(v) => patch({ includeHistory: v })}
-        />
-        <SliderRow
-          label="History messages"
-          value={draft.maxHistoryMessages ?? 18}
-          min={1}
-          max={40}
-          step={1}
-          onChange={(v) => patch({ maxHistoryMessages: v })}
-        />
-      </Card>
-
-      <Card title="Streaming & rendering" description="How replies appear and are formatted.">
-        <ToggleRow
-          label="Typewriter streaming"
-          description="Reveal tokens smoothly instead of instant render."
-          checked={draft.streamingReveal !== false}
-          onChange={(v) => patch({ streamingReveal: v })}
-        />
-        <ToggleRow
-          label="Markdown rendering"
-          checked={draft.markdownRender !== false}
-          onChange={(v) => patch({ markdownRender: v })}
-        />
-        <ToggleRow
-          label="Code highlighting"
-          checked={draft.codeHighlight !== false}
-          onChange={(v) => patch({ codeHighlight: v })}
-        />
-        <ToggleRow
-          label="Auto-scroll"
-          description="Follow the stream as new tokens arrive."
-          checked={draft.autoScroll !== false}
-          onChange={(v) => patch({ autoScroll: v })}
-        />
-        <ToggleRow
-          label="Show timestamps"
-          checked={draft.showTimestamps !== false}
-          onChange={(v) => patch({ showTimestamps: v })}
-        />
-        <ToggleRow
-          label="Show token usage & latency"
-          checked={Boolean(draft.showTokenUsage)}
-          onChange={(v) => patch({ showTokenUsage: v })}
-        />
-      </Card>
-
-      <Card title="Input & uploads" description="Composer defaults and attachment limits.">
-        <ToggleRow
-          label="Web search by default"
-          description="Ground answers with live web results when the engine supports it."
-          checked={Boolean(draft.webSearchDefault)}
-          onChange={(v) => patch({ webSearchDefault: v })}
-        />
-        <SliderRow
-          label="Max upload size"
-          description="Per-file ceiling for attachments."
-          value={draft.maxUploadMb ?? 10}
-          min={1}
-          max={25}
-          step={1}
-          format={(v) => `${v} MB`}
-          onChange={(v) => patch({ maxUploadMb: v })}
-        />
-        <ToggleRow
-          label="Smart formatting"
-          description="Automatic cleanup and formatting of replies."
-          checked={draft.smartFormatting !== false}
-          onChange={(v) => patch({ smartFormatting: v })}
-        />
-      </Card>
-
-      <Card title="Notifications" description="Browser alerts when tasks finish or fail." icon={<Bell className="w-4 h-4" />}>
-        {!notifSupport && (
-          <p className="cs-callout warn">This browser does not support notifications.</p>
-        )}
-        <div className="cs-row">
-          <div className="cs-row-info">
-            <span className="cs-label">Permission</span>
-            <span className="cs-desc">Status: {notifSupport ? notifPermission : 'unsupported'}</span>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary !py-1.5 !px-3 !text-[12px]"
-            disabled={!notifSupport}
-            onClick={requestNotifPermission}
-          >
-            Enable
-          </button>
-        </div>
-        <ToggleRow
-          label="Enable notifications"
-          checked={Boolean(draft.notifEnabled)}
-          disabled={!notifSupport}
-          onChange={(v) => patch({ notifEnabled: v })}
-        />
-        <ToggleRow label="Task completed" checked={draft.notifTaskDone !== false} onChange={(v) => patch({ notifTaskDone: v })} />
-        <ToggleRow label="Errors & failures" checked={draft.notifErrors !== false} onChange={(v) => patch({ notifErrors: v })} />
-        <ToggleRow label="Usage limit reached" checked={draft.notifUsageLimit !== false} onChange={(v) => patch({ notifUsageLimit: v })} />
-        <ToggleRow label="Play sound" checked={Boolean(draft.notifSound)} onChange={(v) => patch({ notifSound: v })} />
-        <div className="cs-form-actions">
-          <button type="button" className="btn btn-secondary" onClick={sendTestNotification}>
-            Send test notification
-          </button>
-        </div>
-      </Card>
-    </>
-  );
-
-  const renderPrivacy = () => (
-    <>
-      <Card title="Memory bank" description="Facts the assistant remembers across conversations." icon={<Sparkles className="w-4 h-4" />}>
-        <ToggleRow
-          label="Auto-learn memory"
-          description="Save useful facts from conversations automatically."
-          checked={draft.autoMemory !== false}
-          onChange={(v) => patch({ autoMemory: v })}
-        />
-
-        <div className="flex flex-col gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Saved Facts ({memory.length})
-            </span>
-            <span className="text-[11px] text-slate-400">
-              Synced privately to your account
-            </span>
-          </div>
-
-          {/* Add Manual Fact Input */}
-          <div className="flex items-center gap-1.5 mt-1">
-            <input
-              type="text"
-              placeholder="Add a new memory fact (e.g., 'পেশা: ওয়েব ডেভেলপার')..."
-              className="cs-input !text-xs !py-1.5 flex-1"
-              value={newMemoryFact}
-              onChange={(e) => {
-                setNewMemoryFact(e.target.value);
-                setMemoryError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (!onUpdateMemory) return;
-                  const res = addManualMemoryFact(memory, newMemoryFact);
-                  if (res.error) {
-                    setMemoryError(res.error);
-                  } else {
-                    onUpdateMemory(res.updated);
-                    setNewMemoryFact('');
-                    notify?.('Memory fact added.');
-                  }
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="btn btn-primary !py-1.5 !px-3 !text-xs shrink-0 flex items-center gap-1"
-              disabled={!newMemoryFact.trim()}
-              onClick={() => {
-                if (!onUpdateMemory) return;
-                const res = addManualMemoryFact(memory, newMemoryFact);
-                if (res.error) {
-                  setMemoryError(res.error);
-                } else {
-                  onUpdateMemory(res.updated);
-                  setNewMemoryFact('');
-                  notify?.('Memory fact added.');
-                }
-              }}
-            >
-              <Plus className="w-3.5 h-3.5" /> Add
-            </button>
-          </div>
-          {memoryError && (
-            <p className="text-[11px] text-rose-500 font-medium">{memoryError}</p>
-          )}
-
-          {/* Search memory input */}
-          {memory.length > 3 && (
-            <div className="relative mt-1">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Search saved facts..."
-                value={memorySearchQuery}
-                onChange={(e) => setMemorySearchQuery(e.target.value)}
-                className="cs-input !text-xs !py-1 !pl-8"
-              />
-            </div>
-          )}
-
-          {/* Memory List with Edit, Pin, Delete */}
-          {memory.length === 0 ? (
-            <p className="text-xs text-slate-400 py-2">
-              Memory is currently empty. Facts learned during chats or added above will appear here.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto pr-1 mt-1">
-              {searchMemoryFacts(memory, memorySearchQuery).map((fact, index) => {
-                const isPinned = fact.startsWith('📌 ');
-                const isEditing = editingFactIndex === index;
-                const displayText = isPinned ? fact.slice(3) : fact;
-
-                return (
+                {prof.statusMessage && (
                   <div
-                    key={`${fact}-${index}`}
-                    className={`flex items-center justify-between gap-2 p-2 rounded-lg border text-xs transition-colors ${
-                      isPinned
-                        ? 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-slate-800 dark:text-slate-200'
-                        : 'bg-slate-50/80 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
+                    className={`mt-2 text-[11px] ${
+                      prof.quotaExhausted || vStatus === 'failed'
+                        ? 'text-rose-400'
+                        : vStatus === 'verified'
+                        ? 'text-emerald-400'
+                        : 'text-[var(--text-3)]'
                     }`}
                   >
-                    {isEditing ? (
-                      <div className="flex items-center gap-1.5 flex-1">
+                    {prof.statusMessage}
+                  </div>
+                )}
+
+                {isEditing && (
+                  <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
+                          Profile Name
+                        </span>
                         <input
                           type="text"
-                          value={editingFactText}
-                          onChange={(e) => setEditingFactText(e.target.value)}
-                          className="cs-input !text-xs !py-1 flex-1 font-sans"
-                          autoFocus
+                          value={prof.name}
+                          onChange={(e) =>
+                            updateSavedProfileField(prof.id, {
+                              name: e.target.value,
+                            })
+                          }
+                          className="cs-input w-full text-xs"
                         />
-                        <button
-                          type="button"
-                          className="p-1 text-emerald-600 hover:text-emerald-700"
-                          title="Save"
-                          onClick={() => {
-                            if (!onUpdateMemory) return;
-                            const res = updateMemoryFact(
-                              memory,
-                              fact,
-                              isPinned ? `📌 ${editingFactText.trim()}` : editingFactText.trim()
-                            );
-                            if (res.error) {
-                              setMemoryError(res.error);
-                            } else {
-                              onUpdateMemory(res.updated);
-                              setEditingFactIndex(null);
-                              setEditingFactText('');
-                            }
-                          }}
-                        >
-                          <Save className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-1 text-slate-400 hover:text-slate-600"
-                          title="Cancel"
-                          onClick={() => {
-                            setEditingFactIndex(null);
-                            setEditingFactText('');
-                          }}
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
                       </div>
-                    ) : (
+                      <div>
+                        <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
+                          Provider
+                        </span>
+                        <select
+                          value={prof.provider}
+                          onChange={(e) => {
+                            const nextProv =
+                              e.target.value as ExternalProviderId;
+                            updateSavedProfileField(prof.id, {
+                              provider: nextProv,
+                              externalBaseUrl:
+                                DEFAULT_PROVIDER_BASE_URLS[nextProv] || '',
+                              externalModel:
+                                nextProv === 'mercury'
+                                  ? 'mercury-3'
+                                  : DEFAULT_PROVIDER_MODELS[nextProv] || '',
+                            });
+                          }}
+                          className="cs-input w-full text-xs"
+                        >
+                          {PROVIDER_CATALOG.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-[11px] font-semibold text-[var(--text-2)]">
+                          Model
+                        </span>
+                        {!isBuiltin && (
+                          <button
+                            type="button"
+                            onClick={() => handleRefreshProfileModels(prof)}
+                            disabled={isRefreshing}
+                            className="text-[11px] font-semibold text-[var(--primary)] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            {isRefreshing ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RefreshCw className="w-3 h-3" />
+                            )}
+                            Fetch models
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {modelsForProf.length > 0 && (
+                          <select
+                            value={
+                              modelsForProf.includes(prof.externalModel)
+                                ? prof.externalModel
+                                : '__custom__'
+                            }
+                            onChange={(e) => {
+                              if (e.target.value !== '__custom__') {
+                                updateSavedProfileField(prof.id, {
+                                  externalModel: e.target.value,
+                                });
+                              }
+                            }}
+                            className="cs-input font-mono text-xs"
+                          >
+                            {modelsForProf.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                            <option value="__custom__">Custom model ID…</option>
+                          </select>
+                        )}
+                        <input
+                          type="text"
+                          value={prof.externalModel}
+                          onChange={(e) =>
+                            updateSavedProfileField(prof.id, {
+                              externalModel: e.target.value,
+                            })
+                          }
+                          placeholder={
+                            DEFAULT_PROVIDER_MODELS[prof.provider] ||
+                            'mercury-3'
+                          }
+                          className="cs-input font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {!isKeylessProviderId(prof.provider) && (
                       <>
-                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                          {isPinned && (
-                            <span className="text-amber-500 font-bold shrink-0 text-[11px]" title="Pinned">
-                              📌
-                            </span>
-                          )}
-                          <span className="truncate">{displayText}</span>
+                        <div>
+                          <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
+                            API Key (preserved safely unless edited)
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type={isKeyRevealed ? 'text' : 'password'}
+                              value={prof.externalKeys}
+                              onChange={(e) =>
+                                updateSavedProfileField(prof.id, {
+                                  externalKeys: e.target.value,
+                                })
+                              }
+                              placeholder="sk-... / AIza..."
+                              className="cs-input font-mono flex-1 text-xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRevealedKeyIds((prev) => ({
+                                  ...prev,
+                                  [prof.id]: !prev[prof.id],
+                                }))
+                              }
+                              className="p-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
+                              title={isKeyRevealed ? 'Hide key' : 'Show key'}
+                            >
+                              {isKeyRevealed ? (
+                                <EyeOff className="w-3.5 h-3.5" />
+                              ) : (
+                                <Eye className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+
+                        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
                           <button
                             type="button"
-                            className="p-1 text-slate-400 hover:text-amber-500 rounded"
-                            title={isPinned ? 'Unpin fact' : 'Pin fact to top'}
-                            onClick={() => {
-                              if (!onUpdateMemory) return;
-                              const updated = toggleMemoryPin(memory, fact);
-                              onUpdateMemory(updated);
-                            }}
+                            onClick={() =>
+                              setProfileAdvancedOpen((prev) => ({
+                                ...prev,
+                                [prof.id]: !prev[prof.id],
+                              }))
+                            }
+                            className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
                           >
-                            {isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                            <span>Advanced Options (Base URL & Headers)</span>
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition-transform ${
+                                profileAdvancedOpen[prof.id] ? 'rotate-180' : ''
+                              }`}
+                            />
                           </button>
-                          <button
-                            type="button"
-                            className="p-1 text-slate-400 hover:text-blue-500 rounded"
-                            title="Edit fact"
-                            onClick={() => {
-                              setEditingFactIndex(index);
-                              setEditingFactText(displayText);
-                            }}
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            className="p-1 text-slate-400 hover:text-rose-500 rounded"
-                            title="Delete fact"
-                            onClick={() => {
-                              if (!onUpdateMemory) return;
-                              const updated = deleteMemoryFact(memory, fact);
-                              onUpdateMemory(updated);
-                            }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {profileAdvancedOpen[prof.id] && (
+                            <div className="p-3 border-t border-[var(--border)] space-y-2.5">
+                              <div>
+                                <span className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
+                                  Base URL
+                                </span>
+                                <input
+                                  type="text"
+                                  value={prof.externalBaseUrl}
+                                  onChange={(e) =>
+                                    updateSavedProfileField(prof.id, {
+                                      externalBaseUrl: e.target.value,
+                                    })
+                                  }
+                                  placeholder={
+                                    DEFAULT_PROVIDER_BASE_URLS[prof.provider] ||
+                                    'https://api.openai.com/v1'
+                                  }
+                                  className="cs-input w-full font-mono text-xs"
+                                />
+                              </div>
+                              <div>
+                                <span className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
+                                  Extra Headers (JSON)
+                                </span>
+                                <input
+                                  type="text"
+                                  value={prof.customHeaders || ''}
+                                  onChange={(e) =>
+                                    updateSavedProfileField(prof.id, {
+                                      customHeaders: e.target.value,
+                                    })
+                                  }
+                                  placeholder='{"HTTP-Referer": "https://example.com"}'
+                                  className="cs-input w-full font-mono text-xs"
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })}
         </div>
+      </Card>
 
-        <div className="cs-form-actions mt-3">
-          {confirmClearMemory ? (
-            <button
-              type="button"
-              className="btn btn-danger"
-              onClick={() => {
-                onClearMemory();
-                setConfirmClearMemory(false);
-                notify?.('Memory cleared.');
-              }}
-            >
-              <AlertTriangle className="w-4 h-4" /> Confirm clear memory
-            </button>
+      {activeProfileModels.length > 0 && (
+        <Card
+          title="Quick Model Switch"
+          description={`Switch the model on "${activeProfile.name}".`}
+          icon={<Key className="w-4 h-4" />}
+        >
+          <div className="flex flex-wrap gap-1.5">
+            {activeProfileModels.slice(0, 12).map((m) => {
+              const active =
+                (activeProfile.externalModel || draft.externalModel) === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() =>
+                    updateSavedProfileField(activeProfile.id, {
+                      externalModel: m,
+                    })
+                  }
+                  className={`px-2.5 py-1 rounded-lg text-xs font-mono border transition-colors cursor-pointer ${
+                    active
+                      ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold'
+                      : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </>
+  );
+
+  // ── TAB 2: General & Appearance ──────────────────────────────────────────
+
+  const renderGeneral = () => (
+    <>
+      <Card
+        title="Appearance & Theme"
+        description="Switch between Dark and Light mode."
+        icon={
+          draft.theme === 'dark' ? (
+            <Moon className="w-4 h-4" />
           ) : (
+            <Sun className="w-4 h-4" />
+          )
+        }
+      >
+        <div className="flex items-center justify-between gap-4 py-1">
+          <div className="min-w-0">
+            <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
+              Theme / থিম
+            </div>
+            <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
+              Choose Dark or Light interface theme. Changes persist immediately.
+            </div>
+          </div>
+          <div className="cs-seg" data-testid="theme-selector">
             <button
               type="button"
-              className="btn btn-secondary !text-rose-500"
-              disabled={memory.length === 0}
-              onClick={() => setConfirmClearMemory(true)}
+              data-testid="theme-dark-btn"
+              onClick={() => patch({ theme: 'dark' })}
+              className={`cs-seg-btn ${draft.theme === 'dark' ? 'is-active' : ''}`}
             >
-              <Trash2 className="w-4 h-4" /> Clear memory
+              <Moon className="w-3.5 h-3.5 inline mr-1" />
+              Dark
             </button>
-          )}
+            <button
+              type="button"
+              data-testid="theme-light-btn"
+              onClick={() => patch({ theme: 'light' })}
+              className={`cs-seg-btn ${draft.theme === 'light' ? 'is-active' : ''}`}
+            >
+              <Sun className="w-3.5 h-3.5 inline mr-1" />
+              Light
+            </button>
+          </div>
         </div>
       </Card>
 
-      <Card title="Chat retention" description="Automatically remove old conversations.">
-        <SliderRow
-          label="Retention period"
-          value={draft.retentionDays ?? 0}
-          min={0}
-          max={365}
-          step={1}
-          format={(v) => (v === 0 ? 'Keep forever' : `${v} days`)}
-          onChange={(v) => patch({ retentionDays: v })}
-        />
-      </Card>
+      <Card
+        title="Language & Profile"
+        description="Configure your display language and profile name."
+        icon={<Globe className="w-4 h-4" />}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
+                App Language / অ্যাপের ভাষা
+              </div>
+              <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
+                Select Bengali (বাংলা) or English interface & reply preference.
+              </div>
+            </div>
+            <div className="cs-seg" data-testid="language-selector">
+              <button
+                type="button"
+                data-testid="lang-bn-btn"
+                onClick={() => patch({ appLanguage: 'bn', replyLang: 'bn' })}
+                className={`cs-seg-btn ${
+                  (draft.appLanguage || 'bn') === 'bn' ? 'is-active' : ''
+                }`}
+              >
+                বাংলা
+              </button>
+              <button
+                type="button"
+                data-testid="lang-en-btn"
+                onClick={() => patch({ appLanguage: 'en', replyLang: 'en' })}
+                className={`cs-seg-btn ${
+                  draft.appLanguage === 'en' ? 'is-active' : ''
+                }`}
+              >
+                English
+              </button>
+            </div>
+          </div>
 
-      <Card title="Encryption & secrets" description="How API keys are protected at rest." icon={<ShieldCheck className="w-4 h-4" />}>
-        <p className={`cs-callout ${keystoreEphemeral ? 'warn' : 'success'}`}>
-          <ShieldCheck className="w-4 h-4 shrink-0" />
-          <span>
-            {keystoreEphemeral
-              ? 'IndexedDB unavailable — keys live only in page memory and will not persist after reload.'
-              : 'AES-256-GCM keystore active — encrypted keys are stored in IndexedDB; only ciphertext touches localStorage.'}
-          </span>
-        </p>
-        <p className="cs-callout info">
-          <KeyRound className="w-3.5 h-3.5 shrink-0" />
-          {storedKeyCount} key-bearing config{storedKeyCount === 1 ? '' : 's'} on this device.
-          Keys are excluded from exports and cloud sync by design.
-        </p>
-      </Card>
-
-      <Card title="Backup & restore" description="Secret-free JSON snapshots of your workspace." icon={<Download className="w-4 h-4" />}>
-        <div className="cs-form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onExportBackup}>
-            <Download className="w-4 h-4" /> Export backup
-          </button>
-          <label className="btn btn-secondary cursor-pointer">
-            <Upload className="w-4 h-4" /> Import backup
+          <div className="flex items-center justify-between gap-4 pt-3 border-t border-[var(--border)]">
+            <div className="min-w-0">
+              <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
+                Your Name / আপনার নাম
+              </div>
+              <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
+                How the AI assistant addresses you.
+              </div>
+            </div>
             <input
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => {
-                onImportBackup(e);
-              }}
+              type="text"
+              value={profileName}
+              maxLength={80}
+              placeholder="e.g. Saymon"
+              onChange={(e) => handleNameChange(e.target.value)}
+              className="cs-input text-xs w-44 sm:w-56"
             />
-          </label>
+          </div>
         </div>
-        <div className="cs-form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onSaveRollbackPoint}>
-            Save rollback point
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={!hasRollbackPoint}
-            onClick={onRollback}
-          >
-            <RotateCcw className="w-4 h-4" /> Restore rollback
-          </button>
-        </div>
-      </Card>
-
-      <Card title="Danger zone" description="Permanently erase workspace data." icon={<AlertTriangle className="w-4 h-4" />}>
-        {confirmClearAll ? (
-          <button
-            type="button"
-            className="btn btn-danger w-full"
-            onClick={() => {
-              onClearAllData();
-              setConfirmClearAll(false);
-            }}
-          >
-            <AlertTriangle className="w-4 h-4" /> Click again to erase everything
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-secondary !text-rose-500 w-full"
-            onClick={() => setConfirmClearAll(true)}
-          >
-            <Trash2 className="w-4 h-4" /> Clear all data
-            {auth.configured ? ' (device + cloud)' : ''}
-          </button>
-        )}
-      </Card>
-    </>
-  );
-
-  const renderConnectors = () => (
-    <>
-      <Card
-        title="Integrations Hub — GitHub, Vercel, Supabase & Google"
-        description="Real OAuth & API connections with granular permission verification, live service workbenches, and confirmation-gated operations."
-        icon={<Wrench className="w-4 h-4" />}
-      >
-        {connections && onUpdateConnections ? (
-          <VaultConnectionsPanel
-            connections={connections}
-            onChange={onUpdateConnections}
-            notes={notes}
-            notify={notify || (() => {})}
-            compact
-          />
-        ) : (
-          <p className="cs-callout warn">Connector services are unavailable.</p>
-        )}
-        <div className="cs-form-actions">
-          {onBackupToGithub && (
-            <button type="button" className="btn btn-secondary" onClick={() => onBackupToGithub()}>
-              <Cloud className="w-4 h-4" /> Backup workspace to GitHub
-            </button>
-          )}
-          {onOpenNotebook && (
-            <button type="button" className="btn btn-secondary" onClick={onOpenNotebook}>
-              Open notebook ({notes.length})
-            </button>
-          )}
-        </div>
-      </Card>
-    </>
-  );
-
-  const renderPermissions = () => (
-    <>
-      <Card title="Autonomy" description="How much authority the assistant has over itself." icon={<Bot className="w-4 h-4" />}>
-        <SegmentedRow
-          label="Self-control authority"
-          value={autonomy}
-          options={[
-            { value: 'safe', label: 'Safe (confirm changes)' },
-            { value: 'full', label: 'Full (act directly)' },
-          ]}
-          onChange={(v) => onAutonomyChange?.(v as AutonomyLevel)}
-        />
-        <div className="cs-form-actions">
-          <button type="button" className="btn btn-secondary" onClick={selfCheck}>
-            <RefreshCw className="w-4 h-4" /> Run self-health check &amp; repair
-          </button>
-        </div>
-      </Card>
-
-      <Card title="Capabilities" description="Engine features the assistant is allowed to use.">
-        <ToggleRow
-          label="Proactive suggestions"
-          description="Offer wording and clarity improvements automatically."
-          checked={Boolean(draft.proactiveAuto)}
-          onChange={(v) => patch({ proactiveAuto: v })}
-        />
-        <ToggleRow
-          label="Fast decision logic"
-          description="Short-circuit simple questions without a model round-trip."
-          checked={draft.fastDecision !== false}
-          onChange={(v) => patch({ fastDecision: v })}
-        />
-        <ToggleRow
-          label="GPU acceleration"
-          description="Use smoother GPU-driven animations where available."
-          checked={draft.gpuAccel !== false}
-          onChange={(v) => patch({ gpuAccel: v })}
-        />
-        <ToggleRow
-          label="Memory cache"
-          description="Cache deterministic answers on the default engine."
-          checked={draft.memoryCache !== false}
-          onChange={(v) => patch({ memoryCache: v })}
-        />
       </Card>
 
       <Card
-        title="AI tool permissions"
-        description="Enable or disable individual operational tools. Disabled tools are rejected on both client and server."
-        icon={<Wrench className="w-4 h-4" />}
+        title="Custom System Instruction / AI Persona"
+        description="Define custom instructions or persona rules that guide the AI across all conversations."
+        icon={<Sparkles className="w-4 h-4" />}
       >
-        {TOOL_CAPABILITY_REGISTRY.map((tool) => {
-          const enabled = isToolEnabled(tool.id, draft.enabledTools);
-          return (
-            <ToggleRow
-              key={tool.id}
-              label={`${tool.name}${tool.requiresConfirmation ? ' (Confirm required)' : ''}`}
-              description={`${tool.description} · ${tool.statusNote}`}
-              checked={enabled}
-              onChange={(next) =>
-                patch({
-                  enabledTools: {
-                    ...(draft.enabledTools || {}),
-                    [tool.id]: next,
-                  },
-                })
-              }
-            />
-          );
-        })}
-      </Card>
-
-
-      <Card title="Reliability" description="Retries and request timeouts on failure.">
-        <SliderRow
-          label="Fallback retries"
-          value={draft.maxRetries ?? 2}
-          min={0}
-          max={4}
-          step={1}
-          onChange={(v) => patch({ maxRetries: v })}
-        />
-        <SliderRow
-          label="Request timeout"
-          value={draft.requestTimeoutSec ?? 120}
-          min={30}
-          max={240}
-          step={10}
-          format={(v) => `${v}s`}
-          onChange={(v) => patch({ requestTimeoutSec: v })}
-        />
-      </Card>
-
-      <Card title="Behavior guidance" description="Standing instructions applied to every reply.">
-        <div className="cs-row cs-row-column">
-          <div className="cs-row-info">
-            <span className="cs-label">Custom instructions</span>
+        <div className="space-y-2">
+          <div className="text-xs font-semibold text-[var(--text)]">
+            System Instruction (সিস্টেম নির্দেশনা)
           </div>
           <textarea
-            className="cs-input cs-textarea"
-            rows={3}
+            rows={4}
+            data-testid="custom-system-instruction-textarea"
             value={draft.customInst || ''}
-            maxLength={500}
-            placeholder="e.g. Always answer in Bengali with short examples."
+            maxLength={4000}
+            placeholder="e.g. Always answer concisely in fluent Bengali and provide complete TypeScript code examples..."
             onChange={(e) => patch({ customInst: e.target.value })}
+            className="cs-textarea w-full text-xs"
           />
-        </div>
-      </Card>
-
-      <Card title="AI-built skills & widgets" description="Capabilities the assistant installed for itself." icon={<Sparkles className="w-4 h-4" />}>
-        {skills.length === 0 && selfWidgets.length === 0 && (
-          <p className="cs-callout info">No self-built skills yet — ask the assistant to create one.</p>
-        )}
-        {skills.map((sk) => (
-          <div key={sk.id} className="cs-skill-row">
-            <div className="cs-row-info">
-              <span className="cs-label">{sk.name}</span>
-              <span className="cs-desc">{sk.description}</span>
-            </div>
-            <div className="cs-skill-actions">
-              <label className="toggle-switch">
-                <input
-                  type="checkbox"
-                  checked={sk.enabled}
-                  onChange={(e) =>
-                    onUpdateSkills?.(
-                      skills.map((s) => (s.id === sk.id ? { ...s, enabled: e.target.checked } : s))
-                    )
-                  }
-                />
-                <span className="slider" />
-              </label>
-              {onOpenSkill && (
-                <button type="button" className="btn btn-secondary !py-1 !px-2 !text-[11px]" onClick={() => onOpenSkill(sk)}>
-                  Open
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn-secondary !py-1 !px-2 !text-[11px] !text-rose-500"
-                onClick={() => onUpdateSkills?.(skills.filter((s) => s.id !== sk.id))}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
+          <div className="text-[11px] text-[var(--text-3)]">
+            Automatically saved to localStorage as you type.
           </div>
-        ))}
-        {selfWidgets.map((w) => (
-          <div key={w.id} className="cs-skill-row">
-            <div className="cs-row-info">
-              <span className="cs-label">{w.title}</span>
-              {w.description && <span className="cs-desc">{w.description}</span>}
-            </div>
-            <div className="cs-skill-actions">
-              {onOpenWidget && (
-                <button type="button" className="btn btn-secondary !py-1 !px-2 !text-[11px]" onClick={() => onOpenWidget(w)}>
-                  Open
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn btn-secondary !py-1 !px-2 !text-[11px] !text-rose-500"
-                onClick={() => onUpdateWidgets?.(selfWidgets.filter((x) => x.id !== w.id))}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        ))}
-      </Card>
-    </>
-  );
-
-  const renderAccount = () => (
-    <>
-      <Card title="Local profile" description="Identity used inside conversations on this device.">
-        <div className="cs-account-row">
-          <div className="cs-avatar">
-            {draft.avatarDataUrl ? (
-              <img src={draft.avatarDataUrl} alt="" />
-            ) : (
-              (profileName || 'S').charAt(0).toUpperCase()
-            )}
-          </div>
-          <label className="btn btn-secondary cursor-pointer">
-            <Upload className="w-4 h-4" /> Change avatar
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleAvatarPick} />
-          </label>
-        </div>
-        <TextRow
-          label="Profile name"
-          value={profileName}
-          maxLength={80}
-          onChange={handleNameChange}
-        />
-        <TextRow
-          label="Contact email (local)"
-          type="email"
-          value={draft.accountEmail || ''}
-          maxLength={120}
-          onChange={(v) => patch({ accountEmail: v })}
-        />
-      </Card>
-
-      <Card title="Usage & limits" description="Today's activity and optional message cap.">
-        <div className="cs-usage">
-          <span className="cs-usage-num">{usageToday}</span>
-          <span className="cs-desc">messages today</span>
-        </div>
-        <SliderRow
-          label="Daily message cap"
-          description="0 means no cap."
-          value={draft.dailyMessageLimit ?? 0}
-          min={0}
-          max={500}
-          step={10}
-          onChange={(v) => patch({ dailyMessageLimit: v })}
-        />
-      </Card>
-
-      <Card title="About" description={`SMFTA AI Pro v${APP_VERSION}`}>
-        <div className="cs-form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onOpenWhatsNew}>
-            What&apos;s new
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={handleResetDefaults}>
-            <RotateCcw className="w-4 h-4" /> Restore default settings
-          </button>
         </div>
       </Card>
     </>
   );
 
-  const renderPerformance = () => (
+  // ── TAB 3: Memory & Privacy ──────────────────────────────────────────────
+
+  const renderPrivacy = () => (
     <>
       <Card
-        title="Response mode & streaming"
-        description="Control response tier, token streaming, and output length. Actual network latency depends on the connected provider."
-        icon={<Zap className="w-4 h-4" />}
+        title="Memory Controls & Privacy"
+        description="Manage how the AI remembers facts from your conversations."
+        icon={<Shield className="w-4 h-4" />}
       >
-        <SegmentedRow
-          label="Response mode"
-          description="Fast prioritizes concise speed; Balanced is everyday default; High-Quality enables deeper analysis."
-          value={draft.mode}
-          options={[
-            { value: 'fast', label: 'Fast' },
-            { value: 'balanced', label: 'Balanced' },
-            { value: 'power', label: 'High-Quality' },
-          ]}
-          onChange={(v) => patch({ mode: v as AppSettings['mode'] })}
-        />
         <ToggleRow
-          label="Stream responses incrementally"
-          description="Enabled by default when supported by the provider. Press Stop in chat at any time to abort an in-flight request."
-          checked={draft.streamingReveal !== false}
-          onChange={(v) => patch({ streamingReveal: v })}
+          label="Auto-Memory / অটো-মেমোরি"
+          description="Automatically save important personal facts shared during conversation."
+          checked={draft.autoMemory !== false}
+          onChange={(v) => patch({ autoMemory: v })}
+          testId="auto-memory-toggle"
         />
-        <SliderRow
-          label="Maximum output tokens"
-          value={draft.maxOutputTokens ?? 1024}
-          min={256}
-          max={32768}
-          step={256}
-          onChange={(v) => patch({ maxOutputTokens: v })}
-        />
-        <SliderRow
-          label="Temperature"
-          description="Applied when supported by the selected model."
-          value={draft.weightTemp ?? 0.7}
-          min={0.1}
-          max={1.2}
-          step={0.05}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => patch({ weightTemp: v })}
-        />
-        <SliderRow
-          label="Top-P sampling"
-          description="Applied when supported by the selected model."
-          value={draft.topP ?? 0.9}
-          min={0.1}
-          max={1}
-          step={0.05}
-          format={(v) => v.toFixed(2)}
-          onChange={(v) => patch({ topP: v })}
-        />
-      </Card>
 
-      <Card
-        title="Timeouts, retries & honest fallback policy"
-        description="Safe retry behavior and transparent provider status reporting."
-        icon={<Server className="w-4 h-4" />}
-      >
-        <SliderRow
-          label="Request timeout"
-          value={draft.requestTimeoutSec ?? 120}
-          min={30}
-          max={240}
-          step={10}
-          format={(v) => `${v}s`}
-          onChange={(v) => patch({ requestTimeoutSec: v })}
-        />
-        <SliderRow
-          label="Safe retry attempts"
-          value={draft.maxRetries ?? 2}
-          min={0}
-          max={4}
-          step={1}
-          onChange={(v) => patch({ maxRetries: v })}
-        />
-        <ToggleRow
-          label="Allow keyless fallback engine"
-          description="When enabled, falls back to the built-in engine if your custom provider is unreachable, and clearly labels the actual provider used."
-          checked={Boolean(draft.allowKeylessFallback)}
-          onChange={(v) => patch({ allowKeylessFallback: v })}
-        />
-        <ToggleRow
-          label="Show actual provider, model & latency on messages"
-          checked={Boolean(draft.showTokenUsage)}
-          onChange={(v) => patch({ showTokenUsage: v })}
-        />
-      </Card>
-    </>
-  );
-
-  const renderAccessibility = () => (
-    <>
-      <Card
-        title="Visual & keyboard accessibility"
-        description="High contrast, visible keyboard focus rings, touch target sizing, and motion controls."
-        icon={<Eye className="w-4 h-4" />}
-      >
-        <ToggleRow
-          label="High contrast mode"
-          description="Increase text and border contrast across chat and settings."
-          checked={Boolean(draft.highContrast)}
-          onChange={(v) => patch({ highContrast: v })}
-        />
-        <ToggleRow
-          label="Visible keyboard focus rings"
-          description="Highlight focused buttons, inputs, and links during Tab navigation."
-          checked={draft.focusRingVisible !== false}
-          onChange={(v) => patch({ focusRingVisible: v })}
-        />
-        <ToggleRow
-          label="Large mobile touch targets"
-          description="Enforce generous touch target sizing for mobile and tablet ergonomics."
-          checked={Boolean(draft.largeTouchTargets)}
-          onChange={(v) => patch({ largeTouchTargets: v })}
-        />
-        <ToggleRow
-          label="Reduced motion"
-          description="Disable decorative transitions and animations."
-          checked={Boolean(draft.reducedMotion)}
-          onChange={(v) => patch({ reducedMotion: v })}
-        />
-        <SegmentedRow
-          label="Interface font size"
-          value={draft.fontsize}
-          options={[
-            { value: 'small', label: 'Small' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'large', label: 'Large' },
-          ]}
-          onChange={(v) => patch({ fontsize: v as AppSettings['fontsize'] })}
-        />
-        <SegmentedRow
-          label="Code font size"
-          value={draft.codeFontSize || 'normal'}
-          options={[
-            { value: 'small', label: 'Small' },
-            { value: 'normal', label: 'Normal' },
-            { value: 'large', label: 'Large' },
-          ]}
-          onChange={(v) => patch({ codeFontSize: v as AppSettings['codeFontSize'] })}
-        />
-      </Card>
-    </>
-  );
-
-  const renderAdvanced = () => (
-    <>
-      <Card
-        title="Streaming & provider diagnostics"
-        description="Inspect real-time provider state, settings schema version, and capability registry."
-        icon={<SlidersHorizontal className="w-4 h-4" />}
-      >
-        <ToggleRow
-          label="Enable live diagnostics overlay"
-          description="Display streaming TTFT, latency, and provider verification details on responses."
-          checked={Boolean(draft.diagnosticsEnabled)}
-          onChange={(v) => patch({ diagnosticsEnabled: v, showTokenUsage: v ? true : draft.showTokenUsage })}
-        />
-        <div className="cs-callout info">
+        <div className="pt-3 mt-3 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <strong>System Schema:</strong> v{draft.settingsVersion ?? SETTINGS_SCHEMA_VERSION} ·{' '}
-            <strong>App Version:</strong> v{APP_VERSION} ·{' '}
-            <strong>Active Profile:</strong> {activeProfile?.name} ({activeProfile?.provider}) ·{' '}
-            <strong>Status:</strong> {describeProviderStatus(activeProfile)}
-          </div>
-        </div>
-      </Card>
-
-      <Card
-        title="Code Workspace runtime capabilities"
-        description="Honest execution matrix for /workspace/code."
-        icon={<Wrench className="w-4 h-4" />}
-      >
-        {WORKSPACE_RUNTIME_CAPABILITIES.map((cap) => (
-          <div key={cap.language} className="cs-row">
-            <div className="cs-row-info">
-              <span className="cs-label uppercase">{cap.language}</span>
-              <span className="cs-desc">{cap.description}</span>
+            <div className="text-xs font-semibold text-red-500">
+              Complete Memory Wipe / সম্পূর্ণ মেমোরি রিসেট
             </div>
-            <span className={`cs-pill ${cap.executableInBrowser ? 'connected' : 'not-tested'}`}>
-              {cap.executableInBrowser ? 'Sandboxed Run' : 'Editor Only'}
-            </span>
+            <div className="text-[11px] text-[var(--text-3)] mt-0.5">
+              Permanently deletes all saved facts (`smfta_memory` & `smfta_memory_backup`) and resets active memory immediately.
+            </div>
           </div>
-        ))}
-      </Card>
-    </>
-  );
 
-  const panels: Record<SectionId, () => React.ReactNode> = {
-    general: renderGeneral,
-    appearance: renderAppearance,
-    providers: renderProviders,
-    performance: renderPerformance,
-    chat: renderChat,
-    privacy: renderPrivacy,
-    connectors: renderConnectors,
-    permissions: renderPermissions,
-    accessibility: renderAccessibility,
-    advanced: renderAdvanced,
-    account: renderAccount,
-  };
-
-
-  const shell = (
-    <div className={`cs-shell ${isInline ? 'is-inline' : ''}`}>
-      {/* Left navigation */}
-      <nav className={`cs-nav ${mobileNavOpen ? 'is-open' : 'is-hidden-mobile'}`} aria-label="Settings sections">
-        <div className="cs-nav-head">
-          <div className="cs-nav-title-row">
-            <h2 className="cs-nav-title">Settings</h2>
+          {!confirmingClearMemory ? (
             <button
               type="button"
-              className="cs-nav-close"
-              onClick={handleSaveAndClose}
-              aria-label="Close settings"
+              data-testid="clear-all-memory-btn"
+              onClick={() => setConfirmingClearMemory(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-500/15 text-red-500 border border-red-500/35 hover:bg-red-500/25 transition-colors inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
             >
-              <X className="w-4 h-4" />
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear All Memory / সব মেমোরি মুছুন</span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                data-testid="confirm-clear-all-memory-btn"
+                onClick={handleConfirmClearAllMemory}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors cursor-pointer"
+              >
+                Confirm Wipe ({memory.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingClearMemory(false)}
+                className="px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      <Card
+        title={`Saved Memory Facts (${memory.length})`}
+        description="Context-relevant facts are selectively injected into prompts. Delete any item instantly with the trash icon."
+      >
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              data-testid="add-memory-fact-input"
+              value={newMemoryFact}
+              onChange={(e) => setNewMemoryFact(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddMemoryItem();
+                }
+              }}
+              placeholder="Add a memory fact (e.g. নাম: সায়মন / Profession: Full-Stack Developer)"
+              className="cs-input flex-1 text-xs"
+            />
+            <button
+              type="button"
+              data-testid="add-memory-fact-btn"
+              onClick={handleAddMemoryItem}
+              className="px-3.5 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
             </button>
           </div>
-        </div>
-        <div className="cs-nav-search">
-          <Search className="w-4 h-4" />
-          <input
-            className="cs-search-input"
-            placeholder="Search settings"
-            value={navQuery}
-            onChange={(e) => setNavQuery(e.target.value)}
-            aria-label="Search settings"
-          />
-          <kbd className="cs-kbd">⌘F</kbd>
-        </div>
-        <div className="cs-nav-list no-scrollbar">
-          {filteredSections.length === 0 && (
-            <p className="cs-empty">No settings found for “{navQuery}”.</p>
+
+          {memory.length === 0 ? (
+            <div
+              data-testid="memory-empty-state"
+              className="py-6 text-center text-xs text-[var(--text-3)] rounded-xl border border-dashed border-[var(--border)]"
+            >
+              No saved memory facts. Memory bank is completely clean.
+            </div>
+          ) : (
+            <div
+              data-testid="memory-facts-list"
+              className="max-h-72 overflow-y-auto space-y-1.5 pr-1"
+            >
+              {memory.map((fact, idx) => (
+                <div
+                  key={`${idx}-${fact}`}
+                  data-testid="memory-fact-row"
+                  className="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-xs text-[var(--text)]"
+                >
+                  <span className="break-words min-w-0 flex-1">{fact}</span>
+                  <button
+                    type="button"
+                    data-testid={`delete-memory-item-${idx}`}
+                    onClick={() => handleDeleteSingleMemory(fact)}
+                    className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
+                    title="Delete memory item"
+                    aria-label={`Delete memory fact ${fact}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
-          {filteredSections.map((id) => {
+        </div>
+      </Card>
+    </>
+  );
+
+  const renderActiveSection = () => {
+    switch (tab) {
+      case 'providers':
+        return renderProviders();
+      case 'general':
+        return renderGeneral();
+      case 'privacy':
+        return renderPrivacy();
+    }
+  };
+
+  const currentMeta = SECTION_META[tab];
+
+  const shellContent = (
+    <div
+      className={`cs-shell ${isInline ? 'is-inline' : ''}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Left Navigation: Strictly 3 Clean Tabs */}
+      <aside className="cs-nav hidden sm:flex" aria-label="Settings sections">
+        <div className="cs-nav-head px-4 pt-4 pb-2 flex items-center justify-between">
+          <div className="cs-nav-title">Settings</div>
+        </div>
+
+        <nav className="cs-nav-list" data-testid="settings-nav-tabs">
+          {SECTION_ORDER.map((id) => {
             const meta = SECTION_META[id];
+            const Icon = meta.icon;
+            const active = tab === id;
             return (
               <button
                 key={id}
                 type="button"
-                className={`cs-nav-item ${tab === id ? 'active' : ''}`}
                 data-section={id}
-                aria-current={tab === id ? 'page' : undefined}
-                onClick={() => openSection(id)}
+                data-testid={`settings-tab-${id}`}
+                onClick={() => setTab(id)}
+                className={`cs-nav-item ${active ? 'active' : ''}`}
               >
-                <span className="cs-nav-icon">{meta.icon}</span>
+                <span className="cs-nav-icon">
+                  <Icon className="w-4 h-4" />
+                </span>
                 <span className="cs-nav-meta">
                   <span className="cs-nav-label">{meta.label}</span>
                   <span className="cs-nav-hint">{meta.hint}</span>
                 </span>
-                <ChevronRight className="w-4 h-4 cs-nav-arrow" />
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="cs-panel">
+        <header className="cs-panel-head justify-between">
+          <div className="min-w-0">
+            <h2>{currentMeta.label}</h2>
+            <p>{currentMeta.hint}</p>
+          </div>
+          {!isInline && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="cs-close"
+              aria-label="Close settings"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </header>
+
+        {/* Mobile 3-Tab Pill Switcher for compact viewports */}
+        <div className="flex sm:hidden items-center gap-1.5 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
+          {SECTION_ORDER.map((id) => {
+            const meta = SECTION_META[id];
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border transition-colors ${
+                  active
+                    ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]'
+                    : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)]'
+                }`}
+              >
+                {meta.label}
               </button>
             );
           })}
         </div>
-      </nav>
 
-      {/* Content panel */}
-      <div className={`cs-panel ${mobileNavOpen ? 'is-hidden-mobile' : 'is-open'}`}>
-        <header className="cs-panel-head">
-          <button
-            type="button"
-            className="cs-back-btn lg:hidden"
-            onClick={() => setMobileNavOpen(true)}
-            aria-label="Back to sections"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <h2>{SECTION_META[tab].label}</h2>
-            <p>{SECTION_META[tab].hint}</p>
-          </div>
-          <button type="button" className="cs-close" onClick={handleSaveAndClose} aria-label="Close settings">
-            ×
-          </button>
-        </header>
-        <div className="cs-panel-body no-scrollbar">{panels[tab]()}</div>
-        <footer className="cs-panel-footer">
-          <button type="button" className="btn btn-secondary" onClick={handleResetDefaults}>
-            <RotateCcw className="w-4 h-4" /> Reset
-          </button>
-          <div className="cs-footer-right">
-            <button type="button" className="btn btn-secondary" onClick={handleDiscardAndClose}>
-              Cancel
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handleSaveAndClose}>
-              Save changes
-            </button>
-          </div>
-        </footer>
+        <div className="cs-panel-body">{renderActiveSection()}</div>
       </div>
     </div>
   );
 
   if (isInline) {
-    return <div className="cs-inline-wrap">{shell}</div>;
+    return <div className="cs-inline-wrap">{shellContent}</div>;
   }
+
   return (
-    <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="Settings">
-      <div className="cs-modal">{shell}</div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-xs p-2 sm:p-4"
+      onClick={onClose}
+    >
+      <div className="cs-modal">{shellContent}</div>
     </div>
   );
 };
-
-export default SettingsModal;

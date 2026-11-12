@@ -62,7 +62,7 @@ export const PRIMARY_PROVIDER_OPTIONS: Array<{
   { id: 'gemini_custom', label: 'Gemini', short: 'Gemini', defaultModel: 'gemini-2.5-flash' },
   { id: 'openai', label: 'OpenAI', short: 'OpenAI', defaultModel: 'gpt-4o-mini' },
   { id: 'anthropic', label: 'Anthropic', short: 'Anthropic', defaultModel: 'claude-sonnet-4-20250514' },
-  { id: 'custom', label: 'Custom', short: 'Custom', defaultModel: 'mercury-3' },
+  { id: 'custom', label: 'Custom / OpenRouter', short: 'Custom / OpenRouter', defaultModel: 'mercury-3' },
 ];
 
 export const UNIFIED_PROVIDER_CATALOG: UnifiedProviderCatalogItem[] =
