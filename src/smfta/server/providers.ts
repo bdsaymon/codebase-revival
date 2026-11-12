@@ -334,18 +334,6 @@ export function resolveEffectiveProvider(
     return cleanProvider || 'xrahat';
   }
 
-  if (detected && detected !== cleanProvider) {
-    if (
-      detected === 'gemini_custom' &&
-      (cleanProvider === 'openrouter' ||
-        cleanProvider === 'unorouter' ||
-        cleanProvider === 'gemini_openai')
-    ) {
-      return cleanProvider;
-    }
-    return detected;
-  }
-
   return cleanProvider;
 }
 

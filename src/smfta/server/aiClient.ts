@@ -123,6 +123,7 @@ export function buildAdHocProviderConfig(params: {
   discoveredModels?: string[];
   exactModelOnly?: boolean;
   respectCustomBaseUrl?: boolean;
+  contextWindow?: number;
 }): {
   effectiveProvider: string;
   adHocProviders: AdHocProviderInput[];
@@ -253,6 +254,9 @@ export function buildAdHocProviderConfig(params: {
         let ctx = 256_000;
         if (lower.includes('gemini')) ctx = 1_000_000;
         else if (lower.includes('claude')) ctx = 256_000;
+        if (typeof params.contextWindow === 'number' && Number.isFinite(params.contextWindow)) {
+          ctx = Math.max(2048, Math.min(1_000_000, Math.round(params.contextWindow)));
+        }
         return {
           model_id: modelId,
           context_window: ctx,
@@ -293,7 +297,7 @@ export function buildAdHocProviderConfig(params: {
 
   // Server Gemini key if available and either smfta_cloud or fallback
   const serverGemKey = getServerGeminiKey();
-  if (serverGemKey && (isExplicitKeyless || !hasUserKeys)) {
+  if (serverGemKey && isExplicitKeyless) {
     // Built-in SMFTA tier ids (smfta-flash/pro/ultra) and legacy fabricated
     // placeholders are client-side labels only — the keyless engine picks its
     // own vendor model, so never forward them as a real Gemini model name.

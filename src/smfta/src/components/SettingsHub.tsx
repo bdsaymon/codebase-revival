@@ -725,7 +725,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ('provider' in changes ||
         'externalKeys' in changes ||
         'externalModel' in changes ||
-        'externalBaseUrl' in changes) &&
+        'externalBaseUrl' in changes ||
+        'contextWindow' in changes ||
+        'maxOutputTokens' in changes ||
+        'supportsStreaming' in changes) &&
       !('verified' in changes);
     const nextList = localProfiles.map((p) =>
       p.id === id
@@ -880,6 +883,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalModel: prof.externalModel,
             externalBaseUrl: prof.externalBaseUrl,
             testStreaming: prof.supportsStreaming !== false,
+            contextWindow: prof.contextWindow,
           }),
         }).catch(() => null);
         if (resp && resp.status !== 404) {

@@ -724,6 +724,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     discoveredModels = [],
     projectContext = '',
     supportsStreaming = true,
+    contextWindow,
   } = req.body || {};
 
   // P0-01 & P0-03: Derive isolated user scope from authenticated server identity
@@ -1062,6 +1063,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     externalBaseUrl,
     maxOutputTokens: effectiveMaxOutputTokens,
     discoveredModels: parsedDiscoveredModels,
+    exactModelOnly: Boolean(activeCustomModelName),
+    contextWindow,
     respectCustomBaseUrl: true,
   });
 

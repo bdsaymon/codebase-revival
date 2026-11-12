@@ -20,3 +20,5 @@
 - Shared website previews (`/preview/:id`) are stored in the `smfta_published_previews` table via the server admin client, because in-memory storage is lost between server instances and links broke on other devices.
 - The API adapter rewrites the request host from forwarded/origin/referer headers (`resolvePublicOrigin`), because behind the hosting proxy the raw host is internal and OAuth links pointed at localhost.
 - The SMFTA code workspace is a view inside the app at `/`; never change the browser address to open it, because the site router has no page for app-internal paths and shows a 404.
+- Preserve explicit provider selections on save and dispatch; infer a vendor only for unset/built-in selections, because compatible services can share key prefixes.
+- Build per-profile context limits and exact selected model IDs into ad-hoc provider configurations so chat and connection tests use the same constraints.

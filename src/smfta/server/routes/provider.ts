@@ -391,6 +391,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     externalModel = '',
     externalBaseUrl = '',
     testStreaming = false,
+    contextWindow,
   } = req.body || {};
 
   const keys = String(externalKeys || '')
@@ -588,6 +589,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     externalModel: effectiveProbeModel,
     externalBaseUrl: effectiveBaseUrl,
     maxOutputTokens: probeMaxTokens,
+    contextWindow,
     discoveredModels,
     exactModelOnly: Boolean(requestedExplicitModel),
     respectCustomBaseUrl: true,

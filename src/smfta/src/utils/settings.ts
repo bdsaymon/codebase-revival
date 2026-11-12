@@ -1,5 +1,4 @@
 import { AppSettings } from '../types';
-import { detectProviderFromKey } from './providers';
 import { DEFAULT_ENABLED_TOOLS } from './capabilityRegistry';
 
 export const SETTINGS_SCHEMA_VERSION = 19;
@@ -90,6 +89,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const VALID_PROVIDERS: ReadonlyArray<NonNullable<AppSettings['provider']>> = [
   'xrahat',
   'smfta_cloud',
+  'inceptionlabs',
   'custom',
   'gemini_custom',
   'gemini_openai',
@@ -144,30 +144,14 @@ export function sanitizeSettings(input: unknown): AppSettings {
       ? (v as T)
       : fallback;
 
-  let provider = oneOf(
+  const provider = oneOf(
     raw.provider,
     VALID_PROVIDERS,
     DEFAULT_SETTINGS.provider as NonNullable<AppSettings['provider']>
   );
   const externalKeys = str(raw.externalKeys, '').slice(0, 4000);
 
-  // Respect explicit provider choices. Only auto-heal vendor-specific prefixes
-  // when a custom provider is selected and the key unambiguously belongs to another vendor.
-  const preserveExplicitProvider =
-    provider === 'xrahat' ||
-    provider === 'smfta_cloud' ||
-    provider === 'custom' ||
-    provider === 'ollama' ||
-    provider === 'lmstudio' ||
-    provider === 'gemini_openai';
-  if (!preserveExplicitProvider) {
-    const detected = detectProviderFromKey(
-      externalKeys.split(/[\n,;]+/)[0] || ''
-    );
-    if (detected && detected !== provider) {
-      provider = detected as typeof provider;
-    }
-  }
+  // A key prefix is not a reliable vendor identity; preserve the user's selection.
 
   let externalModel = str(raw.externalModel, '').trim().slice(0, 200);
   if (/^gemini-1\.5/i.test(externalModel)) {
