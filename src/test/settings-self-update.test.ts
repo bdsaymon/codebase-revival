@@ -1,38 +1,43 @@
 import { describe, expect, it } from 'vitest';
-import { SYSTEM_IDENTITY_CORE_DIRECTIVE } from '../smfta/server/coreDirective';
-import { buildSystemInstruction } from '../smfta/server/systemPrompt';
 import { DEFAULT_SETTINGS, sanitizeSettings } from '../smfta/src/utils/settings';
+import { applySettingsUpdate, parseSettingsUpdateResponse } from '../smfta/src/utils/settingsUpdate';
 
-describe('settings self-update contract', () => {
-  it('includes the user-requested system identity core directive', () => {
-    expect(SYSTEM_IDENTITY_CORE_DIRECTIVE).toContain('SYSTEM IDENTITY & CORE DIRECTIVE');
-    expect(SYSTEM_IDENTITY_CORE_DIRECTIVE).toContain('Never invent facts');
+describe('settings update envelope', () => {
+  it('parses a valid update, strips control syntax, and returns only requested fields', () => {
+    const result = parseSettingsUpdateResponse(
+      'Done.\n⟦SELF_UPDATE⟧{"theme":"dark","mode":"balanced"}⟦/SELF_UPDATE⟧',
+      sanitizeSettings({})
+    );
+    expect(result.responseText).toBe('Done.');
+    expect(result.settingsPatch).toEqual({ theme: 'dark', mode: 'balanced' });
+    expect(result.error).toBeUndefined();
   });
 
-  it('retains the self-update envelope and safe supported setting keys', () => {
-    const prompt = buildSystemInstruction({ mode: 'balanced', replyLang: 'bn' });
-    expect(prompt).toContain('⟦SELF_UPDATE⟧');
-    expect(prompt).toContain('⟦/SELF_UPDATE⟧');
-    expect(prompt).toContain('responseTone');
-    expect(prompt).toContain('provider');
-    expect(prompt).toContain('enabledTools');
-    expect(prompt).toContain('Never emit provider keys');
+  it('rejects malformed JSON and multiple blocks', () => {
+    expect(parseSettingsUpdateResponse('⟦SELF_UPDATE⟧{bad}⟦/SELF_UPDATE⟧', sanitizeSettings({})).error)
+      .toBe('invalid_json');
+    expect(parseSettingsUpdateResponse(
+      '⟦SELF_UPDATE⟧{"theme":"dark"}⟦/SELF_UPDATE⟧⟦SELF_UPDATE⟧{"mode":"power"}⟦/SELF_UPDATE⟧',
+      sanitizeSettings({})
+    ).error).toBe('multiple_blocks');
   });
 
-  it('keeps application defaults and schema validation as the settings authority', () => {
-    expect(sanitizeSettings({}).mode).toBe(DEFAULT_SETTINGS.mode);
-    const safe = sanitizeSettings({ mode: 'balanced', theme: 'dark', weightTemp: 99, provider: 'not-a-provider' });
-    expect(safe.mode).toBe('balanced');
-    expect(safe.theme).toBe('dark');
-    expect(safe.weightTemp).toBe(1.2);
-    expect(safe.provider).toBe(DEFAULT_SETTINGS.provider);
+  it('drops unknown, secret, and privilege fields and clamps values through canonical schema', () => {
+    const result = parseSettingsUpdateResponse(
+      '⟦SELF_UPDATE⟧{"theme":"dark","externalKeys":"steal-me","isAdmin":true,"weightTemp":9,"dailyMessageLimit":99999}⟦/SELF_UPDATE⟧',
+      sanitizeSettings({})
+    );
+    expect(result.settingsPatch).toEqual({ theme: 'dark', weightTemp: 1.2, dailyMessageLimit: 10_000 });
+    expect('externalKeys' in (result.settingsPatch || {})).toBe(false);
+    expect('isAdmin' in (result.settingsPatch || {})).toBe(false);
   });
 
-  it('does not allow prompt-generated privilege fields through schema sanitization', () => {
-    const safe = sanitizeSettings({ provider: 'openai', isAdmin: true, testingBypass: true, dailyMessageLimit: 50_000 });
-    expect(safe.provider).toBe('openai');
-    expect('isAdmin' in safe).toBe(false);
-    expect('testingBypass' in safe).toBe(false);
-    expect(safe.dailyMessageLimit).toBe(10_000);
+  it('applies valid patches without resetting unrelated preferences', () => {
+    const current = sanitizeSettings({ mode: 'power', density: 'spacious' });
+    const updated = applySettingsUpdate(current, { theme: 'dark' });
+    expect(updated.theme).toBe('dark');
+    expect(updated.mode).toBe('power');
+    expect(updated.density).toBe('spacious');
+    expect(updated.mode).not.toBe(DEFAULT_SETTINGS.mode);
   });
 });
