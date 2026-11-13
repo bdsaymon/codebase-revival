@@ -1,0 +1,336 @@
+/* ════════════════════════════════════════════════════════════════════════
+   v19.0 — REFERENCE-MATCHED REFINEMENT LAYER
+   Loaded after styles.css so every rule here wins on equal specificity.
+   Scope: chat surface (header / messages / composer), model picker,
+   settings hub, auth. No app logic touched — class contracts preserved.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root,
+[data-theme='dark'] {
+  --ref-deep: #0a0e1a;
+  --ref-bg: #0b0f18;
+  --ref-panel: #111827;
+  --ref-panel-2: #151c2c;
+  --ref-line: rgba(148, 163, 184, 0.16);
+  --ref-violet: #6d5ef5;
+  --ref-violet-2: #8b7cff;
+  --ref-cyan: #22d3ee;
+  --ref-radius: 16px;
+}
+
+[data-theme='light'] {
+  --ref-bg: #f6f7fb;
+  --ref-panel: #ffffff;
+  --ref-panel-2: #f4f6fb;
+  --ref-line: rgba(15, 23, 42, 0.1);
+}
+
+/* ── Global canvas ────────────────────────────────────────────────────── */
+html,
+body {
+  background: var(--ref-bg);
+}
+
+/* ── App header: single-row nav like the reference top bar ───────────── */
+.app-header {
+  height: 52px;
+  padding: 0 14px;
+  background: color-mix(in srgb, var(--ref-bg) 88%, transparent);
+  border-bottom: 1px solid var(--ref-line);
+}
+
+.app-header-title strong {
+  font-size: 14.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.chip-btn {
+  height: 32px;
+  border-radius: 999px;
+  border-color: var(--ref-line);
+  background: var(--ref-panel-2);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+/* ── Message surface: cleaner AI rows, tighter bubbles ───────────────── */
+.msg-user-bubble {
+  background: linear-gradient(135deg, var(--ref-violet-2), var(--ref-violet) 70%);
+  box-shadow: 0 4px 14px -8px rgba(109, 94, 245, 0.55);
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+}
+
+.msg-ai-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, var(--ref-violet-2), var(--ref-violet) 55%, #0ea5e9);
+}
+
+.msg-ai-head .msg-ai-name {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.msg-action {
+  height: 26px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.msg-action:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+/* ── Composer: pill toolbar + circular send (reference chat input) ────── */
+.composer {
+  border-radius: 22px;
+  background: var(--ref-panel);
+  border-color: var(--ref-line);
+  box-shadow: 0 8px 30px -14px rgba(0, 0, 0, 0.5);
+}
+
+.composer:focus-within {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-soft), 0 8px 30px -14px rgba(0, 0, 0, 0.5);
+}
+
+.composer textarea {
+  font-size: 15px;
+  min-height: 52px;
+}
+
+.composer-pill {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--ref-panel-2);
+  border-color: var(--ref-line);
+  font-size: 12px;
+}
+
+.composer-pill.is-on {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+
+.composer-send {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--ref-violet-2), var(--ref-violet) 70%);
+  box-shadow: 0 6px 16px -8px rgba(109, 94, 245, 0.6);
+}
+
+.composer-icon {
+  border-radius: 10px;
+}
+
+/* ── Welcome / empty state ────────────────────────────────────────────── */
+.empty-mark,
+.welcome-orb-core {
+  background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 38%),
+    linear-gradient(145deg, var(--ref-violet-2), var(--ref-violet) 55%, #0ea5e9);
+  box-shadow: 0 12px 34px -14px rgba(109, 94, 245, 0.6);
+}
+
+.empty-title {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.empty-card {
+  border-radius: 14px;
+  border-color: var(--ref-line);
+  background: var(--ref-panel-2);
+}
+
+.empty-card:hover {
+  border-color: rgba(109, 94, 245, 0.4);
+}
+
+/* ── Model picker / dropdown menus (reference model sheet) ────────────── */
+.menu,
+.sb-menu {
+  border-radius: 16px;
+  border-color: var(--ref-line);
+  background: var(--ref-panel);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.65);
+  padding: 8px;
+}
+
+.menu button,
+.sb-menu button {
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.menu button.is-active,
+.menu button[aria-checked='true'] {
+  background: var(--primary-soft);
+  color: var(--ink);
+}
+
+.menu-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+
+.menu-sep {
+  background: var(--ref-line);
+}
+
+/* Model rows in the picker */
+.menu button .menu-value {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* ── Settings: section cards + active rail item (reference settings) ──── */
+.settings-nav,
+.cs-nav {
+  background: var(--ref-panel-2);
+  border-right-color: var(--ref-line);
+}
+
+.settings-section-card,
+.cs-nav-item {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: transparent;
+}
+
+.settings-section-card:hover,
+.cs-nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.settings-section-card.active,
+.cs-nav-item.active {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+}
+
+.settings-section-icon {
+  border-radius: 10px;
+}
+
+.settings-section-label,
+.cs-nav-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-section-hint,
+.cs-nav-hint {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.cs-panel-head h2 {
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.cs-card {
+  border-radius: 14px;
+  background: var(--ref-panel-2);
+  border-color: var(--ref-line);
+}
+
+.cs-label {
+  font-size: 13px;
+}
+
+/* ── Sidebar: tighter rail matching reference left panel ──────────────── */
+.v2-sidebar {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ref-deep) 70%, var(--sidebar)), var(--sidebar));
+  border-right-color: var(--ref-line);
+}
+
+.sb-new {
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ref-violet) 16%, transparent);
+  border-color: color-mix(in srgb, var(--ref-violet) 34%, transparent);
+}
+
+.sb-feature,
+.sb-nav-item,
+.sb-chat {
+  border-radius: 10px;
+}
+
+.sb-upgrade {
+  border-radius: 16px;
+  border-color: var(--ref-line);
+  background:
+    radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--ref-violet) 30%, transparent), transparent 60%),
+    var(--ref-panel-2);
+}
+
+.sb-upgrade-btn {
+  border-radius: 10px;
+  background: linear-gradient(120deg, var(--ref-violet-2), var(--ref-violet));
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn-primary {
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--ref-violet-2), var(--ref-violet) 70%);
+}
+
+.codews-primary {
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--ref-violet-2), var(--ref-violet) 70%);
+}
+
+/* ── Auth screen ──────────────────────────────────────────────────────── */
+.auth-card {
+  border-radius: 18px;
+  background: var(--ref-panel);
+  border-color: var(--ref-line);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.7);
+}
+
+.auth-brand-icon,
+.auth-submit {
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--ref-violet-2), var(--ref-violet) 70%);
+}
+
+/* ── Mobile hardening: keep every surface inside the viewport ─────────── */
+@media (max-width: 640px) {
+  .app-header {
+    padding: 0 10px;
+  }
+  .composer {
+    border-radius: 18px;
+  }
+  .composer-send {
+    width: 36px;
+    height: 36px;
+  }
+  .menu,
+  .sb-menu {
+    width: min(92vw, 240px);
+  }
+  .settings-section-card {
+    padding: 10px;
+  }
+}
+
+/* Touch devices: keep hover-only affordances visible */
+@media (hover: none) {
+  .msg-actions,
+  .sb-chat-more {
+    opacity: 1;
+  }
+}
