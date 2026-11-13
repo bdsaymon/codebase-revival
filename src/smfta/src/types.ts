@@ -1,3 +1,9 @@
+import type { AutonomyLevel, SelfSkill } from './utils/selfEngine';
+import type { VaultConnections } from './utils/cloudVault';
+
+export type { AutonomyLevel, SelfSkill };
+export type ConnectionsState = VaultConnections;
+
 export interface ImageAttachment {
   mime: string;
   data: string;
@@ -54,6 +60,8 @@ export interface NotebookNote {
   /** Optional real file name (e.g. "app.py") used when committing to GitHub. */
   filename?: string;
 }
+
+export type NotebookEntry = NotebookNote;
 
 /** The AI can write notes by itself via ⟦NOTE⟧ control blocks. */
 export interface AINoteDraft {
@@ -314,6 +322,8 @@ export interface SavedProviderProfile {
   supportsStreaming?: boolean;
   /** v19.0.0 — verified model capabilities (e.g. 'streaming', 'vision', 'json', 'code'). */
   capabilities?: string[];
+  /** Whether this profile represents a built-in provider engine. */
+  isBuiltin?: boolean;
 }
 
 export interface ProviderTestStatus {

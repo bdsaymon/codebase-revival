@@ -152,10 +152,7 @@ import {
   loadWorkspaceHandoff,
   saveWorkspaceHandoff,
 } from './utils/workspaceHandoff';
-import { CodeBlockInfo } from './utils/livePreview';
-import {
-  extractCodeBlocks,
-} from './utils/livePreview';
+import { CodeBlockInfo, extractCodeBlocks, hasPreviewableCode } from './utils/livePreview';
 import {
   applyProjectFileEdits,
   buildWebsiteProjectFromBlocks,
@@ -271,6 +268,7 @@ import {
   isV2ModelId,
   evaluateV2ModelQuota,
   getNextRiyadhResetInfo,
+  getV2ModelLabel,
   getV2ModelSpec,
 } from './utils/v2UsageLimits';
 import {
@@ -653,6 +651,10 @@ export default function App() {
   const activeModelLabel = activeIsBuiltin
     ? builtinTierLabel(activeModelName, settings.mode)
     : activeModelName || 'No model selected';
+
+  const activeAvailableModels = activeProfile
+    ? getModelsForProfile(activeProfile)
+    : [];
 
   const activeIsV2 = isV2ModelId(activeModelName);
   const isV2AuthorizedTester = isAuthorizedTestingUser(firebaseUser);
@@ -2883,6 +2885,8 @@ export default function App() {
       latencyMs?: number;
     } = {};
 
+    let bubbleCreated = Boolean(appendToMsg);
+
     try {
       // v18.11 + v19.0 — history is user-controlled: off sends only the current
       // prompt; on, the count follows maxHistoryMessages (1..40, default 24).
@@ -3217,7 +3221,7 @@ export default function App() {
         }
       }
 
-      let bubbleCreated = Boolean(appendToMsg);
+      bubbleCreated = Boolean(appendToMsg);
       if (appendToMsg) {
         setStreamingMsgId(aiMsgId);
       }

@@ -735,8 +735,13 @@ export async function tryStreamViaFirebaseAiLogic(params: {
       },
     });
 
+    const typedContents = contents.map((turn) => ({
+      role: turn.role,
+      parts: turn.parts.map((p) => ({ type: 'text' as const, text: p.text })),
+    }));
+
     const streamRes = await genModel.generateContentStream(
-      { contents },
+      { contents: typedContents },
       { signal: params.signal }
     );
 

@@ -11,7 +11,7 @@ export function estimateTokens(text: string): number { return Math.max(0, Math.c
 export function estimateUsage(input: string, output: string): UsageEstimate { const inputTokens = estimateTokens(input); const outputTokens = estimateTokens(output); return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens }; }
 
 export function trimMessagesToContext(messages: AiMessage[], maxChars = DEFAULT_CONTEXT_CHARS): AiMessage[] {
-  const limit = Math.max(1_000, Math.floor(maxChars));
+  const limit = Math.max(1, Math.floor(maxChars));
   const normalized = messages.filter((m) => m && typeof m.content === 'string').map((m) => ({ ...m, content: m.content.trim() })).filter((m) => m.content.length > 0);
   if (!normalized.length) return [];
   const system = normalized.find((m) => m.role === 'system');
