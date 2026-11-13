@@ -62,6 +62,11 @@ export const PRIMARY_PROVIDER_OPTIONS: Array<{
   { id: 'gemini_custom', label: 'Gemini', short: 'Gemini', defaultModel: 'gemini-2.5-flash' },
   { id: 'openai', label: 'OpenAI', short: 'OpenAI', defaultModel: 'gpt-4o-mini' },
   { id: 'anthropic', label: 'Anthropic', short: 'Anthropic', defaultModel: 'claude-sonnet-4-20250514' },
+  { id: 'deepseek', label: 'DeepSeek', short: 'DeepSeek', defaultModel: 'deepseek-chat' },
+  { id: 'groq', label: 'Groq', short: 'Groq', defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'openrouter', label: 'OpenRouter', short: 'OpenRouter', defaultModel: 'openrouter/auto' },
+  { id: 'mistral', label: 'Mistral', short: 'Mistral', defaultModel: 'mistral-large-latest' },
+  { id: 'xai', label: 'xAI Grok', short: 'Grok', defaultModel: 'grok-3-mini' },
   { id: 'custom', label: 'Custom / OpenRouter', short: 'Custom / OpenRouter', defaultModel: 'mercury-3' },
 ];
 

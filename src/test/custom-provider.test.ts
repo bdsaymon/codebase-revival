@@ -39,6 +39,11 @@ describe('custom provider routing', () => {
       'Gemini',
       'OpenAI',
       'Anthropic',
+      'DeepSeek',
+      'Groq',
+      'OpenRouter',
+      'Mistral',
+      'xAI Grok',
       'Custom / OpenRouter',
     ]);
   });

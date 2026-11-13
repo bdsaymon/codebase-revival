@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Spec defaults: temperature 0.7 · top P 0.9 · max output tokens 1024.
   weightTemp: 0.7,
   topP: 0.9,
-  maxOutputTokens: 1024,
+  maxOutputTokens: 4096,
   trainingData: '',
   fastDecision: true,
   thinkingMode: 'medium',
@@ -244,7 +244,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
     autoVoice: bool(raw.autoVoice, DEFAULT_SETTINGS.autoVoice),
     sendOnEnter: bool(raw.sendOnEnter, DEFAULT_SETTINGS.sendOnEnter),
     proactiveAuto: bool(raw.proactiveAuto, DEFAULT_SETTINGS.proactiveAuto),
-    customInst: str(raw.customInst, DEFAULT_SETTINGS.customInst).slice(0, 500),
+    customInst: str(raw.customInst, DEFAULT_SETTINGS.customInst).slice(0, 4000),
     autoMemory: bool(raw.autoMemory, DEFAULT_SETTINGS.autoMemory),
     includeHistory: bool(raw.includeHistory, DEFAULT_SETTINGS.includeHistory ?? true),
     maxHistoryMessages: int(raw.maxHistoryMessages, 1, 40, DEFAULT_SETTINGS.maxHistoryMessages ?? 18),
@@ -272,7 +272,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
     ),
     weightTemp: num(raw.weightTemp, 0.1, 1.2, DEFAULT_SETTINGS.weightTemp ?? 0.7),
     topP: num(raw.topP, 0.1, 1.0, DEFAULT_SETTINGS.topP ?? 0.9),
-    maxOutputTokens: int(raw.maxOutputTokens, 256, 32768, DEFAULT_SETTINGS.maxOutputTokens ?? 1024),
+    maxOutputTokens: int(raw.maxOutputTokens, 256, 32768, DEFAULT_SETTINGS.maxOutputTokens ?? 4096),
     trainingData: str(raw.trainingData, '').slice(0, 4000),
     fastDecision: bool(raw.fastDecision, DEFAULT_SETTINGS.fastDecision ?? true),
     thinkingMode: oneOf(

@@ -22,3 +22,4 @@
 - The SMFTA code workspace is a view inside the app at `/`; never change the browser address to open it, because the site router has no page for app-internal paths and shows a 404.
 - Preserve explicit provider selections on save and dispatch; infer a vendor only for unset/built-in selections, because compatible services can share key prefixes.
 - Build per-profile context limits and exact selected model IDs into ad-hoc provider configurations so chat and connection tests use the same constraints.
+- Keep Settings controls in SettingsControls and persist edits through SettingsHub's sanitized commit path, so displayed values and chat requests stay consistent.
