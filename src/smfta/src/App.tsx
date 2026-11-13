@@ -4567,7 +4567,7 @@ export default function App() {
         ) : currentView === 'settings' ? (
           <SettingsModal
             isOpen={true}
-            isInline={true}
+            variant="inline"
             initialTab={settingsTab}
             onClose={() => setCurrentView('chat')}
             profile={profile}

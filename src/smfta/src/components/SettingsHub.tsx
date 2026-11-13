@@ -22,16 +22,17 @@ import {
 } from 'lucide-react';
 import {
   AppSettings,
-  AutonomyLevel,
-  ConnectionsState,
   ExternalProviderId,
-  NotebookEntry,
+  NotebookNote,
   ProviderTestStatus,
   SavedProviderProfile,
-  SelfSkill,
   SelfUpdateWidget,
   UserProfile,
 } from '../types';
+import type { AutonomyLevel, SelfSkill } from '../utils/selfEngine';
+import type { VaultConnections } from '../utils/cloudVault';
+import { Button } from '@/components/ui/button';
+import { SettingNumber, SettingSelect, SettingsGrid } from './SettingsControls';
 import { sanitizeSettings } from '../utils/settings';
 import {
   DEFAULT_BUILTIN_PROFILE,
@@ -70,6 +71,7 @@ function maskApiKey(key?: string): string {
 
 export type SettingsTabId =
   | 'providers'
+  | 'responses'
   | 'general'
   | 'privacy'
   | 'memory'
@@ -93,9 +95,9 @@ export type SettingsTabId =
   | 'self'
   | 'upgrade';
 
-type SectionId = 'providers' | 'general' | 'privacy';
+type SectionId = 'providers' | 'responses' | 'general' | 'privacy';
 
-const SECTION_ORDER: SectionId[] = ['providers', 'general', 'privacy'];
+const SECTION_ORDER: SectionId[] = ['providers', 'responses', 'general', 'privacy'];
 
 const SECTION_META: Record<
   SectionId,
@@ -112,8 +114,11 @@ const SECTION_META: Record<
     icon: Cpu,
     hint: 'Mercury, Gemini, OpenAI, Anthropic & Custom API',
   },
+  responses: {
+    label: 'Responses', labelBn: 'উত্তর ও ক্ষমতা', icon: Sparkles, hint: 'Output, context & instructions',
+  },
   general: {
-    label: 'General & Appearance',
+    label: 'Appearance',
     labelBn: 'সাধারণ ও থিম',
     icon: Sliders,
     hint: 'Theme, language & AI system persona',
@@ -132,8 +137,10 @@ function normalizeTab(t?: SettingsTabId): SectionId {
     case 'engine':
     case 'ai':
     case 'weights':
-    case 'performance':
       return 'providers';
+    case 'responses':
+    case 'performance':
+      return 'responses';
     case 'privacy':
     case 'memory':
     case 'data':
@@ -171,9 +178,9 @@ export interface SettingsModalProps {
   hasRollbackPoint?: boolean;
   onClearAllData: () => void;
   onOpenWhatsNew: () => void;
-  connections?: ConnectionsState;
-  onUpdateConnections?: (next: ConnectionsState) => void;
-  notes?: NotebookEntry[];
+  connections?: VaultConnections;
+  onUpdateConnections?: (next: VaultConnections) => void;
+  notes?: NotebookNote[];
   onOpenNotebook?: () => void;
   selfWidgets?: SelfUpdateWidget[];
   onUpdateWidgets?: (next: SelfUpdateWidget[]) => void;
@@ -187,7 +194,7 @@ export interface SettingsModalProps {
   onSelfRepair?: () => void;
   onProviderTestResult?: (status: ProviderTestStatus) => void;
   keystoreEphemeral?: boolean;
-  usageToday?: { date: string; requests: number; chars: number };
+  usageToday?: number;
   onOpenSkill?: (skill: SelfSkill) => void;
 }
 
@@ -235,7 +242,7 @@ const ToggleRow: React.FC<{
         </div>
       ) : null}
     </div>
-    <button
+    <Button variant="ghost"
       type="button"
       role="switch"
       data-testid={testId}
@@ -249,11 +256,11 @@ const ToggleRow: React.FC<{
       }`}
     >
       <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform ${
+        className={`inline-block h-4 w-4 transform rounded-full bg-[var(--settings-on-accent)] shadow-xs transition-transform ${
           checked ? 'translate-x-5' : 'translate-x-1'
         }`}
       />
-    </button>
+    </Button>
   </div>
 );
 
@@ -273,6 +280,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClearMemory,
   notify,
   onProviderTestResult,
+  onExportBackup, onImportBackup, onResetSettings,
 }) => {
   const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
@@ -393,7 +401,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         'externalKeys' in changes ||
         'externalModel' in changes ||
         'externalBaseUrl' in changes ||
-        'customHeaders' in changes) &&
+        'customHeaders' in changes ||
+        'contextWindow' in changes ||
+        'supportsStreaming' in changes) &&
       !('verified' in changes);
     const nextList = localProfiles.map((p) =>
       p.id === id
@@ -548,6 +558,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalKeys: prof.externalKeys,
             externalModel: prof.externalModel,
             externalBaseUrl: prof.externalBaseUrl,
+            customHeaders: prof.customHeaders,
             testStreaming: prof.supportsStreaming !== false,
             contextWindow: prof.contextWindow,
           }),
@@ -833,6 +844,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalKeys: newApiKey.trim(),
             externalModel: newModel.trim(),
             externalBaseUrl: effectiveBaseUrl,
+            customHeaders: newCustomHeaders,
             testStreaming: true,
           }),
         }).catch(() => null);
@@ -1016,7 +1028,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <>
       <Card
         title="Configure AI Provider"
-        description="Select a provider, model (Mercury defaults to mercury-3), and API key."
+        description=""
         icon={<Plus className="w-4 h-4" />}
       >
         <div className="space-y-4">
@@ -1032,7 +1044,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {PRIMARY_PROVIDER_OPTIONS.map((opt) => {
                 const isSelected = newProviderId === opt.id;
                 return (
-                  <button
+                  <Button variant="ghost"
                     key={opt.id}
                     type="button"
                     data-testid={`provider-pill-${opt.id}`}
@@ -1056,7 +1068,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }`}
                   >
                     {opt.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -1101,7 +1113,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)]">
                 Model Name
               </label>
-              <button
+              <Button variant="ghost"
                 type="button"
                 onClick={() => handleFetchNewModels()}
                 disabled={isLoadingModels}
@@ -1113,7 +1125,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <RefreshCw className="w-3 h-3" />
                 )}
                 Fetch Models
-              </button>
+              </Button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input
@@ -1150,7 +1162,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               )}
             </div>
             {discoveryWarning && (
-              <div className="text-[11px] text-amber-500 mt-1">{discoveryWarning}</div>
+              <div className="text-[11px] text-[var(--accent-amber)] mt-1">{discoveryWarning}</div>
             )}
           </div>
 
@@ -1184,7 +1196,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }
                   className="cs-input flex-1 font-mono text-xs"
                 />
-                <button
+                <Button variant="ghost"
                   type="button"
                   data-testid="provider-api-key-toggle"
                   onClick={() => setShowNewKey((v) => !v)}
@@ -1197,7 +1209,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <Eye className="w-3.5 h-3.5" />
                   )}
                   <span>{showNewKey ? 'Hide' : 'Show'}</span>
-                </button>
+                </Button>
               </div>
               {detectedProviderFromNewKey &&
                 detectedProviderFromNewKey !== newProviderId && (
@@ -1209,7 +1221,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           detectedProviderFromNewKey}
                       </strong>
                     </span>
-                    <button
+                    <Button variant="ghost"
                       type="button"
                       onClick={() => {
                         setNewProviderId(detectedProviderFromNewKey);
@@ -1223,7 +1235,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="text-[var(--primary)] font-semibold hover:underline cursor-pointer"
                     >
                       Switch
-                    </button>
+                    </Button>
                   </div>
                 )}
             </div>
@@ -1231,20 +1243,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Optional Advanced Options Accordion (Closed by Default) */}
           <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
-            <button
+            <Button variant="ghost"
               type="button"
               data-testid="provider-advanced-toggle"
               aria-expanded={showAdvancedOptions}
               onClick={() => setShowAdvancedOptions((prev) => !prev)}
               className="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
             >
-              <span>Advanced Options (Base URL, Extra Headers & Profile Name)</span>
+              <span>Connection details</span>
               <ChevronDown
                 className={`w-4 h-4 transition-transform duration-200 ${
                   showAdvancedOptions ? 'rotate-180' : ''
                 }`}
               />
-            </button>
+            </Button>
             {showAdvancedOptions && (
               <div
                 data-testid="provider-advanced-panel"
@@ -1303,8 +1315,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div
               className={`px-3 py-2 rounded-xl text-xs font-medium border ${
                 newVerifyResult.ok
-                  ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-400'
-                  : 'border-rose-500/35 bg-rose-500/10 text-rose-400'
+                  ? 'border-emerald-500/35 bg-emerald-500/10 text-[var(--accent-emerald)]'
+                  : 'border-rose-500/35 bg-rose-500/10 text-[var(--settings-danger)]'
               }`}
             >
               {newVerifyResult.message}
@@ -1312,19 +1324,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-            <button
+            <Button variant="ghost"
               type="button"
               onClick={handleSaveWithoutVerification}
               disabled={isVerifyingNew}
               className="px-3.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] hover:border-[var(--primary-border)] cursor-pointer"
             >
               Save Profile
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost"
               type="button"
               onClick={handleVerifyAndAddProvider}
               disabled={isVerifyingNew}
-              className="px-4 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer"
             >
               {isVerifyingNew ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1332,7 +1344,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Check className="w-3.5 h-3.5" />
               )}
               {isVerifyingNew ? 'Testing...' : 'Verify & Connect'}
-            </button>
+            </Button>
           </div>
         </div>
       </Card>
@@ -1348,7 +1360,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             const isSelected = activeProfile?.id === prof.id;
             const isEditing = editingProfileId === prof.id;
             const isBuiltin =
-              prof.isBuiltin || isBuiltinProviderId(prof.provider);
+              isBuiltinProviderId(prof.provider);
             const isKeyRevealed = Boolean(revealedKeyIds[prof.id]);
             const isTesting = testingProfileId === prof.id;
             const isRefreshing = loadingModelsForId === prof.id;
@@ -1367,7 +1379,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <button
+                  <Button variant="ghost"
                     type="button"
                     onClick={() => activateSavedProfile(prof)}
                     className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
@@ -1380,7 +1392,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }`}
                     >
                       {isSelected && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--settings-on-accent)]" />
                       )}
                     </span>
                     <div className="min-w-0 flex-1">
@@ -1395,12 +1407,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </span>
                         )}
                         {!isBuiltin && vStatus === 'verified' && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--accent-emerald)]">
                             Verified
                           </span>
                         )}
                         {!isBuiltin && vStatus === 'failed' && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/15 text-rose-400">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--settings-danger)]">
                             Failed
                           </span>
                         )}
@@ -1416,11 +1428,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                       </div>
                     </div>
-                  </button>
+                  </Button>
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     {!isBuiltin && (
-                      <button
+                      <Button variant="ghost"
                         type="button"
                         onClick={() => handleTestExistingProfile(prof)}
                         disabled={isTesting}
@@ -1432,9 +1444,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <Sparkles className="w-3 h-3" />
                         )}
                         Test
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button variant="ghost"
                       type="button"
                       onClick={() =>
                         setEditingProfileId(isEditing ? null : prof.id)
@@ -1447,16 +1459,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           isEditing ? 'rotate-90' : ''
                         }`}
                       />
-                    </button>
+                    </Button>
                     {!isBuiltin && localProfiles.length > 1 && (
-                      <button
+                      <Button variant="ghost"
                         type="button"
                         onClick={() => deleteSavedProfile(prof.id)}
-                        className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                        className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--settings-danger)] hover:bg-rose-500/10 cursor-pointer"
                         title="Delete profile"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1465,9 +1477,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div
                     className={`mt-2 text-[11px] ${
                       prof.quotaExhausted || vStatus === 'failed'
-                        ? 'text-rose-400'
+                        ? 'text-[var(--settings-danger)]'
                         : vStatus === 'verified'
-                        ? 'text-emerald-400'
+                        ? 'text-[var(--accent-emerald)]'
                         : 'text-[var(--text-3)]'
                     }`}
                   >
@@ -1529,7 +1541,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           Model
                         </span>
                         {!isBuiltin && (
-                          <button
+                          <Button variant="ghost"
                             type="button"
                             onClick={() => handleRefreshProfileModels(prof)}
                             disabled={isRefreshing}
@@ -1541,7 +1553,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <RefreshCw className="w-3 h-3" />
                             )}
                             Fetch models
-                          </button>
+                          </Button>
                         )}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1604,7 +1616,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               placeholder="sk-... / AIza..."
                               className="cs-input font-mono flex-1 text-xs"
                             />
-                            <button
+                            <Button variant="ghost"
                               type="button"
                               onClick={() =>
                                 setRevealedKeyIds((prev) => ({
@@ -1620,12 +1632,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               ) : (
                                 <Eye className="w-3.5 h-3.5" />
                               )}
-                            </button>
+                            </Button>
                           </div>
                         </div>
 
                         <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                          <button
+                          <Button variant="ghost"
                             type="button"
                             onClick={() =>
                               setProfileAdvancedOpen((prev) => ({
@@ -1635,13 +1647,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             }
                             className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
                           >
-                            <span>Advanced Options (Base URL & Headers)</span>
+                            <span>Connection details & limits</span>
                             <ChevronDown
                               className={`w-3.5 h-3.5 transition-transform ${
                                 profileAdvancedOpen[prof.id] ? 'rotate-180' : ''
                               }`}
                             />
-                          </button>
+                          </Button>
                           {profileAdvancedOpen[prof.id] && (
                             <div className="p-3 border-t border-[var(--border)] space-y-2.5">
                               <div>
@@ -1679,6 +1691,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   className="cs-input w-full font-mono text-xs"
                                 />
                               </div>
+                              <SettingsGrid>
+                                <SettingNumber label="Context window (tokens)" value={prof.contextWindow ?? 32768} min={1024} max={1000000} step={1024} onChange={v => updateSavedProfileField(prof.id, { contextWindow: v })} />
+                                <SettingNumber label="Profile output limit (tokens)" value={prof.maxOutputTokens ?? draft.maxOutputTokens ?? 1024} min={256} max={32768} step={256} onChange={v => updateSavedProfileField(prof.id, { maxOutputTokens: v })} />
+                              </SettingsGrid>
+                              <ToggleRow label="Stream responses" checked={prof.supportsStreaming !== false} onChange={v => updateSavedProfileField(prof.id, { supportsStreaming: v })} />
                             </div>
                           )}
                         </div>
@@ -1703,7 +1720,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               const active =
                 (activeProfile.externalModel || draft.externalModel) === m;
               return (
-                <button
+                <Button variant="ghost"
                   key={m}
                   type="button"
                   onClick={() =>
@@ -1718,7 +1735,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }`}
                 >
                   {m}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -1748,11 +1765,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               Theme / থিম
             </div>
             <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-              Choose Dark or Light interface theme. Changes persist immediately.
+              
             </div>
           </div>
           <div className="cs-seg" data-testid="theme-selector">
-            <button
+            <Button variant="ghost"
               type="button"
               data-testid="theme-dark-btn"
               onClick={() => patch({ theme: 'dark' })}
@@ -1760,8 +1777,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <Moon className="w-3.5 h-3.5 inline mr-1" />
               Dark
-            </button>
-            <button
+            </Button>
+            <Button variant="ghost"
               type="button"
               data-testid="theme-light-btn"
               onClick={() => patch({ theme: 'light' })}
@@ -1769,7 +1786,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <Sun className="w-3.5 h-3.5 inline mr-1" />
               Light
-            </button>
+            </Button>
           </div>
         </div>
       </Card>
@@ -1790,7 +1807,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
             <div className="cs-seg" data-testid="language-selector">
-              <button
+              <Button variant="ghost"
                 type="button"
                 data-testid="lang-bn-btn"
                 onClick={() => patch({ appLanguage: 'bn', replyLang: 'bn' })}
@@ -1799,8 +1816,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 বাংলা
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost"
                 type="button"
                 data-testid="lang-en-btn"
                 onClick={() => patch({ appLanguage: 'en', replyLang: 'en' })}
@@ -1809,7 +1826,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 English
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -1834,8 +1851,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
       </Card>
 
+      <Card title="Chat display">
+        <SettingsGrid>
+          <SettingSelect label="Text size" value={draft.fontsize} options={[{value:'small',label:'Small'},{value:'normal',label:'Normal'},{value:'large',label:'Large'}]} onChange={v => patch({fontsize: v as AppSettings['fontsize']})} />
+          <SettingSelect label="Conversation width" value={draft.layoutWidth ?? 'standard'} options={[{value:'standard',label:'Standard'},{value:'wide',label:'Wide'},{value:'full',label:'Full'}]} onChange={v => patch({layoutWidth: v as AppSettings['layoutWidth']})} />
+        </SettingsGrid>
+        <ToggleRow label="Send on Enter" checked={draft.sendOnEnter} onChange={v => patch({sendOnEnter:v})} />
+        <ToggleRow label="Reduce animation" checked={draft.reducedMotion === true} onChange={v => patch({reducedMotion:v})} />
+      </Card>
+    </>
+  );
+
+  const renderResponses = () => (
+    <>
+      <Card title="Response controls" icon={<Sparkles className="w-4 h-4" />}>
+        <SettingsGrid>
+          <SettingSelect label="Processing mode" value={draft.mode} options={[{value:'fast',label:'Fast'},{value:'balanced',label:'Balanced'},{value:'power',label:'Power'}]} onChange={v => patch({mode:v as AppSettings['mode']})} />
+          <SettingSelect label="Reply language" value={draft.replyLang} options={[{value:'auto',label:'Automatic'},{value:'bn',label:'বাংলা'},{value:'en',label:'English'}]} onChange={v => patch({replyLang:v as AppSettings['replyLang']})} />
+          <SettingNumber label="Maximum output (tokens)" value={draft.maxOutputTokens ?? 1024} min={256} max={32768} step={256} onChange={v => patch({maxOutputTokens:v})} />
+          <SettingNumber label="Temperature" value={draft.weightTemp ?? 0.7} min={0.1} max={1.2} step={0.1} onChange={v => patch({weightTemp:v})} />
+          <SettingNumber label="Top P" value={draft.topP ?? 0.9} min={0.1} max={1} step={0.1} onChange={v => patch({topP:v})} />
+          <SettingNumber label="Request timeout (seconds)" value={draft.requestTimeoutSec ?? 120} min={30} max={240} onChange={v => patch({requestTimeoutSec:v})} />
+        </SettingsGrid>
+      </Card>
+      <Card title="Conversation context">
+        <ToggleRow label="Include conversation history" checked={draft.includeHistory !== false} onChange={v => patch({includeHistory:v})} />
+        <SettingNumber label="History messages" value={draft.maxHistoryMessages ?? 18} min={1} max={40} onChange={v => patch({maxHistoryMessages:v})} />
+      </Card>
       <Card
-        title="Custom System Instruction / AI Persona"
+        title="Custom instructions"
         description="Define custom instructions or persona rules that guide the AI across all conversations."
         icon={<Sparkles className="w-4 h-4" />}
       >
@@ -1852,9 +1896,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             onChange={(e) => patch({ customInst: e.target.value })}
             className="cs-textarea w-full text-xs"
           />
-          <div className="text-[11px] text-[var(--text-3)]">
-            Automatically saved to localStorage as you type.
-          </div>
+
         </div>
       </Card>
     </>
@@ -1879,41 +1921,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         <div className="pt-3 mt-3 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold text-red-500">
+            <div className="text-xs font-semibold text-[var(--settings-danger)]">
               Complete Memory Wipe / সম্পূর্ণ মেমোরি রিসেট
             </div>
             <div className="text-[11px] text-[var(--text-3)] mt-0.5">
-              Permanently deletes all saved facts (`smfta_memory` & `smfta_memory_backup`) and resets active memory immediately.
+              Deletes saved facts from this device.
             </div>
           </div>
 
           {!confirmingClearMemory ? (
-            <button
+            <Button variant="ghost"
               type="button"
               data-testid="clear-all-memory-btn"
               onClick={() => setConfirmingClearMemory(true)}
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-500/15 text-red-500 border border-red-500/35 hover:bg-red-500/25 transition-colors inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--surface-2)] text-[var(--settings-danger)] border border-red-500/35 hover:bg-red-500/25 transition-colors inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear All Memory / সব মেমোরি মুছুন</span>
-            </button>
+            </Button>
           ) : (
             <div className="flex items-center gap-2 shrink-0">
-              <button
+              <Button variant="ghost"
                 type="button"
                 data-testid="confirm-clear-all-memory-btn"
                 onClick={handleConfirmClearAllMemory}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--settings-danger)] text-[var(--settings-on-accent)] hover:bg-red-500 transition-colors cursor-pointer"
               >
                 Confirm Wipe ({memory.length})
-              </button>
-              <button
+              </Button>
+              <Button variant="ghost"
                 type="button"
                 onClick={() => setConfirmingClearMemory(false)}
                 className="px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] cursor-pointer"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1921,7 +1963,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       <Card
         title={`Saved Memory Facts (${memory.length})`}
-        description="Context-relevant facts are selectively injected into prompts. Delete any item instantly with the trash icon."
+        description=""
       >
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -1939,15 +1981,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               placeholder="Add a memory fact (e.g. নাম: সায়মন / Profession: Full-Stack Developer)"
               className="cs-input flex-1 text-xs"
             />
-            <button
+            <Button variant="ghost"
               type="button"
               data-testid="add-memory-fact-btn"
               onClick={handleAddMemoryItem}
-              className="px-3.5 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer shrink-0"
+              className="px-3.5 py-2 rounded-xl bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               Add
-            </button>
+            </Button>
           </div>
 
           {memory.length === 0 ? (
@@ -1969,20 +2011,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-xs text-[var(--text)]"
                 >
                   <span className="break-words min-w-0 flex-1">{fact}</span>
-                  <button
+                  <Button variant="ghost"
                     type="button"
                     data-testid={`delete-memory-item-${idx}`}
                     onClick={() => handleDeleteSingleMemory(fact)}
-                    className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-red-500 hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
+                    className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--settings-danger)] hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
                     title="Delete memory item"
                     aria-label={`Delete memory fact ${fact}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      </Card>
+      <Card title="Backup & preferences">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onExportBackup}>Export backup</Button>
+          <label className="settings-import">Import backup<input type="file" accept=".json,application/json" onChange={onImportBackup} /></label>
+          {onResetSettings && <Button variant="outline" onClick={() => { if (window.confirm('Reset preferences? Chats and saved providers will be kept.')) { onResetSettings(); setDraft(sanitizeSettings({})); } }}>Reset preferences</Button>}
         </div>
       </Card>
     </>
@@ -1992,6 +2041,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     switch (tab) {
       case 'providers':
         return renderProviders();
+      case 'responses':
+        return renderResponses();
       case 'general':
         return renderGeneral();
       case 'privacy':
@@ -2003,7 +2054,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const shellContent = (
     <div
-      className={`cs-shell ${isInline ? 'is-inline' : ''}`}
+      className={`cs-shell settings-redesign ${isInline ? 'is-inline' : ''}`}
       onClick={(e) => e.stopPropagation()}
     >
       {/* Left Navigation: Strictly 3 Clean Tabs */}
@@ -2018,7 +2069,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             const Icon = meta.icon;
             const active = tab === id;
             return (
-              <button
+              <Button variant="ghost"
                 key={id}
                 type="button"
                 data-section={id}
@@ -2033,7 +2084,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span className="cs-nav-label">{meta.label}</span>
                   <span className="cs-nav-hint">{meta.hint}</span>
                 </span>
-              </button>
+              </Button>
             );
           })}
         </nav>
@@ -2044,17 +2095,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <header className="cs-panel-head justify-between">
           <div className="min-w-0">
             <h2>{currentMeta.label}</h2>
-            <p>{currentMeta.hint}</p>
+            <p className="settings-active-model">{activeProfile.name} · {activeProfile.externalModel || "Auto"}</p>
           </div>
-          {!isInline && (
-            <button
+          {(
+            <Button variant="ghost"
               type="button"
               onClick={onClose}
               className="cs-close"
               aria-label="Close settings"
             >
               <X className="w-5 h-5" />
-            </button>
+            </Button>
           )}
         </header>
 
@@ -2064,7 +2115,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             const meta = SECTION_META[id];
             const active = tab === id;
             return (
-              <button
+              <Button variant="ghost"
                 key={id}
                 type="button"
                 onClick={() => setTab(id)}
@@ -2075,7 +2126,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 {meta.label}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -2091,7 +2142,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-xs p-2 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--settings-overlay)] backdrop-blur-xs p-2 sm:p-4"
       onClick={onClose}
     >
       <div className="cs-modal">{shellContent}</div>

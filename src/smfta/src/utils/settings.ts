@@ -244,7 +244,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
     autoVoice: bool(raw.autoVoice, DEFAULT_SETTINGS.autoVoice),
     sendOnEnter: bool(raw.sendOnEnter, DEFAULT_SETTINGS.sendOnEnter),
     proactiveAuto: bool(raw.proactiveAuto, DEFAULT_SETTINGS.proactiveAuto),
-    customInst: str(raw.customInst, DEFAULT_SETTINGS.customInst).slice(0, 500),
+    customInst: str(raw.customInst, DEFAULT_SETTINGS.customInst).slice(0, 4000),
     autoMemory: bool(raw.autoMemory, DEFAULT_SETTINGS.autoMemory),
     includeHistory: bool(raw.includeHistory, DEFAULT_SETTINGS.includeHistory ?? true),
     maxHistoryMessages: int(raw.maxHistoryMessages, 1, 40, DEFAULT_SETTINGS.maxHistoryMessages ?? 18),
