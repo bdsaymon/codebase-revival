@@ -844,6 +844,52 @@ CREATE TABLE IF NOT EXISTS ai_stored_messages (
     return Number(info.changes || 0) > 0;
   }
 
+  public saveMessageFeedback(params: {
+    messageId: string;
+    sessionId: string;
+    userId: string;
+    rating: 'up' | 'down';
+    reason?: string;
+  }): { messageId: string; rating: 'up' | 'down'; reason?: string; updatedAt: number } {
+    const now = this.now();
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ai_message_feedback (
+        message_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        rating TEXT NOT NULL,
+        reason TEXT,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (message_id, user_id)
+      );
+    `);
+    const cleanReason = params.reason ? String(params.reason).trim().slice(0, 500) : null;
+    this.db
+      .prepare(
+        `INSERT INTO ai_message_feedback (message_id, session_id, user_id, rating, reason, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(message_id, user_id) DO UPDATE SET
+           session_id = excluded.session_id,
+           rating = excluded.rating,
+           reason = excluded.reason,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        String(params.messageId).slice(0, 120),
+        String(params.sessionId || '').slice(0, 120),
+        String(params.userId || 'local').slice(0, 120),
+        params.rating,
+        cleanReason,
+        now
+      );
+    return {
+      messageId: params.messageId,
+      rating: params.rating,
+      ...(cleanReason ? { reason: cleanReason } : {}),
+      updatedAt: now,
+    };
+  }
+
   public close(): void {
     if (this.pruneTimer) {
       clearInterval(this.pruneTimer);

@@ -3,6 +3,10 @@ import {
   AppSettings,
   ChatMessage,
   ChatSession,
+  DataBridgeConfig,
+  DbConnectionConfig,
+  KnowledgeDocument,
+  McpServerConfig,
   SavedProviderProfile,
   SelfUpdateWidget,
 } from '../types';
@@ -24,6 +28,9 @@ export interface ExportEnvelopeV2 {
     savedProfiles: number;
     widgets: number;
     skills: number;
+    knowledgeDocs?: number;
+    mcpServers?: number;
+    dbConnections?: number;
   };
   chats: ChatSession[];
   settings?: Partial<AppSettings>;
@@ -33,6 +40,10 @@ export interface ExportEnvelopeV2 {
   widgets?: SelfUpdateWidget[];
   skills?: SelfSkill[];
   autonomy?: 'safe' | 'full';
+  mcpServers?: McpServerConfig[];
+  dbConnections?: DbConnectionConfig[];
+  dataBridgeConfig?: DataBridgeConfig | null;
+  knowledgeDocs?: KnowledgeDocument[];
 }
 
 export interface ParsedImportPayload {
@@ -45,6 +56,10 @@ export interface ParsedImportPayload {
   widgets?: SelfUpdateWidget[];
   skills?: SelfSkill[];
   autonomy?: 'safe' | 'full';
+  mcpServers?: McpServerConfig[];
+  dbConnections?: DbConnectionConfig[];
+  dataBridgeConfig?: DataBridgeConfig;
+  knowledgeDocs?: KnowledgeDocument[];
 }
 
 /**
@@ -84,6 +99,10 @@ export function buildExportEnvelope(params: {
   widgets?: SelfUpdateWidget[];
   skills?: SelfSkill[];
   autonomy?: 'safe' | 'full';
+  mcpServers?: McpServerConfig[];
+  dbConnections?: DbConnectionConfig[];
+  dataBridgeConfig?: DataBridgeConfig | null;
+  knowledgeDocs?: KnowledgeDocument[];
   includeKeys?: boolean;
 }): ExportEnvelopeV2 {
   const includeKeys = Boolean(params.includeKeys);
@@ -93,6 +112,13 @@ export function buildExportEnvelope(params: {
   const savedProfiles = sanitizeProfilesForExport(params.savedProfiles, includeKeys);
   const widgets = Array.isArray(params.widgets) ? params.widgets : undefined;
   const skills = Array.isArray(params.skills) ? params.skills : undefined;
+  const mcpServers = Array.isArray(params.mcpServers)
+    ? params.mcpServers.map((s) => ({ ...s, authSecret: includeKeys ? s.authSecret : '' }))
+    : undefined;
+  const dbConnections = Array.isArray(params.dbConnections)
+    ? params.dbConnections.map((d) => ({ ...d, secret: includeKeys ? d.secret : '' }))
+    : undefined;
+  const knowledgeDocs = Array.isArray(params.knowledgeDocs) ? params.knowledgeDocs : undefined;
 
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
@@ -106,6 +132,9 @@ export function buildExportEnvelope(params: {
       savedProfiles: savedProfiles?.length || 0,
       widgets: widgets?.length || 0,
       skills: skills?.length || 0,
+      knowledgeDocs: knowledgeDocs?.length || 0,
+      mcpServers: mcpServers?.length || 0,
+      dbConnections: dbConnections?.length || 0,
     },
     chats,
     settings: sanitizeSettingsForExport(params.settings, includeKeys),
@@ -115,6 +144,10 @@ export function buildExportEnvelope(params: {
     widgets,
     skills,
     autonomy: params.autonomy,
+    mcpServers,
+    dbConnections,
+    dataBridgeConfig: params.dataBridgeConfig ?? undefined,
+    knowledgeDocs,
   };
 }
 
@@ -289,6 +322,29 @@ export function parseImportPayload(rawInput: unknown): ParsedImportPayload {
       ? obj.autonomy
       : undefined;
 
+  const mcpServers = Array.isArray(obj.mcpServers)
+    ? (obj.mcpServers as ExportEnvelopeV2['mcpServers'])?.map((srv) => ({
+        ...srv,
+        authSecret: '',
+      }))
+    : undefined;
+
+  const dbConnections = Array.isArray(obj.dbConnections)
+    ? (obj.dbConnections as ExportEnvelopeV2['dbConnections'])?.map((conn) => ({
+        ...conn,
+        secret: '',
+      }))
+    : undefined;
+
+  const dataBridgeConfig =
+    obj.dataBridgeConfig && typeof obj.dataBridgeConfig === 'object'
+      ? (obj.dataBridgeConfig as DataBridgeConfig)
+      : undefined;
+
+  const knowledgeDocs = Array.isArray(obj.knowledgeDocs)
+    ? (obj.knowledgeDocs as ExportEnvelopeV2['knowledgeDocs'])
+    : undefined;
+
   return {
     schemaVersion,
     chats,
@@ -299,5 +355,9 @@ export function parseImportPayload(rawInput: unknown): ParsedImportPayload {
     widgets,
     skills,
     autonomy,
+    mcpServers,
+    dbConnections,
+    dataBridgeConfig,
+    knowledgeDocs,
   };
 }

@@ -789,6 +789,12 @@ export function loadSavedProfiles(
         if (typeof p.customHeaders === 'string' && p.customHeaders.trim()) {
           item.customHeaders = p.customHeaders;
         }
+        if (typeof p.customParams === 'string' && p.customParams.trim()) {
+          item.customParams = p.customParams;
+        }
+        if (typeof p.priority === 'number' && Number.isFinite(p.priority)) {
+          item.priority = Math.max(0, Math.min(999, Math.round(p.priority)));
+        }
         if (Array.isArray(p.availableModels)) {
           item.availableModels = p.availableModels.filter(
             (m): m is string => typeof m === 'string' && Boolean(m.trim())
@@ -836,6 +842,93 @@ export function loadSavedProfiles(
   } catch {
     return [];
   }
+}
+
+export function sortProvidersByPriority(
+  profiles: SavedProviderProfile[],
+  fallbackOrder?: string[]
+): SavedProviderProfile[] {
+  const orderMap = new Map<string, number>();
+  (fallbackOrder || []).forEach((id, idx) => orderMap.set(id, idx));
+  return [...profiles].sort((a, b) => {
+    const idxA = orderMap.has(a.id) ? orderMap.get(a.id)! : a.priority ?? 100;
+    const idxB = orderMap.has(b.id) ? orderMap.get(b.id)! : b.priority ?? 100;
+    if (idxA !== idxB) return idxA - idxB;
+    return 0;
+  });
+}
+
+export function resolveFallbackProfileChain(
+  activeProfileId: string | undefined,
+  profiles: SavedProviderProfile[],
+  fallbackOrder?: string[]
+): SavedProviderProfile[] {
+  const ordered = sortProvidersByPriority(
+    profiles.filter((p) => p.enabled !== false && p.id !== activeProfileId),
+    fallbackOrder
+  );
+  return ordered;
+}
+
+export function getAllVerifiedModelChoices(
+  profiles: SavedProviderProfile[]
+): Array<{ profileId: string; profileName: string; provider: ExternalProviderId; modelId: string }> {
+  const choices: Array<{
+    profileId: string;
+    profileName: string;
+    provider: ExternalProviderId;
+    modelId: string;
+  }> = [];
+  const seen = new Set<string>();
+  for (const prof of profiles) {
+    if (prof.enabled === false) continue;
+    const models = getModelsForProfile(prof);
+    for (const modelId of models) {
+      const key = `${prof.id}:${modelId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      choices.push({
+        profileId: prof.id,
+        profileName: prof.name,
+        provider: prof.provider,
+        modelId,
+      });
+    }
+  }
+  return choices;
+}
+
+export function resolveModelForSlot(
+  slot: 'defaultModel' | 'fastModel' | 'reasoningModel' | 'visionModel',
+  settings: AppSettings,
+  profiles: SavedProviderProfile[]
+): { profile?: SavedProviderProfile; modelId: string } | null {
+  const rawSlotValue = (settings.modelSlots?.[slot] || '').trim();
+  if (!rawSlotValue) return null;
+
+  // Allow composite "profileId::modelId" or plain modelId
+  const sep = rawSlotValue.indexOf('::');
+  const targetProfId = sep > 0 ? rawSlotValue.slice(0, sep) : '';
+  const targetModel = sep > 0 ? rawSlotValue.slice(sep + 2) : rawSlotValue;
+
+  if (targetProfId) {
+    const prof = profiles.find((p) => p.id === targetProfId && p.enabled !== false);
+    if (prof && getModelsForProfile(prof).includes(targetModel)) {
+      return { profile: prof, modelId: targetModel };
+    }
+  }
+
+  for (const prof of profiles) {
+    if (prof.enabled === false) continue;
+    if (getModelsForProfile(prof).includes(targetModel)) {
+      return { profile: prof, modelId: targetModel };
+    }
+  }
+  if (BUILTIN_TIER_MODELS.includes(targetModel) || isV2SpecialModel(targetModel)) {
+    const builtin = profiles.find((p) => isBuiltinProviderId(p.provider));
+    return { profile: builtin, modelId: targetModel };
+  }
+  return null;
 }
 
 export function getInitialProviderProfiles(

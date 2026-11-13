@@ -17,6 +17,7 @@ import {
   sanitizeErrorMsg,
 } from '../aiClient';
 import { verifyConnectionTargetSafe } from '../engine/config';
+import { parseCustomParamsSafe } from '../engine/adapters';
 import {
   getSharedHardenedEngine,
   formatActionableProviderError,
@@ -392,7 +393,10 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     externalBaseUrl = '',
     testStreaming = false,
     contextWindow,
+    customParams,
   } = req.body || {};
+
+  const parsedCustomParams = parseCustomParamsSafe(customParams);
 
   const keys = String(externalKeys || '')
     .split(/[\n,;]+/)
@@ -603,6 +607,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     preferredModelId: effectiveProbeModel,
     maxOutputTokens: probeMaxTokens,
     temperature: 0.7,
+    customParams: parsedCustomParams,
     adHocProviders: built.adHocProviders,
     skipServerRegistry: true,
     overallDeadlineMs: 25_000,
@@ -685,6 +690,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
         preferredModelId: probeRes.modelId || effectiveProbeModel,
         maxOutputTokens: probeMaxTokens,
         temperature: 0.7,
+        customParams: parsedCustomParams,
         adHocProviders: built.adHocProviders,
         skipServerRegistry: true,
         overallDeadlineMs: 15_000,

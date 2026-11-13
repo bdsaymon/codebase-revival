@@ -449,9 +449,7 @@ export function subscribeToFirestoreConversations(
           // Ignore malformed payload
         }
       });
-      if (loaded.length > 0) {
-        onConversations(loaded);
-      }
+      onConversations(loaded);
     },
     (error) => {
       try {
@@ -461,6 +459,54 @@ export function subscribeToFirestoreConversations(
       }
     }
   );
+}
+
+export async function deleteConversationFromFirestore(
+  user: FirebaseUser,
+  sessionId: string | number
+): Promise<void> {
+  if (!user?.uid || !user.emailVerified) return;
+  const { db } = getFirebaseServices();
+  const userId = sanitizeDocId(user.uid);
+  const conversationId = sanitizeDocId(`conv_${sessionId}`);
+  const cleanSessionId = sanitizeDocId(`sess_${sessionId}`);
+  const convRef = doc(db, 'users', userId, 'conversations', conversationId);
+  const sessRef = doc(db, 'users', userId, 'sessions', cleanSessionId);
+
+  try {
+    await deleteDoc(convRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${userId}/conversations/${conversationId}`);
+  }
+  try {
+    await deleteDoc(sessRef);
+  } catch {
+    // Session doc may not exist if never saved via v2 path
+  }
+}
+
+export async function clearAllFirestoreConversations(
+  user: FirebaseUser
+): Promise<void> {
+  if (!user?.uid || !user.emailVerified) return;
+  const { db } = getFirebaseServices();
+  const userId = sanitizeDocId(user.uid);
+
+  try {
+    const convCol = collection(db, 'users', userId, 'conversations');
+    const convSnap = await getDocs(query(convCol, where('userId', '==', userId)));
+    await Promise.all(convSnap.docs.map((d) => deleteDoc(d.ref)));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `users/${userId}/conversations`);
+  }
+
+  try {
+    const sessCol = collection(db, 'users', userId, 'sessions');
+    const sessSnap = await getDocs(query(sessCol, where('userId', '==', userId)));
+    await Promise.all(sessSnap.docs.map((d) => deleteDoc(d.ref)));
+  } catch {
+    // ignore optional session subcollection cleanup error
+  }
 }
 
 function hashMemoryFactId(fact: string): string {

@@ -166,3 +166,14 @@ CREATE TABLE IF NOT EXISTS ai_stored_messages (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ai_message_feedback (
+  message_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  rating TEXT NOT NULL,
+  reason TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (message_id, user_id)
+);
+

@@ -24,7 +24,7 @@ const DB_NAME = 'smfta-secure-keystore';
 const STORE_NAME = 'keys';
 const KEY_ID = 'aes-gcm-v1';
 
-export function isEncrypted(value: unknown): value is string {
+export function isEncrypted(value: unknown): boolean {
   return typeof value === 'string' && value.startsWith(ENC_PREFIX);
 }
 
@@ -247,3 +247,147 @@ export async function decryptSecretsInPlace<T extends Record<string, unknown>>(
   }
   return obj;
 }
+
+const KEYSTORE_META_KEY = 'smfta_keystore_meta';
+
+export interface KeystoreMetadata {
+  available: boolean;
+  ephemeral: boolean;
+  algorithm: 'AES-GCM-256';
+  lastRotatedAt: string | null;
+  rotationCount: number;
+}
+
+export function getKeystoreMetadata(): KeystoreMetadata {
+  let lastRotatedAt: string | null = null;
+  let rotationCount = 0;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(KEYSTORE_META_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (typeof parsed.lastRotatedAt === 'string') {
+          lastRotatedAt = parsed.lastRotatedAt;
+        }
+        if (typeof parsed.rotationCount === 'number' && Number.isFinite(parsed.rotationCount)) {
+          rotationCount = parsed.rotationCount;
+        }
+      }
+    }
+  } catch {
+    // ignore metadata read errors
+  }
+  return {
+    available: keystoreAvailable(),
+    ephemeral: isEphemeralKeystore(),
+    algorithm: 'AES-GCM-256',
+    lastRotatedAt,
+    rotationCount,
+  };
+}
+
+async function encryptWithKey(plaintext: string, key: CryptoKey): Promise<string> {
+  const value = String(plaintext || '');
+  if (!value) return '';
+  const iv = randomIv();
+  const cipher = await globalThis.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: asBufferSource(iv) },
+    key,
+    asBufferSource(new TextEncoder().encode(value))
+  );
+  return `${ENC_PREFIX}${toBase64(iv)}:${toBase64(new Uint8Array(cipher))}`;
+}
+
+async function decryptWithKey(stored: string, key: CryptoKey): Promise<string> {
+  const value = String(stored || '');
+  if (!value) return '';
+  if (!isEncrypted(value)) return value;
+  const payload = value.slice(ENC_PREFIX.length);
+  const sep = payload.indexOf(':');
+  const ivB64 = sep === -1 ? '' : payload.slice(0, sep);
+  const dataB64 = sep === -1 ? '' : payload.slice(sep + 1);
+  if (!ivB64 || !dataB64 || dataB64.includes(':')) {
+    throw new Error('Malformed encrypted secret');
+  }
+  const plain = await globalThis.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: asBufferSource(fromBase64(ivB64)) },
+    key,
+    asBufferSource(fromBase64(dataB64))
+  );
+  return new TextDecoder().decode(plain);
+}
+
+/**
+ * Generates a brand-new non-extractable AES-256-GCM master CryptoKey, persists
+ * it in IndexedDB (or memory if ephemeral), and invokes the caller's re-seal
+ * callback so every encrypted credential on the device is decrypted under the
+ * previous key and re-encrypted under the new key atomically.
+ */
+export async function rotateKeystoreMasterKey(
+  reencryptCallback?: (helpers: {
+    decryptOld: (stored: string) => Promise<string>;
+    encryptNew: (plaintext: string) => Promise<string>;
+  }) => Promise<number>
+): Promise<{
+  ok: boolean;
+  rotatedAt: string;
+  rotationCount: number;
+  reencryptedCount: number;
+  ephemeral: boolean;
+}> {
+  if (!hasSubtleCrypto()) {
+    throw new Error('Web Crypto API is not available in this environment');
+  }
+  const oldKey = await getKey();
+  const freshKey = await globalThis.crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+
+  let reencryptedCount = 0;
+  if (reencryptCallback) {
+    reencryptedCount = await reencryptCallback({
+      decryptOld: (stored: string) => decryptWithKey(stored, oldKey),
+      encryptNew: (plaintext: string) => encryptWithKey(plaintext, freshKey),
+    });
+  }
+
+  try {
+    if (hasIndexedDb()) {
+      const db = await openKeyDb();
+      await idbPut(db, KEY_ID, freshKey);
+      ephemeral = false;
+    } else {
+      ephemeral = true;
+    }
+  } catch {
+    ephemeral = true;
+  }
+
+  cachedKey = freshKey;
+  keyPromise = Promise.resolve(freshKey);
+
+  const prevMeta = getKeystoreMetadata();
+  const rotatedAt = new Date().toISOString();
+  const rotationCount = prevMeta.rotationCount + 1;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(
+        KEYSTORE_META_KEY,
+        JSON.stringify({ lastRotatedAt: rotatedAt, rotationCount })
+      );
+    }
+  } catch {
+    // ignore storage errors
+  }
+
+  return {
+    ok: true,
+    rotatedAt,
+    rotationCount,
+    reencryptedCount,
+    ephemeral,
+  };
+}
+

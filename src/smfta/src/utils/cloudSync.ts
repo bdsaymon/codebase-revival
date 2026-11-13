@@ -63,6 +63,44 @@ export interface CloudStateRow extends CloudStatePayload {
 
 export type SyncStatus = 'saved' | 'too_large' | 'error';
 export const PENDING_SYNC_QUEUE_KEY = 'smfta_pending_sync_queue';
+export const DELETED_CHATS_KEY = 'smfta_deleted_chat_ids';
+
+export function loadDeletedChatIds(): number[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(DELETED_CHATS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is number => typeof id === 'number' && Number.isFinite(id));
+  } catch {
+    return [];
+  }
+}
+
+export function saveDeletedChatIds(ids: number[]): number[] {
+  const unique = Array.from(
+    new Set((ids || []).filter((id) => typeof id === 'number' && Number.isFinite(id)))
+  ).slice(-500);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(DELETED_CHATS_KEY, JSON.stringify(unique));
+    } catch {
+      // ignore storage quota errors
+    }
+  }
+  return unique;
+}
+
+export function markChatDeleted(sessionId: number): number[] {
+  const current = loadDeletedChatIds();
+  return saveDeletedChatIds([...current, sessionId]);
+}
+
+export function clearDeletedChatTombstone(sessionId: number): number[] {
+  const current = loadDeletedChatIds();
+  return saveDeletedChatIds(current.filter((id) => id !== sessionId));
+}
 
 /** A session is worth persisting once it has messages or a user title. */
 export function isPersistableSession(session: ChatSession): boolean {
@@ -149,14 +187,18 @@ export function mergeProviderProfiles(
  */
 export function mergeSessions(
   local: ChatSession[],
-  cloudRows: CloudSessionRow[]
+  cloudRows: CloudSessionRow[],
+  deletedIds: number[] = []
 ): ChatSession[] {
+  const deletedSet = new Set(deletedIds);
   const byId = new Map<number, ChatSession>();
   for (const session of local) {
+    if (deletedSet.has(session.id)) continue;
     if (!isPersistableSession(session)) continue;
     byId.set(session.id, session);
   }
   for (const row of cloudRows) {
+    if (deletedSet.has(row.session_id)) continue;
     const cloudSession: ChatSession = { ...row.data, id: row.session_id };
     const existing = byId.get(cloudSession.id);
     if (!existing) {
@@ -241,7 +283,7 @@ export async function fetchCloudState(
 }
 
 export function enqueueOfflineSync(item: {
-  type: 'state' | 'session';
+  type: 'state' | 'session' | 'delete_session' | 'clear_sessions';
   userId: string;
   payload: unknown;
   sessionId?: number;
@@ -272,7 +314,7 @@ export async function flushOfflineSyncQueue(
     const raw = localStorage.getItem(PENDING_SYNC_QUEUE_KEY);
     if (!raw) return 0;
     const list: Array<{
-      type: 'state' | 'session';
+      type: 'state' | 'session' | 'delete_session' | 'clear_sessions';
       userId: string;
       payload: unknown;
       sessionId?: number;
@@ -287,6 +329,12 @@ export async function flushOfflineSyncQueue(
           flushed += 1;
         } else if (item.type === 'session') {
           await upsertCloudSession(sb, item.userId, item.payload as ChatSession);
+          flushed += 1;
+        } else if (item.type === 'delete_session' && typeof item.sessionId === 'number') {
+          await deleteCloudSession(sb, item.userId, item.sessionId);
+          flushed += 1;
+        } else if (item.type === 'clear_sessions') {
+          await clearCloudChatSessions(sb, item.userId);
           flushed += 1;
         }
       } catch {
@@ -307,6 +355,26 @@ export async function flushOfflineSyncQueue(
   }
 }
 
+export function stripWorkspaceSecrets(
+  workspace?: Record<string, unknown> | null
+): Record<string, unknown> | undefined {
+  if (!workspace || typeof workspace !== 'object') return undefined;
+  const copy: Record<string, unknown> = { ...workspace };
+  if (Array.isArray(copy.mcpServers)) {
+    copy.mcpServers = (copy.mcpServers as Array<Record<string, unknown>>).map((s) => ({
+      ...s,
+      authSecret: '',
+    }));
+  }
+  if (Array.isArray(copy.dbConnections)) {
+    copy.dbConnections = (copy.dbConnections as Array<Record<string, unknown>>).map((d) => ({
+      ...d,
+      secret: '',
+    }));
+  }
+  return copy;
+}
+
 export async function saveCloudState(
   client: SupabaseClient,
   userId: string,
@@ -320,6 +388,7 @@ export async function saveCloudState(
     saved_profiles: Array.isArray(payload.saved_profiles)
       ? stripProfileSecrets(payload.saved_profiles)
       : [],
+    workspace: stripWorkspaceSecrets(payload.workspace) ?? payload.workspace,
     // Never send raw auth tokens from connections to cloud database
     connections: payload.connections
       ? {
@@ -392,12 +461,33 @@ export async function deleteCloudSession(
   userId: string,
   sessionId: number
 ): Promise<void> {
-  const { error } = await client
-    .from(SESSION_TABLE)
-    .delete()
-    .eq('user_id', userId)
-    .eq('session_id', sessionId);
-  if (error) throw error;
+  try {
+    const { error } = await client
+      .from(SESSION_TABLE)
+      .delete()
+      .eq('user_id', userId)
+      .eq('session_id', sessionId);
+    if (error) throw error;
+  } catch (err) {
+    enqueueOfflineSync({ type: 'delete_session', userId, payload: null, sessionId });
+    throw err;
+  }
+}
+
+export async function clearCloudChatSessions(
+  client: SupabaseClient,
+  userId: string
+): Promise<void> {
+  try {
+    const { error } = await client
+      .from(SESSION_TABLE)
+      .delete()
+      .eq('user_id', userId);
+    if (error) throw error;
+  } catch (err) {
+    enqueueOfflineSync({ type: 'clear_sessions', userId, payload: null });
+    throw err;
+  }
 }
 
 export async function saveCloudProfile(
@@ -442,6 +532,7 @@ export async function wipeCloudWorkspace(
         widgets: [],
         skills: [],
         autonomy: null,
+        workspace: {},
       },
       { onConflict: 'user_id' }
     );
@@ -449,3 +540,4 @@ export async function wipeCloudWorkspace(
   if (s.error) throw s.error;
   if (r.error) throw r.error;
 }
+

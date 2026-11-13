@@ -139,6 +139,10 @@ export interface EngineRequest {
   allowResetUnderChars?: number;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  stopSequences?: string[];
+  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  customParams?: Record<string, unknown>;
   maxOutputTokens?: number;
   perAttemptTimeoutMs?: number;
   requiredCapabilities?: {
@@ -1448,6 +1452,10 @@ export class HardenedAIEngine {
           maxOutput: effectiveMaxOut,
           temperature: req.temperature,
           topP: req.topP,
+          topK: req.topK,
+          stopSequences: req.stopSequences,
+          thinkingMode: req.thinkingMode,
+          customParams: req.customParams,
           stream: false,
           jsonMode: Boolean(req.structuredSchema),
           tools: req.tools,
@@ -2547,6 +2555,10 @@ export class HardenedAIEngine {
         maxOutput: effectiveMaxOut,
         temperature: req.temperature,
         topP: req.topP,
+        topK: req.topK,
+        stopSequences: req.stopSequences,
+        thinkingMode: req.thinkingMode,
+        customParams: req.customParams,
         stream: true,
         authHeaderName: provider.auth_header_name,
         authHeaderFormat: provider.auth_header_format,

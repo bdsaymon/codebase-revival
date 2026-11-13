@@ -25,6 +25,8 @@ async function buildApp(): Promise<AppChain> {
     { toolsRouter },
     { healthRouter },
     { oauthRouter },
+    { mcpRouter },
+    { dbBridgeRouter },
     { APP_VERSION },
     { createIpRateLimiter, parseTrustProxyHops },
     { createApiIdentityMiddleware, redactSecrets },
@@ -36,6 +38,8 @@ async function buildApp(): Promise<AppChain> {
     import('../routes/tools'),
     import('../routes/health'),
     import('../routes/oauth'),
+    import('../routes/mcp'),
+    import('../routes/dbBridge'),
     import('../../src/version'),
     import('../rateLimit'),
     import('../engine/security'),
@@ -65,6 +69,8 @@ async function buildApp(): Promise<AppChain> {
   root.use('/api', providerRouter as never);
   root.use('/api', toolsRouter as never);
   root.use('/api', healthRouter as never);
+  root.use('/api', mcpRouter as never);
+  root.use('/api', dbBridgeRouter as never);
   root.use(oauthRouter as never);
   return { root, redactSecrets };
 }

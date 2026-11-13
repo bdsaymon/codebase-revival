@@ -1,6 +1,7 @@
 import type { SupportedProtocol } from './config';
 import type { CanonicalMessage, CanonicalToolCall } from './context';
 import type { ToolDefinition } from './toolsEngine';
+import { buildGeminiThinkingConfig } from './thinking';
 
 /**
  * Section 10 (C2) & Section 3 (CP5): Protocol Adapters for openai_compatible, gemini_native, and anthropic_native.
@@ -25,12 +26,60 @@ export interface AdapterParsedResponse {
  * Preserves system instruction at top, enforces call-result pairing.
  */
 // UNVERIFIED: Official OpenAI-compatible wire documentation excerpt was not supplied in Owner Paste Section 6
+const RESERVED_BODY_KEYS = new Set([
+  'model',
+  'messages',
+  'contents',
+  'stream',
+  'tools',
+  'system',
+  'systemInstruction',
+]);
+
+export function parseCustomParamsSafe(
+  raw?: string | Record<string, unknown>
+): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function mergeCustomParams(
+  payload: Record<string, unknown>,
+  customParams?: Record<string, unknown>
+): void {
+  if (!customParams) return;
+  for (const [key, value] of Object.entries(customParams)) {
+    if (!RESERVED_BODY_KEYS.has(key) && value !== undefined) {
+      payload[key] = value;
+    }
+  }
+}
+
 export function toOpenAICompatiblePayload(params: {
   modelId: string;
   messages: CanonicalMessage[];
   maxOutput: number;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  stopSequences?: string[];
+  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  customParams?: Record<string, unknown>;
   stream?: boolean;
   jsonMode?: boolean;
   tools?: ToolDefinition[];
@@ -103,11 +152,21 @@ export function toOpenAICompatiblePayload(params: {
   };
 
   if (/mercury/i.test(params.modelId)) {
-    payload.reasoning_effort = 'low';
+    payload.reasoning_effort =
+      params.thinkingMode === 'high' || params.thinkingMode === 'medium'
+        ? params.thinkingMode
+        : 'low';
   }
 
   if (isReasoning) {
     payload.max_completion_tokens = params.maxOutput;
+    if (
+      params.thinkingMode &&
+      params.thinkingMode !== 'off' &&
+      !('reasoning_effort' in payload)
+    ) {
+      payload.reasoning_effort = params.thinkingMode;
+    }
   } else {
     payload.max_tokens = params.maxOutput;
     if (typeof params.temperature === 'number') {
@@ -116,6 +175,12 @@ export function toOpenAICompatiblePayload(params: {
     if (typeof params.topP === 'number') {
       payload.top_p = params.topP;
     }
+  }
+  if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
+    payload.top_k = Math.round(params.topK);
+  }
+  if (Array.isArray(params.stopSequences) && params.stopSequences.length > 0) {
+    payload.stop = params.stopSequences.slice(0, 4);
   }
   if (params.jsonMode) {
     payload.response_format = { type: 'json_object' };
@@ -131,6 +196,7 @@ export function toOpenAICompatiblePayload(params: {
     }));
   }
 
+  mergeCustomParams(payload, params.customParams);
   return payload;
 }
 
@@ -146,6 +212,11 @@ export function toGeminiNativePayload(params: {
   messages: CanonicalMessage[];
   maxOutput: number;
   temperature?: number;
+  topP?: number;
+  topK?: number;
+  stopSequences?: string[];
+  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  customParams?: Record<string, unknown>;
   jsonMode?: boolean;
   tools?: ToolDefinition[];
 }): Record<string, unknown> {
@@ -253,8 +324,25 @@ export function toGeminiNativePayload(params: {
   if (typeof params.temperature === 'number') {
     generationConfig.temperature = params.temperature;
   }
+  if (typeof params.topP === 'number') {
+    generationConfig.topP = params.topP;
+  }
+  if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
+    generationConfig.topK = Math.round(params.topK);
+  }
+  if (Array.isArray(params.stopSequences) && params.stopSequences.length > 0) {
+    generationConfig.stopSequences = params.stopSequences.slice(0, 5);
+  }
   if (params.jsonMode) {
     generationConfig.responseMimeType = 'application/json';
+  }
+  const thinkingCfg = buildGeminiThinkingConfig(
+    params.modelId,
+    params.thinkingMode,
+    params.thinkingMode !== 'off'
+  );
+  if (thinkingCfg) {
+    generationConfig.thinkingConfig = thinkingCfg;
   }
 
   const payload: Record<string, unknown> = {
@@ -278,6 +366,7 @@ export function toGeminiNativePayload(params: {
     ];
   }
 
+  mergeCustomParams(payload, params.customParams);
   return payload;
 }
 
@@ -293,6 +382,11 @@ export function toAnthropicNativePayload(params: {
   messages: CanonicalMessage[];
   maxOutput: number;
   temperature?: number;
+  topP?: number;
+  topK?: number;
+  stopSequences?: string[];
+  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  customParams?: Record<string, unknown>;
   stream?: boolean;
   tools?: ToolDefinition[];
 }): Record<string, unknown> {
@@ -403,6 +497,15 @@ export function toAnthropicNativePayload(params: {
   if (typeof params.temperature === 'number') {
     payload.temperature = params.temperature;
   }
+  if (typeof params.topP === 'number') {
+    payload.top_p = params.topP;
+  }
+  if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
+    payload.top_k = Math.round(params.topK);
+  }
+  if (Array.isArray(params.stopSequences) && params.stopSequences.length > 0) {
+    payload.stop_sequences = params.stopSequences.slice(0, 4);
+  }
   if (Array.isArray(params.tools) && params.tools.length > 0) {
     payload.tools = params.tools.map((t) => ({
       name: t.name,
@@ -411,6 +514,7 @@ export function toAnthropicNativePayload(params: {
     }));
   }
 
+  mergeCustomParams(payload, params.customParams);
   return payload;
 }
 
@@ -426,6 +530,10 @@ export function buildProtocolRequest(params: {
   maxOutput: number;
   temperature?: number;
   topP?: number;
+  topK?: number;
+  stopSequences?: string[];
+  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  customParams?: Record<string, unknown>;
   stream?: boolean;
   jsonMode?: boolean;
   tools?: ToolDefinition[];
@@ -462,6 +570,10 @@ export function buildProtocolRequest(params: {
         maxOutput: params.maxOutput,
         temperature: params.temperature,
         topP: params.topP,
+        topK: params.topK,
+        stopSequences: params.stopSequences,
+        thinkingMode: params.thinkingMode,
+        customParams: params.customParams,
         stream: params.stream,
         jsonMode: params.jsonMode,
         tools: params.tools,
@@ -485,6 +597,11 @@ export function buildProtocolRequest(params: {
         messages: params.messages,
         maxOutput: params.maxOutput,
         temperature: params.temperature,
+        topP: params.topP,
+        topK: params.topK,
+        stopSequences: params.stopSequences,
+        thinkingMode: params.thinkingMode,
+        customParams: params.customParams,
         jsonMode: params.jsonMode,
         tools: params.tools,
       }),
@@ -502,6 +619,11 @@ export function buildProtocolRequest(params: {
       messages: params.messages,
       maxOutput: params.maxOutput,
       temperature: params.temperature,
+      topP: params.topP,
+      topK: params.topK,
+      stopSequences: params.stopSequences,
+      thinkingMode: params.thinkingMode,
+      customParams: params.customParams,
       stream: params.stream,
       tools: params.tools,
     }),

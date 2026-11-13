@@ -419,11 +419,18 @@ toolsRouter.post('/generate-image', async (req: Request, res: Response) => {
     });
   }
 
+  const requestedSize = Number(req.body?.size);
+  const size = [512, 768, 1024, 1536].includes(requestedSize) ? requestedSize : 1024;
+  const styleHint =
+    typeof req.body?.style === 'string' && req.body.style.trim()
+      ? `, ${req.body.style.trim().slice(0, 60)} style`
+      : '';
+  const finalPrompt = `${rawPrompt}${styleHint}`;
   const seed = crypto.randomInt(1, 1_000_000_000);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-    rawPrompt
-  )}?width=1024&height=1024&seed=${seed}&nologo=true`;
-  return res.json({ url, prompt: rawPrompt });
+    finalPrompt
+  )}?width=${size}&height=${size}&seed=${seed}&nologo=true`;
+  return res.json({ url, prompt: rawPrompt, size });
 });
 
 // ============================================================================
@@ -596,6 +603,7 @@ toolsRouter.post('/execute-tool', async (req: Request, res: Response) => {
     confirmed = false,
     confirmationId = '',
     enabledTools,
+    toolPermissions,
     provider,
     externalKeys,
     externalModel,
@@ -619,9 +627,29 @@ toolsRouter.post('/execute-tool', async (req: Request, res: Response) => {
     });
   }
 
+  const canonicalToolName =
+    toolName === 'math' ? 'calculate' : toolName === 'search' ? 'web_search' : toolName;
+  const requestedPermission =
+    toolPermissions && typeof toolPermissions === 'object'
+      ? (toolPermissions as Record<string, unknown>)[toolName] ||
+        (toolPermissions as Record<string, unknown>)[canonicalToolName]
+      : undefined;
 
-  // Write / external action confirmation gate (Phase 4.3 & P0-04)
-  if (WRITE_TOOLS.has(toolName)) {
+  if (requestedPermission === 'deny') {
+    return res.status(403).json({
+      ok: false,
+      errorCode: 'TOOL_DENIED_BY_POLICY',
+      tool: toolName,
+      permission: 'deny',
+      error: `Tool "${toolName}" execution is denied by user Tool Permissions policy.`,
+    });
+  }
+
+  const requiresConfirmation =
+    WRITE_TOOLS.has(toolName) || requestedPermission === 'ask';
+
+  // Write / approval-gated action confirmation gate (Phase 4.3, P0-04, and Settings Tool Permissions)
+  if (requiresConfirmation) {
     const callerUserId = String(req.userId || 'anon_local');
     const normalizedArgs: Record<string, unknown> =
       typeof args === 'object' && args !== null
@@ -828,15 +856,18 @@ toolsRouter.post('/execute-tool', async (req: Request, res: Response) => {
       }
     }
 
-    // github_commit / drive_upload require real connector credentials; never fabricate success (P0-04)
-    return res.status(501).json({
-      ok: false,
-      confirmed: true,
-      executed: false,
-      tool: toolName,
-      reason: 'connector_unavailable',
-      error: `Real connector for "${toolName}" is not configured on the server. Use client Vault sync or provide connector credentials.`,
-    });
+    if (WRITE_TOOLS.has(toolName)) {
+      // github_commit / drive_upload require real connector credentials; never fabricate success (P0-04)
+      return res.status(501).json({
+        ok: false,
+        confirmed: true,
+        executed: false,
+        tool: toolName,
+        reason: 'connector_unavailable',
+        error: `Real connector for "${toolName}" is not configured on the server. Use client Vault sync or provide connector credentials.`,
+      });
+    }
+    // For read/utility tools with permission='ask', fall through after confirmation is verified.
   }
 
   // 1. Safe AST Math Calculator

@@ -168,6 +168,20 @@ export interface ChatMessageTiming {
   latencyMs?: number;
 }
 
+export interface MessageFeedback {
+  rating: 'up' | 'down';
+  reason?: string;
+  updatedAt: number;
+}
+
+export interface ChatProject {
+  id: string;
+  name: string;
+  instructions: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'ai';
@@ -193,6 +207,12 @@ export interface ChatMessage {
   memoryAdded?: string[];
   /** v18.3.0 — the live reasoning trace captured while answering. */
   thinking?: string;
+  /** Elapsed thinking duration in whole seconds for collapsed UI summary. */
+  thinkingDurationSec?: number;
+  /** Truthful status step labels observed during response generation. */
+  statusSteps?: string[];
+  /** Persistent user thumbs up/down feedback (outside message text). */
+  feedback?: MessageFeedback;
   /** v20.0.0 — Active V2 Special model identifier for label attribution. */
   v2ModelId?: string;
   selfUpdateSummary?: string;
@@ -237,6 +257,10 @@ export interface ChatSession {
   pinned?: boolean;
   draft?: string;
   msgs: ChatMessage[];
+  /** Optional simple project association (applies only that project's instructions). */
+  projectId?: string;
+  /** Incognito mode: uses no old memory and saves nothing to memory. */
+  incognito?: boolean;
   /** v19.0.0 — Rolling intelligent summary of older turns in long conversations. */
   conversationSummary?: string;
   /** v19.0.0 — Per-conversation selected services & resources (GitHub repo/branch/files, Vercel project, Supabase DB, Google Doc). */
@@ -324,6 +348,134 @@ export interface SavedProviderProfile {
   capabilities?: string[];
   /** Whether this profile represents a built-in provider engine. */
   isBuiltin?: boolean;
+  /** Provider priority order (lower number = higher priority in fallback chain). */
+  priority?: number;
+  /** Custom JSON request parameters forwarded cleanly (never overriding model/messages). */
+  customParams?: string;
+}
+
+export interface ModelRoleSlots {
+  defaultModel?: string;
+  fastModel?: string;
+  reasoningModel?: string;
+  visionModel?: string;
+}
+
+export type ToolPermissionMode = 'allow' | 'ask' | 'deny';
+
+export type McpTransport = 'http' | 'sse' | 'stdio';
+
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  urlOrCommand: string;
+  transport: McpTransport;
+  authType: 'none' | 'bearer' | 'header';
+  authHeaderName?: string;
+  /** Encrypted at rest via AES-256-GCM (`enc:v1:...`), plaintext only in memory when unlocked. */
+  authSecret?: string;
+  enabled: boolean;
+  lastTestedAt?: number;
+  status?: 'untested' | 'connected' | 'error' | 'edge_blocked';
+  statusMessage?: string;
+  latencyMs?: number;
+  tools?: McpToolInfo[];
+  edgeLimited?: boolean;
+}
+
+export type DbProviderKind =
+  | 'supabase'
+  | 'firebase'
+  | 'postgresql'
+  | 'mysql'
+  | 'mongodb'
+  | 'custom_rest';
+
+export interface DbConnectionConfig {
+  id: string;
+  name: string;
+  kind: DbProviderKind;
+  endpointOrUri: string;
+  authHeaderOrKeyName?: string;
+  /** Encrypted at rest via AES-256-GCM (`enc:v1:...`), stripped from cloud/exports. */
+  secret?: string;
+  enabled: boolean;
+  transportMode: 'http_rest' | 'direct_tcp';
+  status?: 'untested' | 'connected' | 'error' | 'edge_blocked';
+  statusMessage?: string;
+  lastTestedAt?: number;
+  latencyMs?: number;
+  tables?: string[];
+}
+
+export interface DbFieldMapping {
+  id: string;
+  sourceField: string;
+  targetField: string;
+  transform?: 'none' | 'trim' | 'lowercase' | 'uppercase' | 'string' | 'number';
+}
+
+export interface DataBridgeConfig {
+  sourceConnectionId: string;
+  destinationConnectionId: string;
+  sourceTable: string;
+  destinationTable: string;
+  syncMode: 'append' | 'upsert';
+  fieldMappings: DbFieldMapping[];
+  lastSyncAt?: number;
+  lastSyncStatus?: string;
+  lastSyncCount?: number;
+}
+
+export interface KnowledgeChunk {
+  id: string;
+  docId: string;
+  docTitle: string;
+  index: number;
+  text: string;
+  tokens: number;
+}
+
+export interface KnowledgeDocument {
+  id: string;
+  title: string;
+  mimeType: string;
+  sizeBytes: number;
+  content: string;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+  tags?: string[];
+}
+
+export interface KnowledgeSettings {
+  enabled: boolean;
+  vectorSearchEnabled: boolean;
+  topK: number;
+  minScore: number;
+  chunkSize: number;
+  chunkOverlap: number;
+}
+
+export interface TelemetryRequestLog {
+  id: string;
+  timestamp: number;
+  provider: string;
+  model: string;
+  status: 'success' | 'error' | 'aborted';
+  httpStatus?: number | null;
+  errorCode?: string;
+  errorMessage?: string;
+  latencyMs?: number;
+  ttftMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface ProviderTestStatus {
@@ -349,6 +501,8 @@ export interface AppSettings {
   vlang: 'bn-BD' | 'en-US' | 'hi-IN';
   /** General UI/application language preference. */
   appLanguage?: 'bn' | 'en' | 'hi';
+  /** Language reading direction (RTL / LTR / Auto). */
+  dir?: 'ltr' | 'rtl' | 'auto';
   creativity: 'precise' | 'balanced' | 'creative';
   accent: 'indigo' | 'emerald' | 'rose' | 'amber' | 'sky' | 'teal' | 'custom';
   /** Hex color used when accent === 'custom'. */
@@ -377,6 +531,7 @@ export interface AppSettings {
   externalModel?: string;
   externalBaseUrl?: string;
   customHeaders?: string;
+  customParams?: string;
   activeProfileId?: string;
   displayName?: string;
   allowKeylessFallback?: boolean;
@@ -388,10 +543,13 @@ export interface AppSettings {
   // 1. Model Weights & Custom Retraining
   weightTemp?: number;
   topP?: number;
+  topK?: number;
+  stopSequences?: string[];
   trainingData?: string;
   // 2. Thinking Algorithm (Fast Decision Logic)
   fastDecision?: boolean;
   thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  liveThinkingSummary?: boolean;
   // 3. Hardware Interface (GPU/CPU Speed Optimization)
   gpuAccel?: boolean;
   // 4. System Memory (High-Speed Cache & Processing Rate)
@@ -410,6 +568,7 @@ export interface AppSettings {
   /** Personalization. */
   responseTone?: 'professional' | 'friendly' | 'creative' | 'concise' | 'technical';
   codingPrefs?: string;
+  userProfileContext?: string;
   /** Notifications (real browser Notification + WebAudio sound). */
   notifEnabled?: boolean;
   notifTaskDone?: boolean;
@@ -418,9 +577,14 @@ export interface AppSettings {
   notifSound?: boolean;
   /** Privacy: chat retention in days; 0 = keep forever. */
   retentionDays?: number;
+  /** Memory retention days; 0 = keep forever. */
+  memoryRetentionDays?: number;
   /** Automation & fallback. */
   maxRetries?: number;
   requestTimeoutSec?: number;
+  concurrentRequests?: number;
+  errorHandlingPolicy?: 'retry_fallback' | 'fail_fast' | 'notify_only';
+  fallbackOrder?: string[];
   /** Usage & limits: per-device daily message cap; 0 = no cap. */
   dailyMessageLimit?: number;
   /** AI tools. */
@@ -430,7 +594,7 @@ export interface AppSettings {
   accountEmail?: string;
   avatarDataUrl?: string;
 
-  // ── v19.0.0 System Upgrade Settings ─────────────────────────────────────
+  // ── v19.0.0 & 10-Category System Upgrade Settings ──────────────────────
   /** Versioned schema marker for settings migration. */
   settingsVersion?: number;
   /** General: default mode when starting a new conversation. */
@@ -453,6 +617,47 @@ export interface AppSettings {
   diagnosticsEnabled?: boolean;
   /** AI Tools & Permissions: per-tool enable/disable map. */
   enabledTools?: Record<string, boolean>;
+  /** AI Tools & Permissions: allow / ask / deny per tool. */
+  toolPermissions?: Record<string, ToolPermissionMode>;
+  /** Model role assignments (default, fast, reasoning, vision). */
+  modelSlots?: ModelRoleSlots;
+  /** Preferred output format directive. */
+  outputFormat?: 'markdown' | 'plain' | 'json' | 'structured';
+  /** Knowledge Base & Vector Search settings. */
+  knowledgeSettings?: KnowledgeSettings;
+  /** Image generation tool defaults. */
+  imageGenPrefs?: { defaultStyle?: string; defaultSize?: number };
+  /** Context compression & handling. */
+  contextCompressionEnabled?: boolean;
+  contextCompressionThreshold?: number;
+  autoContextMode?: 'balanced' | 'aggressive' | 'minimal';
+  /** Security & Privacy. */
+  telemetryOptOut?: boolean;
+  conversationPrivacyMode?: boolean;
+  /** Backup & Restore. */
+  autoBackupEnabled?: boolean;
+  autoBackupIntervalHours?: number;
+
+  // ── Simple 7-Section Settings Fields ────────────────────────────────────
+  /** "আপনাকে কী নামে ডাকব" */
+  nickname?: string;
+  /** Global instructions (max 3000 chars) applied to every chat */
+  globalInstructions?: string;
+  /** Response style preset */
+  responseStyle?: 'normal' | 'concise' | 'explanatory' | 'formal' | 'custom';
+  /** Optional user writing sample when custom style is active */
+  customStyleSample?: string;
+  /** Allow searching older chats when building context */
+  memorySearchChats?: boolean;
+  /** Pause memory: keep saved memories intact without reading or adding */
+  memoryPaused?: boolean;
+  /** Thinking toggle */
+  thinkingEnabled?: boolean;
+  /** Response length preference */
+  responseLength?: 'short' | 'medium' | 'detailed';
+  /** Simple projects list (id, name, instructions) */
+  projects?: ChatProject[];
 }
+
 
 

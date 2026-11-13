@@ -33,6 +33,7 @@ import {
   type AttemptRecord,
 } from '../engine/router';
 import { verifyConnectionTargetSafe } from '../engine/config';
+import { parseCustomParamsSafe } from '../engine/adapters';
 import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from '../engine/defaults';
 import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
@@ -723,6 +724,15 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     sessionId = 'default-session',
     weightTemp,
     topP,
+    topK,
+    stopSequences,
+    thinkingMode = 'medium',
+    outputFormat = 'markdown',
+    userProfileContext = '',
+    knowledgeContext = '',
+    mcpToolsContext = '',
+    customParams,
+    requestTimeoutSec,
     maxOutputTokens,
     trainingData,
     fastDecision = true,
@@ -744,6 +754,29 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     v2TestingBypass = false,
     v2QuotaConfig,
   } = req.body || {};
+
+  const parsedCustomParams = parseCustomParamsSafe(customParams);
+  const parsedStopSequences = Array.isArray(stopSequences)
+    ? stopSequences
+        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+        .map((s) => s.trim().slice(0, 80))
+        .slice(0, 8)
+    : undefined;
+  const parsedTopK =
+    typeof topK === 'number' && Number.isFinite(topK) && topK > 0
+      ? Math.min(200, Math.max(1, Math.round(topK)))
+      : undefined;
+  const effectiveThinkingMode: 'off' | 'low' | 'medium' | 'high' =
+    thinkingMode === 'off' ||
+    thinkingMode === 'low' ||
+    thinkingMode === 'medium' ||
+    thinkingMode === 'high'
+      ? thinkingMode
+      : 'medium';
+  const perAttemptTimeoutMs =
+    typeof requestTimeoutSec === 'number' && Number.isFinite(requestTimeoutSec)
+      ? Math.min(240_000, Math.max(10_000, Math.round(requestTimeoutSec * 1000)))
+      : undefined;
 
   // P0-01 & P0-03: Derive isolated user scope from authenticated server identity
   const scopedUserId = String(req.userId || sessionId || 'default').slice(0, 64);
@@ -1136,6 +1169,24 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       : undefined,
     autonomy:
       autonomy === 'safe' || autonomy === 'full' ? autonomy : undefined,
+    outputFormat:
+      outputFormat === 'plain' ||
+      outputFormat === 'json' ||
+      outputFormat === 'structured'
+        ? outputFormat
+        : 'markdown',
+    userProfileContext:
+      typeof userProfileContext === 'string' && userProfileContext.trim()
+        ? userProfileContext.slice(0, 2000)
+        : undefined,
+    knowledgeContext:
+      typeof knowledgeContext === 'string' && knowledgeContext.trim()
+        ? knowledgeContext.slice(0, 6000)
+        : undefined,
+    mcpToolsContext:
+      typeof mcpToolsContext === 'string' && mcpToolsContext.trim()
+        ? mcpToolsContext.slice(0, 3000)
+        : undefined,
     projectContext:
       typeof projectContext === 'string' && projectContext.trim()
         ? projectContext.slice(0, 120000)
@@ -1282,6 +1333,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
               ? weightTemp
               : algoDecision.temperature,
           topP: typeof topP === 'number' ? topP : algoDecision.topP,
+          topK: parsedTopK,
+          stopSequences: parsedStopSequences,
+          thinkingMode: effectiveThinkingMode,
+          customParams: parsedCustomParams,
+          perAttemptTimeoutMs,
           language:
             replyLang === 'bn' || replyLang === 'en' ? replyLang : 'auto',
           abortSignal: upstreamAbortController.signal,
@@ -1360,6 +1416,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             ? weightTemp
             : algoDecision.temperature,
         topP: typeof topP === 'number' ? topP : algoDecision.topP,
+        topK: parsedTopK,
+        stopSequences: parsedStopSequences,
+        thinkingMode: effectiveThinkingMode,
+        customParams: parsedCustomParams,
+        perAttemptTimeoutMs,
         language:
           replyLang === 'bn' || replyLang === 'en' ? replyLang : 'auto',
         abortSignal: upstreamAbortController.signal,

@@ -6,9 +6,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
-export const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').trim();
+const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+export const SUPABASE_URL = (viteEnv?.VITE_SUPABASE_URL || '').trim();
 export const SUPABASE_ANON_KEY = (
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || ''
+  viteEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || ''
 ).trim();
 
 /** True when the cloud backend is available. */

@@ -1,89 +1,94 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AudioLines,
-  Check,
-  ChevronDown,
+  Activity,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
-  CornerDownLeft,
   Cpu,
-  Eye,
-  EyeOff,
-  Globe,
+  Database,
   Info,
-  Key,
+  KeyRound,
   Layers,
-  LayoutGrid,
-  Loader2,
-  Moon,
-  Plus,
-  RefreshCw,
+  Plug,
+  Search,
   Shield,
   Sliders,
-  SlidersVertical,
   Sparkles,
-  Sun,
-  Trash2,
-  UserCircle,
+  Wrench,
   X,
 } from 'lucide-react';
 import {
   AppSettings,
+  DataBridgeConfig,
+  DbConnectionConfig,
   ExternalProviderId,
+  KnowledgeDocument,
+  McpServerConfig,
   NotebookNote,
   ProviderTestStatus,
   SavedProviderProfile,
   SelfUpdateWidget,
+  TelemetryRequestLog,
   UserProfile,
 } from '../types';
 import type { AutonomyLevel, SelfSkill } from '../utils/selfEngine';
 import type { VaultConnections } from '../utils/cloudVault';
-import { Button } from '@/components/ui/button';
-import { SettingNumber, SettingSelect, SettingsGrid } from './SettingsControls';
 import { sanitizeSettings } from '../utils/settings';
 import {
   DEFAULT_BUILTIN_PROFILE,
   DEFAULT_PROVIDER_BASE_URLS,
   DEFAULT_PROVIDER_MODELS,
-  PROVIDER_CATALOG,
-  PROVIDER_GROUP_LABELS,
-  ProviderGroup,
   QUICK_PROVIDER_CHIPS,
   detectProviderFromKey,
   getInitialProviderProfiles,
-  getModelsForProfile,
-  isBuiltinProviderId,
   isKeylessProviderId,
   persistSavedProfiles,
   providerEntry,
+  sortProvidersByPriority,
 } from '../utils/providers';
-import { PRIMARY_PROVIDER_OPTIONS } from '../data/providerCatalog';
 import {
   fetchProviderModelsClientSide,
   isStandaloneApkEnv,
   testProviderClientSide,
 } from '../utils/apkClientFallback';
+import { loadMcpServers, saveMcpServers } from '../utils/mcpClient';
 import {
-  addManualMemoryFact,
-  clearEntireMemoryBank,
-  deleteMemoryFact,
-} from '../utils/memoryBank';
-
-function maskApiKey(key?: string): string {
-  const k = (key || '').trim();
-  if (!k) return '';
-  if (k.length <= 8) return '••••••••';
-  return `${k.slice(0, 4)}••••${k.slice(-4)}`;
-}
+  loadDataBridgeConfig,
+  loadDbConnections,
+  saveDataBridgeConfig,
+  saveDbConnections,
+} from '../utils/dbBridge';
+import {
+  loadKnowledgeDocuments,
+  saveKnowledgeDocuments,
+} from '../utils/knowledgeBase';
+import { clearTelemetryLogs, loadTelemetryLogs } from '../utils/telemetryLog';
+import { rotateKeystoreMasterKey } from '../utils/secureKeystore';
+import { APP_VERSION } from '../version';
+import { GeneralSection } from './settings/GeneralSection';
+import { ModelsSection } from './settings/ModelsSection';
+import { ProvidersApiSection } from './settings/ProvidersApiSection';
+import { McpIntegrationsSection } from './settings/McpIntegrationsSection';
+import { DatabaseBridgeSection } from './settings/DatabaseBridgeSection';
+import { MemoryKnowledgeSection } from './settings/MemoryKnowledgeSection';
+import { ToolsCapabilitiesSection } from './settings/ToolsCapabilitiesSection';
+import { PerformanceAdvancedSection } from './settings/PerformanceAdvancedSection';
+import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
+import { AboutSystemSection } from './settings/AboutSystemSection';
 
 export type SettingsTabId =
-  | 'providers'
-  | 'responses'
   | 'general'
-  | 'privacy'
+  | 'models'
+  | 'providers'
+  | 'mcp'
+  | 'database'
   | 'memory'
-  // Legacy aliases mapped cleanly into the 3 core tabs
+  | 'tools'
+  | 'performance'
+  | 'security'
+  | 'about'
+  // Legacy aliases preserved for backward compatibility
+  | 'responses'
+  | 'privacy'
   | 'account'
   | 'appearance'
   | 'ai'
@@ -93,9 +98,6 @@ export type SettingsTabId =
   | 'accessibility'
   | 'data'
   | 'integrations'
-  | 'performance'
-  | 'security'
-  | 'about'
   | 'profile'
   | 'engine'
   | 'weights'
@@ -103,62 +105,312 @@ export type SettingsTabId =
   | 'self'
   | 'upgrade';
 
-type SectionId = 'providers' | 'responses' | 'general' | 'privacy';
+export type SectionId =
+  | 'general'
+  | 'models'
+  | 'providers'
+  | 'mcp'
+  | 'database'
+  | 'memory'
+  | 'tools'
+  | 'performance'
+  | 'security'
+  | 'about';
 
-const SECTION_ORDER: SectionId[] = ['providers', 'responses', 'general', 'privacy'];
+interface CategoryDescriptor {
+  id: SectionId;
+  code: string;
+  label: string;
+  group: 'Workspace' | 'AI Engine' | 'Knowledge & Tools' | 'System & Trust';
+  hint: string;
+  keywords: string[];
+  icon: React.ComponentType<{ className?: string }>;
+}
 
-const SECTION_META: Record<
-  SectionId,
+const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
   {
-    label: string;
-    labelBn: string;
-    icon: React.ComponentType<{ className?: string }>;
-    hint: string;
-  }
-> = {
-  providers: {
-    label: 'AI Providers',
-    labelBn: 'AI প্রোভাইডার ও মডেল',
-    icon: Cpu,
-    hint: 'Mercury, Gemini, OpenAI, Anthropic & Custom API',
-  },
-  responses: {
-    label: 'Responses', labelBn: 'উত্তর ও ক্ষমতা', icon: Sparkles, hint: 'Output, context & instructions',
-  },
-  general: {
-    label: 'Appearance',
-    labelBn: 'সাধারণ ও থিম',
+    id: 'general',
+    code: '01',
+    label: 'General',
+    group: 'Workspace',
+    hint: 'Appearance, RTL/LTR language, chat behavior, alerts',
+    keywords: [
+      'appearance',
+      'theme',
+      'dark',
+      'light',
+      'system',
+      'accent',
+      'layout',
+      'font',
+      'language',
+      'rtl',
+      'ltr',
+      'enter',
+      'scroll',
+      'streaming',
+      'notifications',
+      'sound',
+      'chime',
+    ],
     icon: Sliders,
-    hint: 'Theme, language & AI system persona',
   },
-  privacy: {
-    label: 'Memory & Privacy',
-    labelBn: 'মেমোরি ও প্রাইভেসি',
+  {
+    id: 'models',
+    code: '02',
+    label: 'AI Models',
+    group: 'AI Engine',
+    hint: 'Default/Fast/Reasoning/Vision slots, thinking, capabilities',
+    keywords: [
+      'model',
+      'fast',
+      'reasoning',
+      'vision',
+      'slot',
+      'thinking',
+      'effort',
+      'summary',
+      'response length',
+      'output format',
+      'json',
+      'markdown',
+      'context window',
+      'capabilities',
+    ],
+    icon: Sparkles,
+  },
+  {
+    id: 'providers',
+    code: '03',
+    label: 'Providers & API',
+    group: 'AI Engine',
+    hint: 'Custom providers, priority, keys, usage & reliability',
+    keywords: [
+      'provider',
+      'api',
+      'key',
+      'base url',
+      'headers',
+      'params',
+      'custom',
+      'test',
+      'priority',
+      'fallback',
+      'retry',
+      'timeout',
+      'usage',
+      'tokens',
+      'history',
+      'mercury',
+      'gemini',
+      'openai',
+      'anthropic',
+    ],
+    icon: Cpu,
+  },
+  {
+    id: 'mcp',
+    code: '04',
+    label: 'MCP & Integrations',
+    group: 'Knowledge & Tools',
+    hint: 'MCP servers, tool permissions, GitHub & cloud apps',
+    keywords: [
+      'mcp',
+      'server',
+      'sse',
+      'http',
+      'stdio',
+      'tools',
+      'permissions',
+      'allow',
+      'deny',
+      'approval',
+      'github',
+      'google',
+      'integrations',
+      'connectors',
+    ],
+    icon: Plug,
+  },
+  {
+    id: 'database',
+    code: '05',
+    label: 'Database & Bridge',
+    group: 'Knowledge & Tools',
+    hint: 'DB connections, data bridge sync, storage & backups',
+    keywords: [
+      'database',
+      'supabase',
+      'firebase',
+      'postgresql',
+      'mysql',
+      'mongodb',
+      'bridge',
+      'mapping',
+      'sync',
+      'storage',
+      'indexeddb',
+      'localstorage',
+      'backup',
+      'restore',
+      'rollback',
+      'export',
+    ],
+    icon: Database,
+  },
+  {
+    id: 'memory',
+    code: '06',
+    label: 'Memory & Knowledge',
+    group: 'Knowledge & Tools',
+    hint: 'Short/long-term memory, Knowledge Base & vector RAG',
+    keywords: [
+      'memory',
+      'retention',
+      'facts',
+      'knowledge',
+      'base',
+      'documents',
+      'upload',
+      'vector',
+      'rag',
+      'search',
+      'retrieval',
+      'chunks',
+      'instructions',
+      'persona',
+      'tone',
+    ],
+    icon: Layers,
+  },
+  {
+    id: 'tools',
+    code: '07',
+    label: 'Tools & Capabilities',
+    group: 'Knowledge & Tools',
+    hint: 'Web search, image studio, files, sandbox & voice',
+    keywords: [
+      'web search',
+      'image',
+      'generation',
+      'file',
+      'upload',
+      'code',
+      'interpreter',
+      'sandbox',
+      'voice',
+      'tts',
+      'audio',
+      'capabilities',
+    ],
+    icon: Wrench,
+  },
+  {
+    id: 'performance',
+    code: '08',
+    label: 'Performance & Advanced',
+    group: 'System & Trust',
+    hint: 'Sampling params, concurrency, compression & diagnostics',
+    keywords: [
+      'temperature',
+      'topp',
+      'topk',
+      'stop',
+      'max tokens',
+      'concurrency',
+      'cache',
+      'compression',
+      'context',
+      'developer',
+      'diagnostics',
+      'telemetry',
+      'logs',
+    ],
+    icon: Activity,
+  },
+  {
+    id: 'security',
+    code: '09',
+    label: 'Security & Privacy',
+    group: 'System & Trust',
+    hint: 'AES-GCM keystore, key rotation, privacy mode & data controls',
+    keywords: [
+      'security',
+      'encryption',
+      'aes',
+      'keystore',
+      'rotate',
+      'privacy',
+      'incognito',
+      'telemetry',
+      'opt out',
+      'retention',
+      'session',
+      'delete',
+      'clear',
+      'export',
+    ],
     icon: Shield,
-    hint: 'Auto-memory toggle, saved facts & full reset',
   },
-};
+  {
+    id: 'about',
+    code: '10',
+    label: 'About & System',
+    group: 'System & Trust',
+    hint: 'Version info, live health probes, edge runtime & changelog',
+    keywords: [
+      'about',
+      'version',
+      'health',
+      'status',
+      'edge',
+      'cloudflare',
+      'changelog',
+      'whats new',
+      'support',
+    ],
+    icon: Info,
+  },
+];
 
 function normalizeTab(t?: SettingsTabId): SectionId {
   switch (t) {
+    case 'models':
+    case 'ai':
+    case 'responses':
+      return 'models';
     case 'providers':
     case 'engine':
-    case 'ai':
     case 'weights':
+    case 'upgrade':
       return 'providers';
-    case 'responses':
-    case 'performance':
-      return 'responses';
-    case 'privacy':
-    case 'memory':
+    case 'mcp':
+    case 'connectors':
+    case 'integrations':
+    case 'self':
+      return 'mcp';
+    case 'database':
     case 'data':
+      return 'database';
+    case 'memory':
+    case 'personalization':
+      return 'memory';
+    case 'tools':
+      return 'tools';
+    case 'performance':
+      return 'performance';
     case 'security':
-      return 'privacy';
+    case 'privacy':
+      return 'security';
+    case 'about':
+      return 'about';
     case 'general':
     case 'appearance':
-    case 'personalization':
     case 'account':
     case 'profile':
+    case 'notifications':
+    case 'accessibility':
+    case 'shortcuts':
     default:
       return 'general';
   }
@@ -204,73 +456,23 @@ export interface SettingsModalProps {
   keystoreEphemeral?: boolean;
   usageToday?: number;
   onOpenSkill?: (skill: SelfSkill) => void;
+  // Expanded 10-category state hooks (with built-in local fallbacks if omitted)
+  mcpServers?: McpServerConfig[];
+  onUpdateMcpServers?: (next: McpServerConfig[]) => void;
+  dbConnections?: DbConnectionConfig[];
+  onUpdateDbConnections?: (next: DbConnectionConfig[]) => void;
+  dataBridgeConfig?: DataBridgeConfig;
+  onUpdateDataBridgeConfig?: (next: DataBridgeConfig) => void;
+  knowledgeDocs?: KnowledgeDocument[];
+  onUpdateKnowledgeDocs?: (next: KnowledgeDocument[]) => void;
+  telemetryLogs?: TelemetryRequestLog[];
+  onClearTelemetryLogs?: () => void;
+  onRotateKeystoreKey?: () => Promise<void>;
+  onClearChatHistory?: () => void;
+  onDeleteCloudData?: () => Promise<void>;
+  cloudConnected?: boolean;
+  cloudUserEmail?: string;
 }
-
-const Card: React.FC<{
-  title: string;
-  description?: string;
-  icon?: React.ReactNode;
-  rightSlot?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, description, icon, rightSlot, children }) => (
-  <section className="cs-card rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
-    <header className="flex items-start justify-between gap-3 pb-3 mb-3 border-b border-[var(--border)]">
-      <div className="flex items-start gap-2.5 min-w-0">
-        {icon ? (
-          <span className="mt-0.5 text-[var(--primary)] shrink-0">{icon}</span>
-        ) : null}
-        <div className="min-w-0">
-          <h3 className="text-sm font-bold text-[var(--text)]">{title}</h3>
-          {description ? (
-            <p className="text-xs text-[var(--text-3)] mt-0.5">{description}</p>
-          ) : null}
-        </div>
-      </div>
-      {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
-    </header>
-    <div>{children}</div>
-  </section>
-);
-
-const ToggleRow: React.FC<{
-  label: string;
-  description?: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  testId?: string;
-}> = ({ label, description, checked, onChange, testId }) => (
-  <div className="flex items-center justify-between gap-4 py-2">
-    <div className="min-w-0">
-      <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
-        {label}
-      </div>
-      {description ? (
-        <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-          {description}
-        </div>
-      ) : null}
-    </div>
-    <button
-      type="button"
-      role="switch"
-      data-testid={testId}
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 p-0 shrink-0 cursor-pointer items-center rounded-full border transition-colors ${
-        checked
-          ? 'bg-[var(--primary)] border-[var(--primary)]'
-          : 'bg-[var(--surface-2)] border-[var(--border)]'
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-[var(--settings-on-accent)] shadow-xs transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  </div>
-);
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -284,40 +486,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateProfiles,
   onSelectProfile,
   onSave,
+  onResetSettings,
   onUpdateMemory,
   onClearMemory,
-  onOpenWhatsNew,
-  connections,
-  onOpenNotebook,
-  notify,
-  onProviderTestResult,
   onExportBackup,
   onImportBackup,
-  onResetSettings,
+  onSaveRollbackPoint,
+  onRollback,
+  hasRollbackPoint,
+  onClearAllData,
+  onOpenWhatsNew,
+  connections,
+  onUpdateConnections,
+  notes = [],
+  notify,
+  onBackupToGithub,
+  onProviderTestResult,
+  keystoreEphemeral,
+  usageToday = 0,
+  mcpServers: externalMcpServers,
+  onUpdateMcpServers,
+  dbConnections: externalDbConnections,
+  onUpdateDbConnections,
+  dataBridgeConfig: externalBridgeConfig,
+  onUpdateDataBridgeConfig,
+  knowledgeDocs: externalKnowledgeDocs,
+  onUpdateKnowledgeDocs,
+  telemetryLogs: externalTelemetryLogs,
+  onClearTelemetryLogs,
+  onRotateKeystoreKey,
+  onClearChatHistory,
+  onDeleteCloudData,
+  cloudConnected,
+  cloudUserEmail,
 }) => {
   const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
   const [mobileDetailOpen, setMobileDetailOpen] = useState<boolean>(() =>
     Boolean(initialTab && initialTab !== 'general')
   );
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    if (initialTab) {
-      setTab(normalizeTab(initialTab));
-      setMobileDetailOpen(initialTab !== 'general');
+    if (isOpen) {
+      setSearchQuery('');
+      if (initialTab) {
+        setTab(normalizeTab(initialTab));
+        setMobileDetailOpen(initialTab !== 'general');
+      }
     }
-  }, [initialTab]);
+  }, [isOpen, initialTab]);
+
+  // Close cleanly on Escape key (desktop & mobile)
+  useEffect(() => {
+    if (!isOpen || isInline) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isInline, onClose]);
 
   const [draft, setDraft] = useState<AppSettings>(() => sanitizeSettings(settings));
   const [profileName, setProfileName] = useState(profile.name || '');
-  const [localProfiles, setLocalProfiles] = useState<SavedProviderProfile[]>(
-    () =>
-      externalProfiles && externalProfiles.length > 0
-        ? externalProfiles
-        : getInitialProviderProfiles(settings)
+  const [localProfiles, setLocalProfiles] = useState<SavedProviderProfile[]>(() =>
+    externalProfiles && externalProfiles.length > 0
+      ? externalProfiles
+      : getInitialProviderProfiles(settings)
   );
 
-  // Provider configuration form state (Default Mercury -> mercury-3)
+  // Expanded workspace local fallbacks when standalone
+  const [localMcpServers, setLocalMcpServers] = useState<McpServerConfig[]>([]);
+  const [localDbConnections, setLocalDbConnections] = useState<DbConnectionConfig[]>([]);
+  const [localBridgeConfig, setLocalBridgeConfig] = useState<DataBridgeConfig>(() =>
+    loadDataBridgeConfig()
+  );
+  const [localKnowledgeDocs, setLocalKnowledgeDocs] = useState<KnowledgeDocument[]>([]);
+  const [localTelemetryLogs, setLocalTelemetryLogs] = useState<TelemetryRequestLog[]>(() =>
+    loadTelemetryLogs()
+  );
+
+  // Provider configuration form state
   const [newPropName, setNewPropName] = useState('');
   const [newProviderId, setNewProviderId] = useState<ExternalProviderId>('mercury');
   const [newApiKey, setNewApiKey] = useState('');
@@ -325,6 +577,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [newBaseUrl, setNewBaseUrl] = useState(DEFAULT_PROVIDER_BASE_URLS.mercury || '');
   const [newModel, setNewModel] = useState(DEFAULT_PROVIDER_MODELS.mercury || 'mercury-3');
   const [newCustomHeaders, setNewCustomHeaders] = useState('');
+  const [newCustomParams, setNewCustomParams] = useState('');
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [profileAdvancedOpen, setProfileAdvancedOpen] = useState<Record<string, boolean>>({});
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
@@ -336,16 +589,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     workingModel?: string;
   } | null>(null);
   const [discoveryWarning, setDiscoveryWarning] = useState<string | null>(null);
-
   const [testingProfileId, setTestingProfileId] = useState<string | null>(null);
   const [loadingModelsForId, setLoadingModelsForId] = useState<string | null>(null);
   const [revealedKeyIds, setRevealedKeyIds] = useState<Record<string, boolean>>({});
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
 
-  // Memory & Privacy state
-  const [newMemoryFact, setNewMemoryFact] = useState('');
-  const [confirmingClearMemory, setConfirmingClearMemory] = useState(false);
-
+  // Hydrate draft & fallback stores whenever Settings opens
   useEffect(() => {
     if (!isOpen && !isInline) return;
     const cleanSettings = sanitizeSettings(settings);
@@ -356,9 +605,103 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDraft(cleanSettings);
     setProfileName(profile.name || '');
     setLocalProfiles(initialProfiles);
-    setConfirmingClearMemory(false);
+
+    if (!externalMcpServers) {
+      void loadMcpServers().then(setLocalMcpServers).catch(() => {});
+    }
+    if (!externalDbConnections) {
+      void loadDbConnections().then(setLocalDbConnections).catch(() => {});
+    }
+    if (!externalBridgeConfig) {
+      setLocalBridgeConfig(loadDataBridgeConfig());
+    }
+    if (!externalKnowledgeDocs) {
+      void loadKnowledgeDocuments().then(setLocalKnowledgeDocs).catch(() => {});
+    }
+    if (!externalTelemetryLogs) {
+      setLocalTelemetryLogs(loadTelemetryLogs());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isInline]);
+
+  const effectiveMcpServers = externalMcpServers ?? localMcpServers;
+  const effectiveDbConnections = externalDbConnections ?? localDbConnections;
+  const effectiveBridgeConfig = externalBridgeConfig ?? localBridgeConfig;
+  const effectiveKnowledgeDocs = externalKnowledgeDocs ?? localKnowledgeDocs;
+  const effectiveTelemetryLogs = externalTelemetryLogs ?? localTelemetryLogs;
+
+  const handleUpdateMcpServers = (next: McpServerConfig[]) => {
+    setLocalMcpServers(next);
+    void saveMcpServers(next).catch(() => {});
+    onUpdateMcpServers?.(next);
+  };
+
+  const handleUpdateDbConnections = (next: DbConnectionConfig[]) => {
+    setLocalDbConnections(next);
+    void saveDbConnections(next).catch(() => {});
+    onUpdateDbConnections?.(next);
+  };
+
+  const handleUpdateBridgeConfig = (next: DataBridgeConfig) => {
+    setLocalBridgeConfig(next);
+    saveDataBridgeConfig(next);
+    onUpdateDataBridgeConfig?.(next);
+  };
+
+  const handleUpdateKnowledgeDocs = (next: KnowledgeDocument[]) => {
+    setLocalKnowledgeDocs(next);
+    void saveKnowledgeDocuments(next).catch(() => {});
+    onUpdateKnowledgeDocs?.(next);
+  };
+
+  const handleClearLogs = () => {
+    clearTelemetryLogs();
+    setLocalTelemetryLogs([]);
+    onClearTelemetryLogs?.();
+    notify?.('Request telemetry history cleared.');
+  };
+
+  const handleRotateKeystore = async () => {
+    if (onRotateKeystoreKey) {
+      await onRotateKeystoreKey();
+      return;
+    }
+    await rotateKeystoreMasterKey(async ({ decryptOld, encryptNew }) => {
+      let count = 0;
+      const nextProfiles = await Promise.all(
+        localProfiles.map(async (p) => {
+          if (!p.externalKeys) return p;
+          const plain = await decryptOld(p.externalKeys);
+          const sealed = plain ? await encryptNew(plain) : '';
+          if (plain) count += 1;
+          return { ...p, externalKeys: plain || sealed };
+        })
+      );
+      setLocalProfiles(nextProfiles);
+      persistSavedProfiles(nextProfiles);
+      return count;
+    });
+    notify?.('Master AES-256-GCM encryption key rotated and local secrets re-sealed.');
+  };
+
+  const filteredCategories = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return SETTINGS_CATEGORIES;
+    return SETTINGS_CATEGORIES.filter((cat) => {
+      if (cat.label.toLowerCase().includes(q)) return true;
+      if (cat.hint.toLowerCase().includes(q)) return true;
+      if (cat.code.includes(q)) return true;
+      return cat.keywords.some((kw) => kw.includes(q));
+    });
+  }, [searchQuery]);
+
+  // If current search hides active tab on desktop, auto-select the first match
+  useEffect(() => {
+    if (!searchQuery.trim()) return;
+    if (filteredCategories.length > 0 && !filteredCategories.some((c) => c.id === tab)) {
+      setTab(filteredCategories[0].id);
+    }
+  }, [filteredCategories, searchQuery, tab]);
 
   if (!isOpen && !isInline) return null;
 
@@ -392,7 +735,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     localProfiles.find((p) => p.id === draft.activeProfileId) ||
     localProfiles[0] ||
     DEFAULT_BUILTIN_PROFILE;
-  const activeProfileModels = getModelsForProfile(activeProfile);
 
   const activateSavedProfile = (prof: SavedProviderProfile) => {
     const cleared: SavedProviderProfile = { ...prof, quotaExhausted: false };
@@ -407,6 +749,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalModel: prof.externalModel,
       externalBaseUrl: prof.externalBaseUrl,
       customHeaders: prof.customHeaders,
+      customParams: prof.customParams,
     });
     commit(nextSettings);
   };
@@ -421,6 +764,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         'externalModel' in changes ||
         'externalBaseUrl' in changes ||
         'customHeaders' in changes ||
+        'customParams' in changes ||
         'contextWindow' in changes ||
         'supportsStreaming' in changes) &&
       !('verified' in changes);
@@ -451,6 +795,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalModel: updated.externalModel,
         externalBaseUrl: updated.externalBaseUrl,
         customHeaders: updated.customHeaders,
+        customParams: updated.customParams,
       });
     }
   };
@@ -460,6 +805,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const nextList = localProfiles.filter((p) => p.id !== id);
     syncProfiles(nextList);
     if (activeProfile?.id === id && nextList[0]) activateSavedProfile(nextList[0]);
+  };
+
+  const handleMovePriority = (id: string, direction: 'up' | 'down') => {
+    const ordered = sortProvidersByPriority(localProfiles);
+    const idx = ordered.findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= ordered.length) return;
+    const copy = [...ordered];
+    const [moved] = copy.splice(idx, 1);
+    copy.splice(swapIdx, 0, moved);
+    const reindexed = copy.map((p, index) => ({ ...p, priority: index + 1 }));
+    syncProfiles(reindexed);
+  };
+
+  const resolveInferredBaseUrl = (
+    provId: ExternalProviderId,
+    rawBase: string,
+    rawKey: string
+  ): string => {
+    const cleanBase = rawBase.trim();
+    if (cleanBase) return cleanBase;
+    if (DEFAULT_PROVIDER_BASE_URLS[provId]) {
+      return DEFAULT_PROVIDER_BASE_URLS[provId];
+    }
+    const firstKey = rawKey.split(/[\n,;]+/)[0]?.trim() || '';
+    const detected = detectProviderFromKey(firstKey);
+    if (detected && DEFAULT_PROVIDER_BASE_URLS[detected]) {
+      return DEFAULT_PROVIDER_BASE_URLS[detected];
+    }
+    if (firstKey.startsWith('sk-')) {
+      return DEFAULT_PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1';
+    }
+    return '';
+  };
+
+  const getPopularStarterModels = (
+    providerId: string,
+    baseUrl: string,
+    apiKey: string
+  ): string[] => {
+    if (providerId === 'mercury' || providerId === 'inceptionlabs') {
+      return ['mercury-3', 'mercury', 'mercury-coder'];
+    }
+    if (providerId !== 'custom') {
+      return (
+        QUICK_PROVIDER_CHIPS[providerId] ||
+        [DEFAULT_PROVIDER_MODELS[providerId]].filter(Boolean)
+      );
+    }
+    const u = (baseUrl || '').toLowerCase();
+    const k = (apiKey || '').toLowerCase();
+    if (u.includes('codecraft') || k.startsWith('cc_')) {
+      return [
+        'gemini-3.7-flash',
+        'deepseek-v4-flash-0731',
+        'claude-sonnet-5',
+        'claude-opus-4.8',
+      ];
+    }
+    if (u.includes('inceptionlabs') || u.includes('mercury')) {
+      return ['mercury-3', 'mercury', 'mercury-coder'];
+    }
+    if (u.includes('groq')) {
+      return ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
+    }
+    if (u.includes('openrouter')) {
+      return [
+        'google/gemini-2.5-flash',
+        'meta-llama/llama-3.3-70b-instruct',
+        'deepseek/deepseek-chat',
+      ];
+    }
+    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-2.5-flash'];
   };
 
   const handleFetchNewModels = async (
@@ -501,10 +920,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (!newModel) setNewModel(models[0]);
         if (warningMsg) setDiscoveryWarning(warningMsg);
       } else {
-        setDiscoveryWarning('Model list আনা যায়নি; manual model ID টাইপ করতে পারেন।');
+        setDiscoveryWarning('Could not fetch remote model list; manual model ID entry is active.');
       }
     } catch {
-      setDiscoveryWarning('Model list আনা যায়নি; manual model ID টাইপ করতে পারেন।');
+      setDiscoveryWarning('Could not fetch remote model list; manual model ID entry is active.');
     } finally {
       setIsLoadingModels(false);
     }
@@ -542,10 +961,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           externalModel: prof.externalModel || models[0],
         });
       } else {
-        notify?.('Model list আনা যায়নি; কাস্টম মডেল আইডি টাইপ করতে পারেন।');
+        notify?.('Model list unavailable; you can enter a custom model ID manually.');
       }
     } catch {
-      notify?.('Model list আনা যায়নি; নেটওয়ার্ক যাচাই করুন।');
+      notify?.('Could not reach provider model endpoint; check network settings.');
     } finally {
       setLoadingModelsForId(null);
     }
@@ -578,6 +997,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalModel: prof.externalModel,
             externalBaseUrl: prof.externalBaseUrl,
             customHeaders: prof.customHeaders,
+            customParams: prof.customParams,
             testStreaming: prof.supportsStreaming !== false,
             contextWindow: prof.contextWindow,
           }),
@@ -662,58 +1082,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const resolveInferredBaseUrl = (
-    provId: ExternalProviderId,
-    rawBase: string,
-    rawKey: string
-  ): string => {
-    const cleanBase = rawBase.trim();
-    if (cleanBase) return cleanBase;
-    if (DEFAULT_PROVIDER_BASE_URLS[provId]) {
-      return DEFAULT_PROVIDER_BASE_URLS[provId];
-    }
-    const firstKey = rawKey.split(/[\n,;]+/)[0]?.trim() || '';
-    const detected = detectProviderFromKey(firstKey);
-    if (detected && DEFAULT_PROVIDER_BASE_URLS[detected]) {
-      return DEFAULT_PROVIDER_BASE_URLS[detected];
-    }
-    if (firstKey.startsWith('sk-')) {
-      return DEFAULT_PROVIDER_BASE_URLS.openai || 'https://api.openai.com/v1';
-    }
-    return '';
-  };
-
-  const getPopularStarterModels = (
-    providerId: string,
-    baseUrl: string,
-    apiKey: string
-  ): string[] => {
-    if (providerId === 'mercury' || providerId === 'inceptionlabs') {
-      return ['mercury-3', 'mercury', 'mercury-coder'];
-    }
-    if (providerId !== 'custom') {
-      return (
-        QUICK_PROVIDER_CHIPS[providerId] ||
-        [DEFAULT_PROVIDER_MODELS[providerId]].filter(Boolean)
-      );
-    }
-    const u = (baseUrl || '').toLowerCase();
-    const k = (apiKey || '').toLowerCase();
-    if (u.includes('codecraft') || k.startsWith('cc_')) {
-      return ['gemini-3.7-flash', 'deepseek-v4-flash-0731', 'claude-sonnet-5', 'claude-opus-4.8'];
-    }
-    if (u.includes('inceptionlabs') || u.includes('mercury')) {
-      return ['mercury-3', 'mercury', 'mercury-coder'];
-    }
-    if (u.includes('groq')) {
-      return ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'];
-    }
-    if (u.includes('openrouter')) {
-      return ['google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-chat'];
-    }
-    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-2.5-flash'];
-  };
-
   const handleSaveWithoutVerification = () => {
     const effectiveBaseUrl = resolveInferredBaseUrl(
       newProviderId,
@@ -735,7 +1103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewVerifyResult({
         ok: false,
         message:
-          'Custom API কানেক্ট করতে Base URL (যেমন: https://api.openai.com/v1) অথবা বৈধ API Key দিন।',
+          'Custom API requires a valid Base URL (e.g. https://api.openai.com/v1) or API Key.',
       });
       return;
     }
@@ -764,6 +1132,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       )
     );
 
+    const nextPriority = localProfiles.length + 1;
     const newProfile: SavedProviderProfile = {
       id:
         typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -775,11 +1144,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalModel: workingModel,
       externalBaseUrl: effectiveBaseUrl,
       ...(newCustomHeaders.trim() ? { customHeaders: newCustomHeaders.trim() } : {}),
+      ...(newCustomParams.trim() ? { customParams: newCustomParams.trim() } : {}),
       availableModels: mergedModels,
       verified: false,
       verificationStatus: 'untested',
+      enabled: true,
+      priority: nextPriority,
       quotaExhausted: false,
-      statusMessage: `Ready · ${workingModel}`,
+      statusMessage: `Untested · ${workingModel}`,
     };
 
     const nextList = [...localProfiles, newProfile];
@@ -794,20 +1166,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       externalModel: newProfile.externalModel,
       externalBaseUrl: newProfile.externalBaseUrl,
       customHeaders: newProfile.customHeaders,
+      customParams: newProfile.customParams,
     });
     commit(nextSettings);
     setNewVerifyResult({
       ok: true,
       workingModel,
-      message: `Saved & activated "${cleanName}" (${workingModel})`,
+      message: `Saved & activated "${cleanName}" (${workingModel}) — untested`,
     });
     setNewPropName('');
     setNewApiKey('');
     setNewCustomHeaders('');
+    setNewCustomParams('');
     setShowNewKey(false);
     setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
     setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || 'mercury-3');
-    notify?.(`Saved & activated "${cleanName}" (${workingModel})`);
+    notify?.(`Saved "${cleanName}" (${workingModel})`);
   };
 
   const handleVerifyAndAddProvider = async () => {
@@ -864,6 +1238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalModel: newModel.trim(),
             externalBaseUrl: effectiveBaseUrl,
             customHeaders: newCustomHeaders,
+            customParams: newCustomParams,
             testStreaming: true,
           }),
         }).catch(() => null);
@@ -901,12 +1276,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         const msgText =
           testData?.message ||
           testData?.error ||
-          'Verification failed. Check API Key, Base URL or quota. Provider was NOT added.';
+          'Verification failed. Check API Key, Base URL, or quota. Provider was NOT added.';
         const suggestionSuffix =
           Array.isArray(testData?.suggestedModels) &&
           testData.suggestedModels.length > 0 &&
           !msgText.includes(testData.suggestedModels[0])
-            ? ` (উপলব্ধ মডেল: ${testData.suggestedModels.slice(0, 4).join(', ')})`
+            ? ` (Available: ${testData.suggestedModels.slice(0, 4).join(', ')})`
             : '';
         setNewVerifyResult({
           ok: false,
@@ -934,6 +1309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             .filter(Boolean)
         )
       );
+      const nextPriority = localProfiles.length + 1;
       const newProfile: SavedProviderProfile = {
         id:
           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -945,6 +1321,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalModel: workingModel,
         externalBaseUrl: effectiveBaseUrl,
         ...(newCustomHeaders.trim() ? { customHeaders: newCustomHeaders.trim() } : {}),
+        ...(newCustomParams.trim() ? { customParams: newCustomParams.trim() } : {}),
         availableModels: mergedModels,
         verified: true,
         verificationStatus: 'verified',
@@ -955,6 +1332,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           typeof testData.supportsStreaming === 'boolean'
             ? testData.supportsStreaming
             : true,
+        enabled: true,
+        priority: nextPriority,
         quotaExhausted: false,
         lastTestedAt: Date.now(),
         statusMessage:
@@ -972,12 +1351,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         externalModel: newProfile.externalModel,
         externalBaseUrl: newProfile.externalBaseUrl,
         customHeaders: newProfile.customHeaders,
+        customParams: newProfile.customParams,
       });
       commit(nextSettings);
       setNewVerifyResult({
         ok: true,
         workingModel,
-        message: `✓ Verified & connected "${cleanName}" (${elapsedMs}ms) — model: ${workingModel}`,
+        message: `Verified & connected "${cleanName}" (${elapsedMs}ms) — model: ${workingModel}`,
       });
       onProviderTestResult?.({
         ok: true,
@@ -989,6 +1369,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewPropName('');
       setNewApiKey('');
       setNewCustomHeaders('');
+      setNewCustomParams('');
       setShowNewKey(false);
       setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[newProviderId] || '');
       setNewModel(DEFAULT_PROVIDER_MODELS[newProviderId] || 'mercury-3');
@@ -1002,7 +1383,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  // Offer discovered models or standard popular starter models
   const popularStarterModels = getPopularStarterModels(
     newProviderId,
     newBaseUrl,
@@ -1013,1387 +1393,434 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
   const detectedProviderFromNewKey = detectProviderFromKey(newApiKey);
 
-  // Memory handlers
-  const handleAddMemoryItem = () => {
-    const res = addManualMemoryFact(memory, newMemoryFact);
-    if (res.error) {
-      notify?.(res.error);
-      return;
-    }
-    onUpdateMemory?.(res.updated);
-    setNewMemoryFact('');
-    notify?.('Memory saved');
-  };
+  const currentMeta =
+    SETTINGS_CATEGORIES.find((c) => c.id === tab) || SETTINGS_CATEGORIES[0];
 
-  const handleDeleteSingleMemory = (factText: string) => {
-    const next = deleteMemoryFact(memory, factText);
-    if (next.length === 0) {
-      clearEntireMemoryBank();
-    }
-    onUpdateMemory?.(next);
-  };
-
-  const handleConfirmClearAllMemory = () => {
-    clearEntireMemoryBank();
-    onUpdateMemory?.([]);
-    onClearMemory();
-    setConfirmingClearMemory(false);
-    notify?.('All memory wiped / সব মেমোরি মুছে ফেলা হয়েছে');
-  };
-
-  // ── TAB 1: AI Providers ──────────────────────────────────────────────────
-
-  const renderProviders = () => (
-    <>
-      <Card
-        title="Configure AI Provider"
-        description=""
-        icon={<Plus className="w-4 h-4" />}
-      >
-        <div className="space-y-4">
-          {/* Quick Provider Selector Pills */}
-          <div>
-            <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)] mb-2">
-              Provider
-            </label>
-            <div
-              className="grid grid-cols-2 sm:grid-cols-5 gap-2"
-              data-testid="provider-selector-pills"
-            >
-              {PRIMARY_PROVIDER_OPTIONS.map((opt) => {
-                const isSelected = newProviderId === opt.id;
-                return (
-                  <Button variant="ghost"
-                    key={opt.id}
-                    type="button"
-                    data-testid={`provider-pill-${opt.id}`}
-                    onClick={() => {
-                      const nextId = opt.id;
-                      const defModel =
-                        nextId === 'mercury'
-                          ? 'mercury-3'
-                          : DEFAULT_PROVIDER_MODELS[nextId] || opt.defaultModel;
-                      setNewProviderId(nextId);
-                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[nextId] || '');
-                      setNewModel(defModel);
-                      setDiscoveredModels([]);
-                      setDiscoveryWarning(null);
-                      setNewVerifyResult(null);
-                    }}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)] shadow-xs'
-                        : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)] hover:text-[var(--text)] hover:border-[var(--primary-border)]'
-                    }`}
-                  >
-                    {opt.label}
-                  </Button>
-                );
-              })}
-            </div>
-            <div className="mt-2">
-              <select
-                aria-label="Provider selector"
-                data-testid="provider-select-dropdown"
-                value={newProviderId}
-                onChange={(e) => {
-                  const nextId = e.target.value as ExternalProviderId;
-                  setNewProviderId(nextId);
-                  setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[nextId] || '');
-                  setNewModel(
-                    nextId === 'mercury' || nextId === 'inceptionlabs'
-                      ? 'mercury-3'
-                      : DEFAULT_PROVIDER_MODELS[nextId] || ''
-                  );
-                  setDiscoveredModels([]);
-                  setDiscoveryWarning(null);
-                  setNewVerifyResult(null);
-                }}
-                className="cs-input w-full text-xs"
-              >
-                {(['popular', 'custom', 'local', 'builtin'] as ProviderGroup[]).map(
-                  (grp) => (
-                    <optgroup key={grp} label={PROVIDER_GROUP_LABELS[grp]}>
-                      {PROVIDER_CATALOG.filter((p) => p.group === grp).map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )
-                )}
-              </select>
-            </div>
-          </div>
-
-          {/* Model Name Input + Quick Chips */}
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)]">
-                Model Name
-              </label>
-              <Button variant="ghost"
-                type="button"
-                onClick={() => handleFetchNewModels()}
-                disabled={isLoadingModels}
-                className="text-[11px] font-semibold text-[var(--primary)] hover:underline inline-flex items-center gap-1 cursor-pointer"
-              >
-                {isLoadingModels ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-3 h-3" />
-                )}
-                Fetch Models
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input
-                type="text"
-                data-testid="provider-model-input"
-                value={newModel}
-                onChange={(e) => setNewModel(e.target.value)}
-                placeholder={
-                  newProviderId === 'mercury'
-                    ? 'mercury-3'
-                    : DEFAULT_PROVIDER_MODELS[newProviderId] || 'Enter model ID'
-                }
-                className="cs-input font-mono text-xs"
-              />
-              {candidateModelsForNew.length > 0 && (
-                <select
-                  aria-label="Quick select model"
-                  data-testid="provider-model-dropdown"
-                  value={candidateModelsForNew.includes(newModel) ? newModel : ''}
-                  onChange={(e) => {
-                    if (e.target.value) setNewModel(e.target.value);
-                  }}
-                  className="cs-input font-mono text-xs"
-                >
-                  <option value="" disabled>
-                    Select preset model...
-                  </option>
-                  {candidateModelsForNew.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-            {discoveryWarning && (
-              <div className="text-[11px] text-[var(--accent-amber)] mt-1">{discoveryWarning}</div>
-            )}
-          </div>
-
-          {/* API Key Input with Show/Hide Toggle */}
-          {(!isKeylessProviderId(newProviderId) || newProviderId === 'custom') && (
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)] mb-1.5">
-                API Key
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type={showNewKey ? 'text' : 'password'}
-                  data-testid="provider-api-key-input"
-                  value={newApiKey}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setNewApiKey(val);
-                    const detected = detectProviderFromKey(val);
-                    if (
-                      detected &&
-                      detected !== newProviderId &&
-                      (newProviderId === 'xrahat' || newProviderId === 'smfta_cloud')
-                    ) {
-                      setNewProviderId(detected);
-                      setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
-                      setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
-                    }
-                  }}
-                  placeholder={
-                    providerEntry(newProviderId)?.keyHint || 'Paste your API key'
-                  }
-                  className="cs-input flex-1 font-mono text-xs"
-                />
-                <Button variant="ghost"
-                  type="button"
-                  data-testid="provider-api-key-toggle"
-                  onClick={() => setShowNewKey((v) => !v)}
-                  className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
-                  title={showNewKey ? 'Hide API Key' : 'Show API Key'}
-                >
-                  {showNewKey ? (
-                    <EyeOff className="w-3.5 h-3.5" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5" />
-                  )}
-                  <span>{showNewKey ? 'Hide' : 'Show'}</span>
-                </Button>
-              </div>
-              {detectedProviderFromNewKey &&
-                detectedProviderFromNewKey !== newProviderId && (
-                  <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-[var(--text-2)]">
-                    <span>
-                      Key matches{' '}
-                      <strong>
-                        {providerEntry(detectedProviderFromNewKey)?.label ||
-                          detectedProviderFromNewKey}
-                      </strong>
-                    </span>
-                    <Button variant="ghost"
-                      type="button"
-                      onClick={() => {
-                        setNewProviderId(detectedProviderFromNewKey);
-                        setNewBaseUrl(
-                          DEFAULT_PROVIDER_BASE_URLS[detectedProviderFromNewKey] || ''
-                        );
-                        setNewModel(
-                          DEFAULT_PROVIDER_MODELS[detectedProviderFromNewKey] || ''
-                        );
-                      }}
-                      className="text-[var(--primary)] font-semibold hover:underline cursor-pointer"
-                    >
-                      Switch
-                    </Button>
-                  </div>
-                )}
-            </div>
-          )}
-
-          {/* Optional Advanced Options Accordion (Closed by Default) */}
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
-            <Button variant="ghost"
-              type="button"
-              data-testid="provider-advanced-toggle"
-              aria-expanded={showAdvancedOptions}
-              onClick={() => setShowAdvancedOptions((prev) => !prev)}
-              className="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
-            >
-              <span>Connection details</span>
-              <ChevronDown
-                className={`w-4 h-4 transition-transform duration-200 ${
-                  showAdvancedOptions ? 'rotate-180' : ''
-                }`}
-              />
-            </Button>
-            {showAdvancedOptions && (
-              <div
-                data-testid="provider-advanced-panel"
-                className="px-3.5 pb-3.5 pt-2 border-t border-[var(--border)] space-y-3"
-              >
-                <div>
-                  <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
-                    Profile Label (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newPropName}
-                    onChange={(e) => setNewPropName(e.target.value)}
-                    placeholder={`e.g. My ${
-                      providerEntry(newProviderId)?.short || 'Custom'
-                    } Profile`}
-                    className="cs-input w-full text-xs"
-                  />
-                </div>
-                {(!isBuiltinProviderId(newProviderId)) && (
-                  <div>
-                    <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
-                      Base URL
-                    </label>
-                    <input
-                      type="text"
-                      data-testid="provider-base-url-input"
-                      value={newBaseUrl}
-                      onChange={(e) => setNewBaseUrl(e.target.value)}
-                      placeholder={
-                        DEFAULT_PROVIDER_BASE_URLS[newProviderId] ||
-                        'https://api.inceptionlabs.ai/v1'
-                      }
-                      className="cs-input w-full font-mono text-xs"
-                    />
-                  </div>
-                )}
-                <div>
-                  <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
-                    Extra Headers (JSON, Optional)
-                  </label>
-                  <input
-                    type="text"
-                    data-testid="provider-extra-headers-input"
-                    value={newCustomHeaders}
-                    onChange={(e) => setNewCustomHeaders(e.target.value)}
-                    placeholder='{"HTTP-Referer": "https://example.com"}'
-                    className="cs-input w-full font-mono text-xs"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {newVerifyResult && (
-            <div
-              className={`px-3 py-2 rounded-xl text-xs font-medium border ${
-                newVerifyResult.ok
-                  ? 'border-emerald-500/35 bg-emerald-500/10 text-[var(--accent-emerald)]'
-                  : 'border-rose-500/35 bg-rose-500/10 text-[var(--settings-danger)]'
-              }`}
-            >
-              {newVerifyResult.message}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-            <Button variant="ghost"
-              type="button"
-              onClick={handleSaveWithoutVerification}
-              disabled={isVerifyingNew}
-              className="px-3.5 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] hover:border-[var(--primary-border)] cursor-pointer"
-            >
-              Save Profile
-            </Button>
-            <Button variant="ghost"
-              type="button"
-              onClick={handleVerifyAndAddProvider}
-              disabled={isVerifyingNew}
-              className="px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer"
-            >
-              {isVerifyingNew ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
-              )}
-              {isVerifyingNew ? 'Testing...' : 'Verify & Connect'}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Active & Saved Profiles */}
-      <Card
-        title={`Saved Profiles (${localProfiles.length})`}
-        description="Switch active profile, update model or API key, or test connection."
-        icon={<Layers className="w-4 h-4" />}
-      >
-        <div className="space-y-2.5">
-          {localProfiles.map((prof) => {
-            const isSelected = activeProfile?.id === prof.id;
-            const isEditing = editingProfileId === prof.id;
-            const isBuiltin =
-              isBuiltinProviderId(prof.provider);
-            const isKeyRevealed = Boolean(revealedKeyIds[prof.id]);
-            const isTesting = testingProfileId === prof.id;
-            const isRefreshing = loadingModelsForId === prof.id;
-            const modelsForProf = getModelsForProfile(prof);
-            const vStatus =
-              prof.verificationStatus ||
-              (prof.verified ? 'verified' : 'untested');
-
-            return (
-              <div
-                key={prof.id}
-                className={`rounded-xl border p-3 transition-colors ${
-                  isSelected
-                    ? 'border-[var(--primary)] bg-[var(--primary-soft)]'
-                    : 'border-[var(--border)] bg-[var(--bg)]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <Button variant="ghost"
-                    type="button"
-                    onClick={() => activateSavedProfile(prof)}
-                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
-                  >
-                    <span
-                      className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
-                        isSelected
-                          ? 'border-[var(--primary)] bg-[var(--primary)]'
-                          : 'border-[var(--text-3)]'
-                      }`}
-                    >
-                      {isSelected && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--settings-on-accent)]" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold text-[var(--text)]">
-                        <span className="truncate">{prof.name}</span>
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--text-2)] border border-[var(--border)]">
-                          {providerEntry(prof.provider)?.short || prof.provider}
-                        </span>
-                        {isBuiltin && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--primary-soft)] text-[var(--primary)]">
-                            Built-in
-                          </span>
-                        )}
-                        {!isBuiltin && vStatus === 'verified' && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--accent-emerald)]">
-                            Verified
-                          </span>
-                        )}
-                        {!isBuiltin && vStatus === 'failed' && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-[var(--surface-2)] text-[var(--settings-danger)]">
-                            Failed
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-[var(--text-3)] mt-0.5">
-                        <span className="font-mono">
-                          {prof.externalModel ||
-                            DEFAULT_PROVIDER_MODELS[prof.provider] ||
-                            'Auto'}
-                        </span>
-                        {!isBuiltin && prof.externalKeys && (
-                          <span> · Key: {maskApiKey(prof.externalKeys)}</span>
-                        )}
-                      </div>
-                    </div>
-                  </Button>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {!isBuiltin && (
-                      <Button variant="ghost"
-                        type="button"
-                        onClick={() => handleTestExistingProfile(prof)}
-                        disabled={isTesting}
-                        className="px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        {isTesting ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-3 h-3" />
-                        )}
-                        Test
-                      </Button>
-                    )}
-                    <Button variant="ghost"
-                      type="button"
-                      onClick={() =>
-                        setEditingProfileId(isEditing ? null : prof.id)
-                      }
-                      className="px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold text-[var(--text-2)] hover:text-[var(--text)] inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      {isEditing ? 'Close' : 'Edit'}
-                      <ChevronRight
-                        className={`w-3 h-3 transition-transform ${
-                          isEditing ? 'rotate-90' : ''
-                        }`}
-                      />
-                    </Button>
-                    {!isBuiltin && localProfiles.length > 1 && (
-                      <Button variant="ghost"
-                        type="button"
-                        onClick={() => deleteSavedProfile(prof.id)}
-                        className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--settings-danger)] hover:bg-rose-500/10 cursor-pointer"
-                        title="Delete profile"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {prof.statusMessage && (
-                  <div
-                    className={`mt-2 text-[11px] ${
-                      prof.quotaExhausted || vStatus === 'failed'
-                        ? 'text-[var(--settings-danger)]'
-                        : vStatus === 'verified'
-                        ? 'text-[var(--accent-emerald)]'
-                        : 'text-[var(--text-3)]'
-                    }`}
-                  >
-                    {prof.statusMessage}
-                  </div>
-                )}
-
-                {isEditing && (
-                  <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div>
-                        <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
-                          Profile Name
-                        </span>
-                        <input
-                          type="text"
-                          value={prof.name}
-                          onChange={(e) =>
-                            updateSavedProfileField(prof.id, {
-                              name: e.target.value,
-                            })
-                          }
-                          className="cs-input w-full text-xs"
-                        />
-                      </div>
-                      <div>
-                        <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
-                          Provider
-                        </span>
-                        <select
-                          value={prof.provider}
-                          onChange={(e) => {
-                            const nextProv =
-                              e.target.value as ExternalProviderId;
-                            updateSavedProfileField(prof.id, {
-                              provider: nextProv,
-                              externalBaseUrl:
-                                DEFAULT_PROVIDER_BASE_URLS[nextProv] || '',
-                              externalModel:
-                                nextProv === 'mercury'
-                                  ? 'mercury-3'
-                                  : DEFAULT_PROVIDER_MODELS[nextProv] || '',
-                            });
-                          }}
-                          className="cs-input w-full text-xs"
-                        >
-                          {PROVIDER_CATALOG.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-[11px] font-semibold text-[var(--text-2)]">
-                          Model
-                        </span>
-                        {!isBuiltin && (
-                          <Button variant="ghost"
-                            type="button"
-                            onClick={() => handleRefreshProfileModels(prof)}
-                            disabled={isRefreshing}
-                            className="text-[11px] font-semibold text-[var(--primary)] hover:underline inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            {isRefreshing ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <RefreshCw className="w-3 h-3" />
-                            )}
-                            Fetch models
-                          </Button>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {modelsForProf.length > 0 && (
-                          <select
-                            value={
-                              modelsForProf.includes(prof.externalModel)
-                                ? prof.externalModel
-                                : '__custom__'
-                            }
-                            onChange={(e) => {
-                              if (e.target.value !== '__custom__') {
-                                updateSavedProfileField(prof.id, {
-                                  externalModel: e.target.value,
-                                });
-                              }
-                            }}
-                            className="cs-input font-mono text-xs"
-                          >
-                            {modelsForProf.map((m) => (
-                              <option key={m} value={m}>
-                                {m}
-                              </option>
-                            ))}
-                            <option value="__custom__">Custom model ID…</option>
-                          </select>
-                        )}
-                        <input
-                          type="text"
-                          value={prof.externalModel}
-                          onChange={(e) =>
-                            updateSavedProfileField(prof.id, {
-                              externalModel: e.target.value,
-                            })
-                          }
-                          placeholder={
-                            DEFAULT_PROVIDER_MODELS[prof.provider] ||
-                            'mercury-3'
-                          }
-                          className="cs-input font-mono text-xs"
-                        />
-                      </div>
-                    </div>
-
-                    {!isBuiltinProviderId(prof.provider) && (
-                      <>
-                        <div>
-                          <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
-                            API Key (preserved safely unless edited)
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type={isKeyRevealed ? 'text' : 'password'}
-                              value={prof.externalKeys}
-                              onChange={(e) =>
-                                updateSavedProfileField(prof.id, {
-                                  externalKeys: e.target.value,
-                                })
-                              }
-                              placeholder="sk-... / AIza..."
-                              className="cs-input font-mono flex-1 text-xs"
-                            />
-                            <Button variant="ghost"
-                              type="button"
-                              onClick={() =>
-                                setRevealedKeyIds((prev) => ({
-                                  ...prev,
-                                  [prof.id]: !prev[prof.id],
-                                }))
-                              }
-                              className="p-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
-                              title={isKeyRevealed ? 'Hide key' : 'Show key'}
-                            >
-                              {isKeyRevealed ? (
-                                <EyeOff className="w-3.5 h-3.5" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                          <Button variant="ghost"
-                            type="button"
-                            onClick={() =>
-                              setProfileAdvancedOpen((prev) => ({
-                                ...prev,
-                                [prof.id]: !prev[prof.id],
-                              }))
-                            }
-                            className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
-                          >
-                            <span>Connection details & limits</span>
-                            <ChevronDown
-                              className={`w-3.5 h-3.5 transition-transform ${
-                                profileAdvancedOpen[prof.id] ? 'rotate-180' : ''
-                              }`}
-                            />
-                          </Button>
-                          {profileAdvancedOpen[prof.id] && (
-                            <div className="p-3 border-t border-[var(--border)] space-y-2.5">
-                              <div>
-                                <span className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
-                                  Base URL
-                                </span>
-                                <input
-                                  type="text"
-                                  value={prof.externalBaseUrl}
-                                  onChange={(e) =>
-                                    updateSavedProfileField(prof.id, {
-                                      externalBaseUrl: e.target.value,
-                                    })
-                                  }
-                                  placeholder={
-                                    DEFAULT_PROVIDER_BASE_URLS[prof.provider] ||
-                                    'https://api.openai.com/v1'
-                                  }
-                                  className="cs-input w-full font-mono text-xs"
-                                />
-                              </div>
-                              <div>
-                                <span className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
-                                  Extra Headers (JSON)
-                                </span>
-                                <input
-                                  type="text"
-                                  value={prof.customHeaders || ''}
-                                  onChange={(e) =>
-                                    updateSavedProfileField(prof.id, {
-                                      customHeaders: e.target.value,
-                                    })
-                                  }
-                                  placeholder='{"HTTP-Referer": "https://example.com"}'
-                                  className="cs-input w-full font-mono text-xs"
-                                />
-                              </div>
-                              <SettingsGrid>
-                                <SettingNumber label="Context window (tokens)" value={prof.contextWindow ?? 32768} min={1024} max={1000000} step={1024} onChange={v => updateSavedProfileField(prof.id, { contextWindow: v })} />
-                                <SettingNumber label="Profile output limit (tokens)" value={prof.maxOutputTokens ?? draft.maxOutputTokens ?? 1024} min={256} max={32768} step={256} onChange={v => updateSavedProfileField(prof.id, { maxOutputTokens: v })} />
-                              </SettingsGrid>
-                              <ToggleRow label="Stream responses" checked={prof.supportsStreaming !== false} onChange={v => updateSavedProfileField(prof.id, { supportsStreaming: v })} />
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </Card>
-
-      {activeProfileModels.length > 0 && (
-        <Card
-          title="Quick Model Switch"
-          description={`Switch the model on "${activeProfile.name}".`}
-          icon={<Key className="w-4 h-4" />}
-        >
-          <div className="flex flex-wrap gap-1.5">
-            {activeProfileModels.slice(0, 12).map((m) => {
-              const active =
-                (activeProfile.externalModel || draft.externalModel) === m;
-              return (
-                <Button variant="ghost"
-                  key={m}
-                  type="button"
-                  onClick={() =>
-                    updateSavedProfileField(activeProfile.id, {
-                      externalModel: m,
-                    })
-                  }
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono border transition-colors cursor-pointer ${
-                    active
-                      ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)] font-semibold'
-                      : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)] hover:text-[var(--text)]'
-                  }`}
-                >
-                  {m}
-                </Button>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-    </>
-  );
-
-  // ── TAB 2: General & Appearance ──────────────────────────────────────────
-
-  const renderGeneral = () => (
-    <>
-      <Card
-        title="Appearance"
-        icon={
-          draft.theme === 'dark' ? (
-            <Moon className="w-4 h-4" />
-          ) : (
-            <Sun className="w-4 h-4" />
-          )
-        }
-      >
-        <div className="flex items-center justify-between gap-4 py-1">
-          <div className="min-w-0">
-            <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
-              Theme / থিম
-            </div>
-          </div>
-          <div className="cs-seg" data-testid="theme-selector">
-            <Button variant="ghost"
-              type="button"
-              data-testid="theme-dark-btn"
-              onClick={() => patch({ theme: 'dark' })}
-              className={`cs-seg-btn ${draft.theme === 'dark' ? 'is-active' : ''}`}
-            >
-              <Moon className="w-3.5 h-3.5 inline mr-1" />
-              Dark
-            </Button>
-            <Button variant="ghost"
-              type="button"
-              data-testid="theme-light-btn"
-              onClick={() => patch({ theme: 'light' })}
-              className={`cs-seg-btn ${draft.theme === 'light' ? 'is-active' : ''}`}
-            >
-              <Sun className="w-3.5 h-3.5 inline mr-1" />
-              Light
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      <Card
-        title="Language & Profile"
-        icon={<Globe className="w-4 h-4" />}
-      >
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
-                App Language / অ্যাপের ভাষা
-              </div>
-            </div>
-            <div className="cs-seg" data-testid="language-selector">
-              <Button variant="ghost"
-                type="button"
-                data-testid="lang-bn-btn"
-                onClick={() => patch({ appLanguage: 'bn', replyLang: 'bn' })}
-                className={`cs-seg-btn ${
-                  (draft.appLanguage || 'bn') === 'bn' ? 'is-active' : ''
-                }`}
-              >
-                বাংলা
-              </Button>
-              <Button variant="ghost"
-                type="button"
-                data-testid="lang-en-btn"
-                onClick={() => patch({ appLanguage: 'en', replyLang: 'en' })}
-                className={`cs-seg-btn ${
-                  draft.appLanguage === 'en' ? 'is-active' : ''
-                }`}
-              >
-                English
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 pt-3 border-t border-[var(--border)]">
-            <div className="min-w-0">
-              <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
-                Your Name / আপনার নাম
-              </div>
-            </div>
-            <input
-              type="text"
-              value={profileName}
-              maxLength={80}
-              placeholder="e.g. Saymon"
-              onChange={(e) => handleNameChange(e.target.value)}
-              className="cs-input text-xs w-44 sm:w-56"
-            />
-          </div>
-        </div>
-      </Card>
-
-      <Card title="Chat display">
-        <SettingsGrid>
-          <SettingSelect label="Text size" value={draft.fontsize} options={[{value:'small',label:'Small'},{value:'normal',label:'Normal'},{value:'large',label:'Large'}]} onChange={v => patch({fontsize: v as AppSettings['fontsize']})} />
-          <SettingSelect label="Conversation width" value={draft.layoutWidth ?? 'standard'} options={[{value:'standard',label:'Standard'},{value:'wide',label:'Wide'},{value:'full',label:'Full'}]} onChange={v => patch({layoutWidth: v as AppSettings['layoutWidth']})} />
-        </SettingsGrid>
-        <ToggleRow label="Send on Enter" checked={draft.sendOnEnter} onChange={v => patch({sendOnEnter:v})} />
-        <ToggleRow label="Reduce animation" checked={draft.reducedMotion === true} onChange={v => patch({reducedMotion:v})} />
-      </Card>
-    </>
-  );
-
-  const renderResponses = () => (
-    <>
-      <Card title="Response controls" icon={<Sparkles className="w-4 h-4" />}>
-        <SettingsGrid>
-          <SettingSelect label="Processing mode" value={draft.mode} options={[{value:'fast',label:'Fast'},{value:'balanced',label:'Balanced'},{value:'power',label:'Power'}]} onChange={v => patch({mode:v as AppSettings['mode']})} />
-          <SettingSelect label="Reply language" value={draft.replyLang} options={[{value:'auto',label:'Automatic'},{value:'bn',label:'বাংলা'},{value:'en',label:'English'}]} onChange={v => patch({replyLang:v as AppSettings['replyLang']})} />
-          <SettingNumber label="Maximum output (tokens)" value={draft.maxOutputTokens ?? 1024} min={256} max={32768} step={256} onChange={v => patch({maxOutputTokens:v})} />
-          <SettingNumber label="Temperature" value={draft.weightTemp ?? 0.7} min={0.1} max={1.2} step={0.1} onChange={v => patch({weightTemp:v})} />
-          <SettingNumber label="Top P" value={draft.topP ?? 0.9} min={0.1} max={1} step={0.1} onChange={v => patch({topP:v})} />
-          <SettingNumber label="Request timeout (seconds)" value={draft.requestTimeoutSec ?? 120} min={30} max={240} onChange={v => patch({requestTimeoutSec:v})} />
-        </SettingsGrid>
-      </Card>
-      <Card title="Conversation context">
-        <ToggleRow label="Include conversation history" checked={draft.includeHistory !== false} onChange={v => patch({includeHistory:v})} />
-        <SettingNumber label="History messages" value={draft.maxHistoryMessages ?? 18} min={1} max={40} onChange={v => patch({maxHistoryMessages:v})} />
-      </Card>
-      <Card
-        title="Custom instructions"
-        icon={<Sparkles className="w-4 h-4" />}
-      >
-        <div className="space-y-2">
-          <div className="text-xs font-semibold text-[var(--text)]">
-            System Instruction (সিস্টেম নির্দেশনা)
-          </div>
-          <textarea
-            rows={4}
-            data-testid="custom-system-instruction-textarea"
-            value={draft.customInst || ''}
-            maxLength={4000}
-            placeholder="Custom instructions..."
-            onChange={(e) => patch({ customInst: e.target.value })}
-            className="cs-textarea w-full text-xs"
-          />
-
-        </div>
-      </Card>
-    </>
-  );
-
-  // ── TAB 3: Memory & Privacy ──────────────────────────────────────────────
-
-  const renderPrivacy = () => (
-    <>
-      <Card
-        title="Memory & Privacy"
-        icon={<Shield className="w-4 h-4" />}
-      >
-        <ToggleRow
-          label="Auto-Memory / অটো-মেমোরি"
-          checked={draft.autoMemory !== false}
-          onChange={(v) => patch({ autoMemory: v })}
-          testId="auto-memory-toggle"
-        />
-
-        <div className="pt-3 mt-3 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold text-[var(--settings-danger)]">
-              Clear Memory / সম্পূর্ণ মেমোরি রিসেট
-            </div>
-          </div>
-
-          {!confirmingClearMemory ? (
-            <Button variant="ghost"
-              type="button"
-              data-testid="clear-all-memory-btn"
-              onClick={() => setConfirmingClearMemory(true)}
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--surface-2)] text-[var(--settings-danger)] border border-red-500/35 hover:bg-red-500/25 transition-colors inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear All Memory / সব মেমোরি মুছুন</span>
-            </Button>
-          ) : (
-            <div className="flex items-center gap-2 shrink-0">
-              <Button variant="ghost"
-                type="button"
-                data-testid="confirm-clear-all-memory-btn"
-                onClick={handleConfirmClearAllMemory}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--settings-danger)] text-[var(--settings-on-accent)] hover:bg-red-500 transition-colors cursor-pointer"
-              >
-                Confirm Wipe ({memory.length})
-              </Button>
-              <Button variant="ghost"
-                type="button"
-                onClick={() => setConfirmingClearMemory(false)}
-                className="px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text)] cursor-pointer"
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </div>
-      </Card>
-
-      <Card
-        title={`Saved Memory Facts (${memory.length})`}
-        description=""
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              data-testid="add-memory-fact-input"
-              value={newMemoryFact}
-              onChange={(e) => setNewMemoryFact(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddMemoryItem();
-                }
-              }}
-              placeholder="Add a memory fact (e.g. নাম: সায়মন / Profession: Full-Stack Developer)"
-              className="cs-input flex-1 text-xs"
-            />
-            <Button variant="ghost"
-              type="button"
-              data-testid="add-memory-fact-btn"
-              onClick={handleAddMemoryItem}
-              className="px-3.5 py-2 rounded-xl bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1.5 hover:opacity-95 cursor-pointer shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add
-            </Button>
-          </div>
-
-          {memory.length === 0 ? (
-            <div
-              data-testid="memory-empty-state"
-              className="py-6 text-center text-xs text-[var(--text-3)] rounded-xl border border-dashed border-[var(--border)]"
-            >
-              No saved memory facts. Memory bank is completely clean.
-            </div>
-          ) : (
-            <div
-              data-testid="memory-facts-list"
-              className="max-h-72 overflow-y-auto space-y-1.5 pr-1"
-            >
-              {memory.map((fact, idx) => (
-                <div
-                  key={`${idx}-${fact}`}
-                  data-testid="memory-fact-row"
-                  className="flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] text-xs text-[var(--text)]"
-                >
-                  <span className="break-words min-w-0 flex-1">{fact}</span>
-                  <Button variant="ghost"
-                    type="button"
-                    data-testid={`delete-memory-item-${idx}`}
-                    onClick={() => handleDeleteSingleMemory(fact)}
-                    className="p-1.5 rounded-lg text-[var(--text-3)] hover:text-[var(--settings-danger)] hover:bg-red-500/10 transition-colors shrink-0 cursor-pointer"
-                    title="Delete memory item"
-                    aria-label={`Delete memory fact ${fact}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
-      <Card title="Backup & preferences">
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={onExportBackup}>Export backup</Button>
-          <label className="settings-import">Import backup<input type="file" accept=".json,application/json" onChange={onImportBackup} /></label>
-          {onResetSettings && <Button variant="outline" onClick={() => { if (window.confirm('Reset preferences? Chats and saved providers will be kept.')) { onResetSettings(); setDraft(sanitizeSettings({})); } }}>Reset preferences</Button>}
-        </div>
-      </Card>
-    </>
-  );
-
-  const renderActiveSection = () => {
-    switch (tab) {
-      case 'providers':
-        return renderProviders();
-      case 'responses':
-        return renderResponses();
-      case 'general':
-        return renderGeneral();
-      case 'privacy':
-        return renderPrivacy();
-    }
-  };
-
-  const currentMeta = SECTION_META[tab];
-
-  const enabledCapabilitiesCount = [
-    draft.autoMemory !== false,
-    draft.includeHistory !== false,
-    draft.markdownRender !== false,
-    draft.codeHighlight !== false,
-    draft.sendOnEnter,
-    draft.autoVoice,
-  ].filter(Boolean).length;
-
-  const connectedServicesCount = connections
-    ? Object.values(connections).filter((c) => Boolean(c && (c as { connected?: boolean }).connected)).length
-    : 0;
-
-  const openSection = (sec: SectionId) => {
-    setTab(sec);
+  const openSection = (id: SectionId) => {
+    setTab(id);
     setMobileDetailOpen(true);
   };
 
-  const cycleColorMode = () => {
-    if (draft.themeMode === 'system') {
-      patch({ themeMode: 'dark', theme: 'dark' });
-    } else if (draft.theme === 'dark') {
-      patch({ themeMode: 'light', theme: 'light' });
-    } else {
-      patch({ themeMode: 'system' });
+  const renderActiveSection = () => {
+    switch (tab) {
+      case 'general':
+        return (
+          <GeneralSection
+            draft={draft}
+            profileName={profileName}
+            onNameChange={handleNameChange}
+            patch={patch}
+            notify={notify}
+          />
+        );
+      case 'models':
+        return (
+          <ModelsSection
+            draft={draft}
+            savedProfiles={localProfiles}
+            activeProfile={activeProfile}
+            patch={patch}
+          />
+        );
+      case 'providers':
+        return (
+          <ProvidersApiSection
+            draft={draft}
+            patch={patch}
+            localProfiles={localProfiles}
+            activeProfile={activeProfile}
+            onActivateProfile={activateSavedProfile}
+            onUpdateProfileField={updateSavedProfileField}
+            onDeleteProfile={deleteSavedProfile}
+            onMovePriority={handleMovePriority}
+            onTestProfile={handleTestExistingProfile}
+            onRefreshProfileModels={handleRefreshProfileModels}
+            newPropName={newPropName}
+            setNewPropName={setNewPropName}
+            newProviderId={newProviderId}
+            onChangeNewProviderId={(nextId) => {
+              const defModel =
+                nextId === 'mercury' || nextId === 'inceptionlabs'
+                  ? 'mercury-3'
+                  : DEFAULT_PROVIDER_MODELS[nextId] || '';
+              setNewProviderId(nextId);
+              setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[nextId] || '');
+              setNewModel(defModel);
+              setDiscoveredModels([]);
+              setDiscoveryWarning(null);
+              setNewVerifyResult(null);
+            }}
+            newApiKey={newApiKey}
+            onChangeNewApiKey={(val) => {
+              setNewApiKey(val);
+              const detected = detectProviderFromKey(val);
+              if (
+                detected &&
+                detected !== newProviderId &&
+                (newProviderId === 'xrahat' || newProviderId === 'smfta_cloud')
+              ) {
+                setNewProviderId(detected);
+                setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
+                setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
+              }
+            }}
+            showNewKey={showNewKey}
+            setShowNewKey={setShowNewKey}
+            newBaseUrl={newBaseUrl}
+            setNewBaseUrl={setNewBaseUrl}
+            newModel={newModel}
+            setNewModel={setNewModel}
+            newCustomHeaders={newCustomHeaders}
+            setNewCustomHeaders={setNewCustomHeaders}
+            newCustomParams={newCustomParams}
+            setNewCustomParams={setNewCustomParams}
+            showAdvancedOptions={showAdvancedOptions}
+            setShowAdvancedOptions={setShowAdvancedOptions}
+            profileAdvancedOpen={profileAdvancedOpen}
+            setProfileAdvancedOpen={setProfileAdvancedOpen}
+            candidateModelsForNew={candidateModelsForNew}
+            detectedProviderFromNewKey={detectedProviderFromNewKey}
+            isLoadingModels={isLoadingModels}
+            discoveryWarning={discoveryWarning}
+            onFetchNewModels={() => handleFetchNewModels()}
+            isVerifyingNew={isVerifyingNew}
+            newVerifyResult={newVerifyResult}
+            onSaveWithoutVerification={handleSaveWithoutVerification}
+            onVerifyAndAddProvider={handleVerifyAndAddProvider}
+            testingProfileId={testingProfileId}
+            loadingModelsForId={loadingModelsForId}
+            revealedKeyIds={revealedKeyIds}
+            setRevealedKeyIds={setRevealedKeyIds}
+            editingProfileId={editingProfileId}
+            setEditingProfileId={setEditingProfileId}
+            telemetryLogs={effectiveTelemetryLogs}
+            usageToday={usageToday}
+          />
+        );
+      case 'mcp':
+        return (
+          <McpIntegrationsSection
+            draft={draft}
+            patch={patch}
+            mcpServers={effectiveMcpServers}
+            onUpdateMcpServers={handleUpdateMcpServers}
+            connections={connections}
+            onUpdateConnections={onUpdateConnections}
+            notes={notes}
+            notify={notify}
+          />
+        );
+      case 'database':
+        return (
+          <DatabaseBridgeSection
+            draft={draft}
+            patch={patch}
+            dbConnections={effectiveDbConnections}
+            onUpdateDbConnections={handleUpdateDbConnections}
+            dataBridgeConfig={effectiveBridgeConfig}
+            onUpdateDataBridgeConfig={handleUpdateBridgeConfig}
+            onExportBackup={onExportBackup}
+            onImportBackup={onImportBackup}
+            onSaveRollbackPoint={onSaveRollbackPoint}
+            onRollback={onRollback}
+            hasRollbackPoint={hasRollbackPoint}
+            onBackupToGithub={onBackupToGithub}
+            cloudConnected={cloudConnected}
+            notify={notify}
+          />
+        );
+      case 'memory':
+        return (
+          <MemoryKnowledgeSection
+            draft={draft}
+            patch={patch}
+            memory={memory}
+            onUpdateMemory={onUpdateMemory}
+            onClearMemory={onClearMemory}
+            knowledgeDocs={effectiveKnowledgeDocs}
+            onUpdateKnowledgeDocs={handleUpdateKnowledgeDocs}
+            notify={notify}
+          />
+        );
+      case 'tools':
+        return <ToolsCapabilitiesSection draft={draft} patch={patch} />;
+      case 'performance':
+        return (
+          <PerformanceAdvancedSection
+            draft={draft}
+            patch={patch}
+            telemetryLogs={effectiveTelemetryLogs}
+            onClearTelemetryLogs={handleClearLogs}
+            notify={notify}
+          />
+        );
+      case 'security':
+        return (
+          <SecurityPrivacySection
+            draft={draft}
+            patch={patch}
+            savedProfiles={localProfiles}
+            mcpServers={effectiveMcpServers}
+            dbConnections={effectiveDbConnections}
+            keystoreEphemeral={keystoreEphemeral}
+            onRotateKeystoreKey={handleRotateKeystore}
+            onExportBackup={onExportBackup}
+            onClearChatHistory={() => {
+              if (onClearChatHistory) {
+                onClearChatHistory();
+              } else {
+                try {
+                  localStorage.removeItem('smfta_chats');
+                } catch {
+                  // ignore
+                }
+                notify?.('Chat history cleared.');
+              }
+            }}
+            onDeleteCloudData={onDeleteCloudData}
+            onResetSettings={onResetSettings}
+            onClearAllData={onClearAllData}
+            cloudConnected={cloudConnected}
+            cloudUserEmail={cloudUserEmail}
+          />
+        );
+      case 'about':
+        return (
+          <AboutSystemSection
+            onOpenWhatsNew={onOpenWhatsNew}
+            keystoreEphemeral={keystoreEphemeral}
+            cloudConnected={cloudConnected}
+          />
+        );
     }
   };
 
-  const cycleFontStyle = () => {
-    const order: Array<AppSettings['fontsize']> = ['normal', 'large', 'small'];
-    const idx = order.indexOf(draft.fontsize);
-    const next = order[(idx + 1) % order.length] || 'normal';
-    patch({ fontsize: next });
-  };
-
-  const renderGroupedOverview = () => (
-    <div className="space-y-2.5 pb-6">
-      {/* Top Account & Status Pill Card */}
-      <div className="rounded-[18px] bg-[var(--surface)] border border-[var(--border)] px-4 py-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[14.5px] font-medium text-[var(--ink)] truncate">
-            {profileName || 'SAYMON HASAN'}
-          </div>
-          <div className="text-[12px] text-[var(--ink-dim)] truncate">
-            {activeProfile.externalModel || 'SMFTA Pro'}
-          </div>
-        </div>
-        <span className="ref-settings-plan-pill">
-          {activeProfile.provider === 'xrahat' ? 'Active' : 'Custom'}
-        </span>
-      </div>
-
-      {/* Group 1: Profile & Providers */}
-      <div className="ref-settings-group">
+  const renderSearchBar = (testId: string) => (
+    <div className="fs-settings-search">
+      <Search className="w-3.5 h-3.5 text-[var(--text-3)] shrink-0" />
+      <input
+        type="text"
+        data-testid={testId}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        placeholder="Search settings (MCP, RTL, vector)..."
+        aria-label="Search settings categories"
+        className="w-full bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-dim)] focus:outline-none"
+      />
+      {searchQuery && (
         <button
           type="button"
-          data-testid="settings-tab-general"
-          onClick={() => openSection('general')}
-          className={`ref-settings-row ${tab === 'general' ? 'md:bg-[var(--surface-hover)]' : ''}`}
+          onClick={() => setSearchQuery('')}
+          aria-label="Clear settings search"
+          className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer p-0.5"
         >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <UserCircle className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Profile</span>
-              <span className="block ref-settings-row-sub truncate">
-                {profileName || 'User'} · {(draft.appLanguage || 'bn') === 'bn' ? 'বাংলা' : 'English'}
-              </span>
-            </span>
-          </span>
-          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+          <X className="w-3.5 h-3.5" />
         </button>
-
-        <button
-          type="button"
-          data-testid="settings-tab-providers"
-          onClick={() => openSection('providers')}
-          className={`ref-settings-row ${tab === 'providers' ? 'md:bg-[var(--surface-hover)]' : ''}`}
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <CircleDollarSign className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">AI Providers</span>
-              <span className="block ref-settings-row-sub truncate">
-                {activeProfile.name} ({savedProfilesCountText(localProfiles.length)})
-              </span>
-            </span>
-          </span>
-          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
-        </button>
-      </div>
-
-      {/* Group 2: Capabilities, Connectors & Permissions */}
-      <div className="ref-settings-group">
-        <button
-          type="button"
-          data-testid="settings-tab-responses"
-          onClick={() => openSection('responses')}
-          className={`ref-settings-row ${tab === 'responses' ? 'md:bg-[var(--surface-hover)]' : ''}`}
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <SlidersVertical className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Capabilities</span>
-              <span className="block ref-settings-row-sub">
-                {enabledCapabilitiesCount} enabled
-              </span>
-            </span>
-          </span>
-          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            if (onOpenNotebook) {
-              onClose();
-              onOpenNotebook();
-            } else {
-              openSection('privacy');
-            }
-          }}
-          className="ref-settings-row"
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <LayoutGrid className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Connectors & Notes</span>
-              <span className="block ref-settings-row-sub">
-                {connectedServicesCount > 0 ? `${connectedServicesCount} connected` : 'Notebook & integrations'}
-              </span>
-            </span>
-          </span>
-          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
-        </button>
-
-        <button
-          type="button"
-          data-testid="settings-tab-privacy"
-          onClick={() => openSection('privacy')}
-          className={`ref-settings-row ${tab === 'privacy' ? 'md:bg-[var(--surface-hover)]' : ''}`}
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <Shield className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Permissions & Memory</span>
-              <span className="block ref-settings-row-sub">
-                {memory.length} saved facts
-              </span>
-            </span>
-          </span>
-          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
-        </button>
-      </div>
-
-      {/* Group 3: Color mode, Font style, Voice, Send on Enter */}
-      <div className="ref-settings-group">
-        <button
-          type="button"
-          onClick={cycleColorMode}
-          className="ref-settings-row"
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <Moon className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Color mode</span>
-              <span className="block ref-settings-row-sub">
-                {draft.themeMode === 'system'
-                  ? 'System'
-                  : draft.theme === 'dark'
-                  ? 'Dark'
-                  : 'Light'}
-              </span>
-            </span>
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={cycleFontStyle}
-          className="ref-settings-row"
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon font-semibold text-[15px]">
-              Aa
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Font style</span>
-              <span className="block ref-settings-row-sub">
-                {draft.fontsize === 'small'
-                  ? 'Compact'
-                  : draft.fontsize === 'large'
-                  ? 'Large'
-                  : 'Default'}
-              </span>
-            </span>
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => patch({ autoVoice: !draft.autoVoice })}
-          className="ref-settings-row"
-        >
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <AudioLines className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Voice</span>
-              <span className="block ref-settings-row-sub">
-                {draft.autoVoice ? 'Auto-speak replies' : 'Manual playback'}
-              </span>
-            </span>
-          </span>
-        </button>
-
-        <div className="ref-settings-row">
-          <span className="flex items-center gap-3.5 min-w-0">
-            <span className="ref-settings-row-icon">
-              <CornerDownLeft className="w-5 h-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block ref-settings-row-label">Send on Enter</span>
-            </span>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={draft.sendOnEnter}
-            aria-label="Send on Enter"
-            onClick={() => patch({ sendOnEnter: !draft.sendOnEnter })}
-            className={`ref-toggle ${draft.sendOnEnter ? 'is-on' : 'is-off'}`}
-          >
-            <span className="ref-toggle-knob" />
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 
+  const renderNavContent = (isMobileList: boolean) => {
+    const groups: Array<CategoryDescriptor['group']> = [
+      'Workspace',
+      'AI Engine',
+      'Knowledge & Tools',
+      'System & Trust',
+    ];
+    return (
+      <div className="space-y-4">
+        {renderSearchBar(isMobileList ? 'settings-search-mobile' : 'settings-search-input')}
+
+        {filteredCategories.length === 0 ? (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-5 text-center text-xs text-[var(--text-3)]">
+            No settings match &ldquo;{searchQuery}&rdquo;.
+          </div>
+        ) : (
+          groups.map((grp) => {
+            const items = filteredCategories.filter((c) => c.group === grp);
+            if (items.length === 0) return null;
+            return (
+              <div key={grp} className="space-y-1">
+                <div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ink-dim)]">
+                  {grp}
+                </div>
+                <div className={isMobileList ? 'ref-settings-group' : 'space-y-0.5'}>
+                  {items.map((cat) => {
+                    const Icon = cat.icon;
+                    const isActive = tab === cat.id;
+                    if (isMobileList) {
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          data-testid={`settings-mobile-tab-${cat.id}`}
+                          onClick={() => openSection(cat.id)}
+                          className="ref-settings-row"
+                        >
+                          <span className="flex items-center gap-3 min-w-0">
+                            <span className="ref-settings-row-icon">
+                              <Icon className="w-4 h-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                                {cat.code}. {cat.label}
+                              </span>
+                              <span className="block text-xs text-[var(--ink-dim)] truncate">
+                                {cat.hint}
+                              </span>
+                            </span>
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        data-testid={`settings-tab-${cat.id}`}
+                        onClick={() => openSection(cat.id)}
+                        className={`fs-settings-nav-item ${isActive ? 'is-active' : ''}`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="font-mono text-[10px] opacity-65 shrink-0">
+                          {cat.code}
+                        </span>
+                        <span className="truncate flex-1 text-left">{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    );
+  };
+
   const shellContent = (
     <div
-      className={`ref-settings-shell settings-redesign ${isInline ? 'is-inline' : ''}`}
+      className={`fs-settings-shell settings-redesign ${isInline ? 'is-inline' : ''}`}
+      data-testid="settings-workspace-shell"
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Top Bar: Back / Close Left, Serif "Settings" Centered, Info Icon Right */}
-      <header className="ref-settings-header border-b border-[var(--border)]">
-        <div className="flex items-center gap-1 min-w-[44px]">
+      {/* Top Workspace Header */}
+      <header className="fs-settings-header">
+        <div className="flex items-center gap-2 min-w-0">
           {mobileDetailOpen ? (
             <button
               type="button"
+              data-testid="settings-mobile-back"
               onClick={() => setMobileDetailOpen(false)}
-              className="md:hidden w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
-              aria-label="Back to Settings"
+              className="fs-settings-back-btn md:hidden"
+              aria-label="Back to Settings Categories"
             >
-              <ChevronLeft className="w-5 h-5" />
+              <ChevronLeft className="w-4 h-4" />
+              <span>Categories</span>
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              className="md:hidden w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
-              aria-label="Close settings"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
+          ) : null}
+
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--ink-dim)]">
+              <span>Settings</span>
+              <span>/</span>
+            </span>
+            <h1 className="text-sm sm:text-base font-bold text-[var(--ink)] truncate">
+              {mobileDetailOpen
+                ? `${currentMeta.code}. ${currentMeta.label}`
+                : 'SMFTA AI Settings'}
+            </h1>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <div
+            className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[11px]"
+            title={`Active profile: ${activeProfile.name} (${activeProfile.externalModel || 'Auto'})`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                activeProfile.verified
+                  ? 'bg-emerald-500'
+                  : activeProfile.verificationStatus === 'failed'
+                  ? 'bg-rose-500'
+                  : 'bg-amber-400'
+              }`}
+            />
+            <span className="font-semibold text-[var(--text)] truncate max-w-[130px]">
+              {activeProfile.name}
+            </span>
+            <span className="font-mono text-[var(--text-3)] truncate max-w-[140px]">
+              {activeProfile.externalModel || 'Auto'}
+            </span>
+          </div>
+
           <button
             type="button"
             onClick={onClose}
-            className="hidden md:inline-flex w-9 h-9 rounded-full items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
+            data-testid="settings-close-btn"
+            className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:border-[var(--primary-border)] cursor-pointer"
             aria-label="Close settings"
+            title="Close Settings (Esc)"
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <h1 className="ref-settings-title truncate">
-          {mobileDetailOpen ? (
-            <>
-              <span className="md:hidden">{currentMeta.label}</span>
-              <span className="hidden md:inline">Settings</span>
-            </>
-          ) : (
-            'Settings'
-          )}
-        </h1>
-
-        <div className="flex items-center justify-end min-w-[44px]">
-          <button
-            type="button"
-            onClick={onOpenWhatsNew}
-            className="w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
-            aria-label="About and updates"
-            title="About & Updates"
-          >
-            <Info className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Responsive Body: Mobile shows Screenshot 2 grouped overview OR drilled-down detail; Desktop shows 2-column split */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* Main Split Workspace */}
+      <div className="fs-settings-body">
+        {/* Desktop 260px Left Rail */}
         <aside
-          aria-label="Settings sections"
-          className={`${
-            mobileDetailOpen ? 'hidden md:block' : 'block'
-          } w-full md:w-[340px] shrink-0 overflow-y-auto px-4 py-4 md:border-r md:border-[var(--border)]`}
+          aria-label="Settings categories"
+          className="fs-settings-rail hidden md:flex"
         >
-          {renderGroupedOverview()}
+          <div className="flex-1 overflow-y-auto px-3 py-3">
+            {renderNavContent(false)}
+          </div>
+          <div className="px-3 py-2.5 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--ink-dim)]">
+            <span className="inline-flex items-center gap-1.5 truncate">
+              <KeyRound className="w-3 h-3 shrink-0" />
+              {keystoreEphemeral ? 'Session Keystore' : 'AES-256-GCM'}
+            </span>
+            <span className="font-mono">v{APP_VERSION}</span>
+          </div>
         </aside>
 
-        <main
-          className={`${
-            mobileDetailOpen ? 'flex' : 'hidden md:flex'
-          } flex-1 min-w-0 flex-col overflow-hidden bg-[var(--bg)]`}
-        >
-          <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
-            <div className="min-w-0">
-              <h2 className="text-[16px] font-semibold text-[var(--ink)]">
-                {currentMeta.label}
-              </h2>
-              <p className="text-xs text-[var(--ink-dim)] settings-active-model">
-                {activeProfile.name} · {activeProfile.externalModel || 'Auto'}
-              </p>
-            </div>
+        {/* Mobile Overview List (visible < 860px / < md when not drilled into detail) */}
+        {!mobileDetailOpen && (
+          <div className="flex-1 overflow-y-auto px-4 py-4 md:hidden">
+            {renderNavContent(true)}
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 space-y-6">
+        )}
+
+        {/* Section Content Panel */}
+        <main
+          className={`fs-settings-main ${
+            mobileDetailOpen ? 'flex' : 'hidden md:flex'
+          }`}
+        >
+          <div className="fs-settings-content">
+            <div className="mb-4 pb-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-mono font-semibold text-[var(--primary)]">
+                  CATEGORY {currentMeta.code}
+                </div>
+                <h2 className="text-base sm:text-lg font-bold text-[var(--ink)]">
+                  {currentMeta.label}
+                </h2>
+                <p className="text-xs text-[var(--ink-dim)] mt-0.5">
+                  {currentMeta.hint}
+                </p>
+              </div>
+              {draft.conversationPrivacyMode && (
+                <span className="px-2 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-400 text-[11px] font-semibold">
+                  Privacy Mode Active
+                </span>
+              )}
+            </div>
+
             {renderActiveSection()}
           </div>
         </main>
@@ -2406,12 +1833,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }
 
   return (
-    <div className="ref-settings-backdrop" onClick={onClose}>
+    <div
+      className="fs-settings-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="SMFTA AI Settings Workspace"
+      onClick={onClose}
+    >
       {shellContent}
     </div>
   );
 };
-
-function savedProfilesCountText(count: number): string {
-  return count === 1 ? '1 profile' : `${count} profiles`;
-}

@@ -6,6 +6,11 @@ const SECRET_OR_IDENTITY_KEYS = new Set([
   'customHeaders',
   'accountEmail',
   'avatarDataUrl',
+  'toolPermissions',
+  'conversationPrivacyMode',
+  'telemetryOptOut',
+  'retentionDays',
+  'memoryRetentionDays',
 ]);
 
 const SUPPORTED_SETTING_KEYS = new Set(

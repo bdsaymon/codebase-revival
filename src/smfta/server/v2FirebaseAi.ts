@@ -288,24 +288,46 @@ function resolveThinkingLevel(
   return ThinkingLevel.HIGH;
 }
 
+function resolveEffortToThinkingLevel(
+  effort: 'low' | 'medium' | 'high' | undefined,
+  fallback: 'MINIMAL' | 'LOW' | 'HIGH'
+): ThinkingLevel {
+  if (effort === 'low') return ThinkingLevel.LOW;
+  if (effort === 'medium') return ThinkingLevel.MEDIUM ?? ThinkingLevel.LOW;
+  if (effort === 'high') return ThinkingLevel.HIGH;
+  return resolveThinkingLevel(fallback);
+}
+
 export function buildV2GenAiRequestConfig(params: {
   modelName: string;
   spec: ReturnType<typeof getV2ModelSpec>;
   fullSystemInstruction: string;
+  thinkingEnabled?: boolean;
+  thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
 }): Record<string, unknown> {
   const normalized = params.modelName.trim().toLowerCase();
   const isHydrogen = normalized === 'gemini-4-hydrogen';
+  const allowThinking = params.thinkingEnabled !== false && params.thinkingEffort !== 'off';
+  const effort =
+    params.thinkingEffort === 'low' ||
+    params.thinkingEffort === 'medium' ||
+    params.thinkingEffort === 'high'
+      ? params.thinkingEffort
+      : undefined;
 
   if (isHydrogen) {
     const cfg: Record<string, unknown> = {
       systemInstruction: params.fullSystemInstruction,
-      thinkingConfig: {
-        thinkingLevel:
-          params.spec.thinkingLevel === 'MINIMAL'
-            ? ThinkingLevel.LOW
-            : resolveThinkingLevel(params.spec.thinkingLevel),
-      },
     };
+    if (allowThinking) {
+      cfg.thinkingConfig = {
+        includeThoughts: true,
+        thinkingLevel:
+          !effort && params.spec.thinkingLevel === 'MINIMAL'
+            ? ThinkingLevel.LOW
+            : resolveEffortToThinkingLevel(effort, params.spec.thinkingLevel),
+      };
+    }
     if (params.spec.useSearchGrounding) {
       cfg.tools = [{ googleSearch: {} }];
     }
@@ -316,10 +338,13 @@ export function buildV2GenAiRequestConfig(params: {
     systemInstruction: params.fullSystemInstruction,
     temperature: params.spec.temperature,
     maxOutputTokens: params.spec.maxOutputTokens,
-    thinkingConfig: {
-      thinkingLevel: resolveThinkingLevel(params.spec.thinkingLevel),
-    },
   };
+  if (allowThinking) {
+    cfg.thinkingConfig = {
+      includeThoughts: true,
+      thinkingLevel: resolveEffortToThinkingLevel(effort, params.spec.thinkingLevel),
+    };
+  }
   if (params.spec.useSearchGrounding) {
     cfg.tools = [{ googleSearch: {} }];
   }
@@ -521,6 +546,9 @@ export async function streamV2FirebaseModel(params: {
     imgs?: Array<{ mime: string; data: string }>;
   }>;
   signal: AbortSignal;
+  thinkingEnabled?: boolean;
+  thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
+  emitThinking?: (chunk: string) => void;
   emitDelta: (delta: string) => void;
 }): Promise<{
   ok: boolean;
@@ -553,7 +581,7 @@ export async function streamV2FirebaseModel(params: {
     };
   }
 
-  const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nTarget maximum length guidance: keep answer balanced within roughly ${spec.maxOutputTokens} tokens.\nIMPORTANT: Never output code or code blocks unless the user explicitly asks for code. Always reply in simple, direct Bengali unless asked otherwise. Never output raw <think> tags or expose internal chain-of-thought. Provide only the clean, final answer.`;
+  const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nTarget maximum length guidance: keep answer balanced within roughly ${spec.maxOutputTokens} tokens.\nIMPORTANT: Never output code or code blocks unless the user explicitly asks for code. Always reply in simple, direct Bengali unless asked otherwise. Never output raw <think> tags inside the answer. Provide only the clean, final answer.`;
 
   const candidates = getV2ServerFallbackModels(params.modelId);
   let lastError: unknown = null;
@@ -572,6 +600,8 @@ export async function streamV2FirebaseModel(params: {
       modelName: candidateModel,
       spec,
       fullSystemInstruction,
+      thinkingEnabled: params.thinkingEnabled,
+      thinkingEffort: params.thinkingEffort,
     });
 
     let emittedAny = false;
@@ -588,8 +618,8 @@ export async function streamV2FirebaseModel(params: {
       for await (const chunk of responseStream) {
         if (params.signal.aborted) break;
         const c = chunk as GenerateContentResponse;
-        const groundingChunks =
-          c.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        const cand0 = c.candidates?.[0];
+        const groundingChunks = cand0?.groundingMetadata?.groundingChunks;
         if (Array.isArray(groundingChunks)) {
           for (const gc of groundingChunks) {
             const web = gc?.web;
@@ -603,13 +633,37 @@ export async function streamV2FirebaseModel(params: {
           }
         }
 
-        const rawText = c.text || '';
-        const cleaned = sanitizeProprietaryOutput(
-          stripPrivateChainOfThought(rawText)
-        );
-        if (cleaned) {
-          emittedAny = true;
-          params.emitDelta(cleaned);
+        const parts = cand0?.content?.parts as
+          | Array<{ text?: string; thought?: boolean }>
+          | undefined;
+        if (Array.isArray(parts) && parts.length > 0) {
+          for (const part of parts) {
+            const pText = typeof part.text === 'string' ? part.text : '';
+            if (!pText) continue;
+            if (part.thought === true) {
+              if (params.thinkingEnabled !== false && params.thinkingEffort !== 'off') {
+                emittedAny = true;
+                params.emitThinking?.(pText);
+              }
+            } else {
+              const cleaned = sanitizeProprietaryOutput(
+                stripPrivateChainOfThought(pText)
+              );
+              if (cleaned) {
+                emittedAny = true;
+                params.emitDelta(cleaned);
+              }
+            }
+          }
+        } else {
+          const rawText = c.text || '';
+          const cleaned = sanitizeProprietaryOutput(
+            stripPrivateChainOfThought(rawText)
+          );
+          if (cleaned) {
+            emittedAny = true;
+            params.emitDelta(cleaned);
+          }
         }
       }
 

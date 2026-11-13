@@ -77,13 +77,18 @@ import {
   ChatMessage,
   ChatServiceSelectionContext,
   ChatSession,
+  DataBridgeConfig,
+  DbConnectionConfig,
   ImageAttachment,
   InlineRevision,
+  KnowledgeDocument,
+  McpServerConfig,
   NotebookNote,
   ProviderTestStatus,
   SavedProviderProfile,
   SelfUpdatePayload,
   SelfUpdateWidget,
+  TelemetryRequestLog,
   UserProfile,
 } from './types';
 import {
@@ -113,6 +118,7 @@ import {
   persistSavedProfiles,
   PROVIDER_CATALOG,
   resolveActiveProfile,
+  resolveModelForSlot,
   SAVED_PROFILES_KEY,
 } from './utils/providers';
 import {
@@ -120,6 +126,7 @@ import {
   encryptSecret,
   ensureKeystore,
   isEncrypted,
+  rotateKeystoreMasterKey,
 } from './utils/secureKeystore';
 import {
   buildExportEnvelope,
@@ -263,6 +270,7 @@ import {
   CloudSessionRow,
   CloudStatePayload,
   CloudStateRow,
+  clearCloudChatSessions,
   deleteCloudSession,
   fetchCloudSessions,
   fetchCloudState,
@@ -276,9 +284,35 @@ import {
   sessionVersion,
   stripProfileSecrets,
   stripSettingsSecrets,
+  stripWorkspaceSecrets,
   upsertCloudSession,
   wipeCloudWorkspace,
 } from './utils/cloudSync';
+import {
+  MCP_STORAGE_KEY,
+  buildMcpPromptContext,
+  loadMcpServers,
+  saveMcpServers,
+} from './utils/mcpClient';
+import {
+  DB_BRIDGE_CONFIG_STORAGE_KEY,
+  DB_CONNECTIONS_STORAGE_KEY,
+  loadDataBridgeConfig,
+  loadDbConnections,
+  saveDataBridgeConfig,
+  saveDbConnections,
+} from './utils/dbBridge';
+import {
+  buildKnowledgePromptContext,
+  loadKnowledgeDocuments,
+  saveKnowledgeDocuments,
+} from './utils/knowledgeBase';
+import {
+  TELEMETRY_LOG_KEY,
+  appendTelemetryLog,
+  clearTelemetryLogs,
+  loadTelemetryLogs,
+} from './utils/telemetryLog';
 import { friendlyAuthError } from './utils/authErrors';
 import type { User as FirebaseUser } from 'firebase/auth';
 import {
@@ -386,7 +420,7 @@ export default function App() {
       try {
         const ks = await ensureKeystore();
         setKeystoreEphemeral(ks.ephemeral || !ks.available);
-        if (isEncrypted(sealedSettingsKey)) {
+        if (sealedSettingsKey && isEncrypted(sealedSettingsKey)) {
           const plain = await decryptSecret(sealedSettingsKey);
           if (!cancelled && plain) {
             setSettings((s) =>
@@ -398,6 +432,16 @@ export default function App() {
         }
         const profiles = await hydrateSavedProfiles();
         if (!cancelled && profiles.length > 0) setSavedProfiles(profiles);
+        const [loadedMcp, loadedDb, loadedKb] = await Promise.all([
+          loadMcpServers().catch(() => []),
+          loadDbConnections().catch(() => []),
+          loadKnowledgeDocuments().catch(() => []),
+        ]);
+        if (!cancelled) {
+          setMcpServers(loadedMcp);
+          setDbConnections(loadedDb);
+          setKnowledgeDocs(loadedKb);
+        }
       } catch {
         // A failed unseal degrades to keyless mode; it must never crash boot.
         if (!cancelled) setKeystoreEphemeral(true);
@@ -508,6 +552,42 @@ export default function App() {
     profileId?: string;
   } | null>(null);
 
+  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+  const [dbConnections, setDbConnections] = useState<DbConnectionConfig[]>([]);
+  const [dataBridgeConfig, setDataBridgeConfig] = useState<DataBridgeConfig>(() =>
+    loadDataBridgeConfig()
+  );
+  const [knowledgeDocs, setKnowledgeDocs] = useState<KnowledgeDocument[]>([]);
+  const [telemetryLogs, setTelemetryLogs] = useState<TelemetryRequestLog[]>(() =>
+    loadTelemetryLogs()
+  );
+  const activeStreamCountRef = useRef(0);
+
+  const handleUpdateMcpServers = (next: McpServerConfig[]) => {
+    setMcpServers(next);
+    void saveMcpServers(next).catch(() => {});
+  };
+
+  const handleUpdateDbConnections = (next: DbConnectionConfig[]) => {
+    setDbConnections(next);
+    void saveDbConnections(next).catch(() => {});
+  };
+
+  const handleUpdateDataBridgeConfig = (next: DataBridgeConfig) => {
+    setDataBridgeConfig(next);
+    saveDataBridgeConfig(next);
+  };
+
+  const handleUpdateKnowledgeDocs = (next: KnowledgeDocument[]) => {
+    setKnowledgeDocs(next);
+    void saveKnowledgeDocuments(next).catch(() => {});
+  };
+
+  const handleClearTelemetryLogs = () => {
+    clearTelemetryLogs();
+    setTelemetryLogs([]);
+  };
+
   const [providerTestStatus, setProviderTestStatus] =
     useState<ProviderTestStatus | null>(() => {
       const savedStatus = loadJSON<ProviderTestStatus | null>(
@@ -520,12 +600,7 @@ export default function App() {
           message: sanitizeProprietaryOutput(savedStatus.message || ''),
         };
       }
-      return {
-        ok: true,
-        message: 'Connected · SMFTA Pro',
-        testedAt: Date.now(),
-        provider: 'xrahat',
-      };
+      return null;
     });
 
   const [usageToday, setUsageToday] = useState<number>(() => {
@@ -594,7 +669,7 @@ export default function App() {
   const [battleOpen, setBattleOpen] = useState(false);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTabId>('engine');
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>('general');
   const [infoModal, setInfoModal] = useState<'stats' | 'whatsnew' | null>(null);
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [cmdkQuery, setCmdkQuery] = useState('');
@@ -1051,6 +1126,10 @@ export default function App() {
     const appLang = settings.appLanguage || 'bn';
     document.documentElement.lang = appLang;
     document.documentElement.setAttribute('data-app-lang', appLang);
+    const resolvedDir =
+      settings.dir === 'rtl' || settings.dir === 'ltr' ? settings.dir : 'ltr';
+    document.documentElement.dir = resolvedDir;
+    document.documentElement.setAttribute('data-dir', settings.dir || 'auto');
     document.documentElement.setAttribute('data-accent', settings.accent);
     document.documentElement.setAttribute('data-fontsize', settings.fontsize);
     document.documentElement.setAttribute(
@@ -1174,8 +1253,8 @@ export default function App() {
 
   useEffect(() => {
     if (streamingMsgId !== null) return;
-    // v18.11 — Auto-Save Conversations can be turned off entirely.
-    if (settings.autoSaveChat === false) return;
+    // v18.11 + v19.0 — Auto-Save Conversations & Privacy Mode stop disk persistence.
+    if (settings.autoSaveChat === false || settings.conversationPrivacyMode) return;
     try {
       localStorage.setItem(LS_KEYS.chats, JSON.stringify(chats));
     } catch {
@@ -1184,7 +1263,7 @@ export default function App() {
         4500
       );
     }
-  }, [chats, streamingMsgId, settings.autoSaveChat]);
+  }, [chats, streamingMsgId, settings.autoSaveChat, settings.conversationPrivacyMode]);
 
   // v18.11 — real retention enforcement: prune chats older than retentionDays
   // (0 = keep forever) once on mount. Uses message timestamps, not estimates.
@@ -1311,6 +1390,16 @@ export default function App() {
       name: project.name,
       files: project.files.map((f) => ({ path: f.path, content: f.text || '' })),
     } : undefined,
+    workspace: stripWorkspaceSecrets({
+      mcpServers,
+      dbConnections,
+      dataBridgeConfig,
+      knowledgeDocsSummary: knowledgeDocs.map((d) => ({
+        id: d.id,
+        title: d.title,
+        chunkCount: d.chunkCount,
+      })),
+    }),
     connections: connections ? (sanitizeVaultConnections(connections) as unknown as Record<string, unknown>) : undefined,
   });
 
@@ -1388,6 +1477,36 @@ export default function App() {
         ).map(normalizeProviderProfile)
       );
     }
+    if (state.workspace && typeof state.workspace === 'object') {
+      const ws = state.workspace as Record<string, unknown>;
+      if (Array.isArray(ws.mcpServers)) {
+        setMcpServers((prev) => {
+          const prevById = new Map(prev.map((m) => [m.id, m]));
+          const next = (ws.mcpServers as McpServerConfig[]).map((m) => ({
+            ...m,
+            authSecret: ignoreLocalChats ? '' : prevById.get(m.id)?.authSecret || '',
+          }));
+          void saveMcpServers(next).catch(() => {});
+          return next;
+        });
+      }
+      if (Array.isArray(ws.dbConnections)) {
+        setDbConnections((prev) => {
+          const prevById = new Map(prev.map((d) => [d.id, d]));
+          const next = (ws.dbConnections as DbConnectionConfig[]).map((d) => ({
+            ...d,
+            secret: ignoreLocalChats ? '' : prevById.get(d.id)?.secret || '',
+          }));
+          void saveDbConnections(next).catch(() => {});
+          return next;
+        });
+      }
+      if (ws.dataBridgeConfig && typeof ws.dataBridgeConfig === 'object') {
+        const nextBridge = ws.dataBridgeConfig as DataBridgeConfig;
+        setDataBridgeConfig(nextBridge);
+        saveDataBridgeConfig(nextBridge);
+      }
+    }
   };
 
   // Hydrate once per authenticated account and scrub workspace on account switch / external sign-out.
@@ -1459,7 +1578,7 @@ export default function App() {
 
   // Debounced push of conversation changes (one row per conversation).
   useEffect(() => {
-    if (!cloudReady || !cloudClient || !userId) return;
+    if (!cloudReady || !cloudClient || !userId || settings.conversationPrivacyMode) return;
     if (sessionPushTimer.current) window.clearTimeout(sessionPushTimer.current);
     sessionPushTimer.current = window.setTimeout(async () => {
       try {
@@ -1565,6 +1684,9 @@ export default function App() {
     skills,
     autonomy,
     profile,
+    mcpServers,
+    dbConnections,
+    dataBridgeConfig,
     cloudReady,
     userId,
     cloudClient,
@@ -1588,6 +1710,10 @@ export default function App() {
     try {
       Object.values(LS_KEYS).forEach((k) => localStorage.removeItem(k));
       localStorage.removeItem(SAVED_PROFILES_KEY);
+      localStorage.removeItem(MCP_STORAGE_KEY);
+      localStorage.removeItem(DB_CONNECTIONS_STORAGE_KEY);
+      localStorage.removeItem(DB_BRIDGE_CONFIG_STORAGE_KEY);
+      localStorage.removeItem(TELEMETRY_LOG_KEY);
       localStorage.removeItem('smfta_autonomy');
       localStorage.removeItem('smfta_self_skills');
       localStorage.removeItem('smfta_battle_wins');
@@ -1608,6 +1734,18 @@ export default function App() {
     setNotes([]);
     setSelfWidgets([]);
     setSkills([]);
+    setMcpServers([]);
+    setDbConnections([]);
+    setDataBridgeConfig({
+      sourceConnectionId: '',
+      destinationConnectionId: '',
+      sourceTable: '',
+      destinationTable: '',
+      syncMode: 'upsert',
+      fieldMappings: [],
+    });
+    setKnowledgeDocs([]);
+    setTelemetryLogs([]);
     setConnections(sanitizeVaultConnections({}));
     setProviderTestStatus(null);
     setProviderLimitBanner(null);
@@ -2376,8 +2514,8 @@ export default function App() {
   // Image Generation (Pollinations HD engine) — P1-13: avoid duplicate user message when invoked from handleSend
   const handleRunImageGen = (
     prompt: string,
-    style = 'high quality, detailed',
-    size = 768,
+    style = settings.imageGenPrefs?.defaultStyle || 'high quality, detailed',
+    size = settings.imageGenPrefs?.defaultSize || 768,
     skipUserMessage = false
   ) => {
     if (!isToolEnabled('generate_image', settings.enabledTools)) {
@@ -2862,8 +3000,21 @@ export default function App() {
     const turnId = createUniqueId('turn');
     const aiMsgId = appendToMsg ? appendToMsg.id : createUniqueId('ai');
 
-    // P1-20: Snapshot active profile configuration at request start
-    const profileSnapshot = resolveActiveProfile(settings, savedProfiles);
+    // P1-20 + v19.0 Model Role Slots: resolve configured role slot when present
+    const slotKeyToCheck: 'defaultModel' | 'fastModel' | 'reasoningModel' | 'visionModel' =
+      historyMsgs.some((m) => m.role === 'user' && Array.isArray(m.imgs) && m.imgs.length > 0)
+        ? 'visionModel'
+        : settings.mode === 'fast'
+        ? 'fastModel'
+        : settings.mode === 'power' || settings.thinkingMode === 'high'
+        ? 'reasoningModel'
+        : 'defaultModel';
+    const slotOverride = !overrideProvider
+      ? resolveModelForSlot(slotKeyToCheck, settings, savedProfiles)
+      : null;
+
+    const baseProfileSnapshot = resolveActiveProfile(settings, savedProfiles);
+    const profileSnapshot = slotOverride?.profile || baseProfileSnapshot;
     const activeProvider =
       overrideProvider ||
       profileSnapshot.provider ||
@@ -2887,9 +3038,19 @@ export default function App() {
     const effectiveExternalModel =
       activeProvider === 'smfta_cloud' && overrideProvider === 'smfta_cloud'
         ? ''
-        : profileSnapshot.externalModel?.trim() ||
+        : slotOverride?.modelId ||
+          profileSnapshot.externalModel?.trim() ||
           settings.externalModel?.trim() ||
           '';
+
+    const maxConcurrent = Math.max(1, Math.min(4, settings.concurrentRequests ?? 1));
+    if (activeStreamCountRef.current >= maxConcurrent) {
+      showToast(`Concurrency limit (${maxConcurrent}) active — wait for current request.`);
+      setIsGenerating(false);
+      setIsWaitingFirstToken(false);
+      return;
+    }
+    activeStreamCountRef.current += 1;
 
     const isV2Request =
       !overrideProvider && isV2ModelId(effectiveExternalModel);
@@ -3113,6 +3274,13 @@ export default function App() {
         .join('\n\n')
         .slice(0, 110_000);
 
+      const kbResult = buildKnowledgePromptContext(
+        lastUserPrompt,
+        knowledgeDocs,
+        settings.knowledgeSettings
+      );
+      const mcpToolsContext = buildMcpPromptContext(mcpServers);
+
       const buildRequestBody = (msgs: StreamMsg[]) =>
         JSON.stringify({
         messages: msgs,
@@ -3122,6 +3290,10 @@ export default function App() {
         workPersona: settings.workPersona || 'allrounder',
         creativity: settings.creativity,
         customInst: settings.customInst,
+        outputFormat: settings.outputFormat || 'auto',
+        userProfileContext: settings.userProfileContext || '',
+        knowledgeContext: kbResult.promptContext || '',
+        mcpToolsContext: mcpToolsContext || '',
         // v18.11 personalization signals for the server-side system prompt.
         responseTone: settings.responseTone || 'friendly',
         codingPrefs: settings.codingPrefs || '',
@@ -3137,6 +3309,8 @@ export default function App() {
         externalKeys: effectiveExternalKeys,
         externalModel: effectiveExternalModel,
         externalBaseUrl: effectiveExternalBaseUrl,
+        customHeaders: profileSnapshot.customHeaders || settings.customHeaders || '',
+        customParams: profileSnapshot.customParams || settings.customParams || '',
         discoveredModels: profileSnapshot.availableModels || [],
         supportsStreaming: profileSnapshot.supportsStreaming !== false,
         allowKeylessFallback: Boolean(settings.allowKeylessFallback),
@@ -3144,6 +3318,10 @@ export default function App() {
         contextWindow: profileSnapshot.contextWindow,
         weightTemp: settings.weightTemp ?? 0.7,
         topP: settings.topP ?? 0.9,
+        topK: settings.topK,
+        stopSequences: settings.stopSequences,
+        thinkingMode: settings.thinkingMode || 'auto',
+        requestTimeoutSec: settings.requestTimeoutSec ?? 120,
         trainingData: settings.trainingData || '',
         fastDecision: settings.fastDecision !== false,
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
@@ -4014,8 +4192,22 @@ export default function App() {
         thinking: finalCompletedMsg.thinking || m.thinking,
       }));
 
+      setTelemetryLogs(
+        appendTelemetryLog(
+          {
+            provider: actualProvider,
+            model: actualModel,
+            latencyMs: computedLatencyMs,
+            status: 'success',
+            inputTokens: Math.ceil(lastUserPrompt.length / 4),
+            outputTokens: Math.ceil((finalCompletedMsg.text || '').length / 4),
+          },
+          settings.telemetryOptOut === true
+        )
+      );
+
       // Synchronize ALL persistent sessions (V1 & V2) & memory to Cloud Firestore when authenticated
-      if (firebaseUser && firebaseUser.emailVerified) {
+      if (firebaseUser && firebaseUser.emailVerified && !settings.conversationPrivacyMode) {
         const lastUserMessageObj = historyMsgs[historyMsgs.length - 1];
         const sessionVersionTag = isV2Request ? 'v2' : 'v1';
         const sessionModelTag =
@@ -4295,8 +4487,21 @@ export default function App() {
             },
           });
         }
+        setTelemetryLogs(
+          appendTelemetryLog(
+            {
+              provider: activeProvider,
+              model: effectiveExternalModel || activeModelName,
+              latencyMs: elapsedMs,
+              status: 'error',
+              errorMessage: rawMsg,
+            },
+            settings.telemetryOptOut === true
+          )
+        );
       }
     } finally {
+      activeStreamCountRef.current = Math.max(0, activeStreamCountRef.current - 1);
       window.clearTimeout(timeoutId);
       window.clearTimeout(phaseFallback);
       setIsWaitingFirstToken(false);
@@ -4481,6 +4686,10 @@ export default function App() {
       widgets: selfWidgets,
       skills,
       autonomy,
+      mcpServers,
+      dbConnections,
+      dataBridgeConfig,
+      knowledgeDocs,
       includeKeys: false,
     });
     const blob = new Blob([JSON.stringify(envelope, null, 2)], {
@@ -4507,13 +4716,38 @@ export default function App() {
         widgets: selfWidgets,
         skills,
         autonomy,
+        mcpServers,
+        dbConnections,
+        dataBridgeConfig,
+        knowledgeDocs,
         includeKeys: false,
       });
       localStorage.setItem(LS_KEYS.rollback, JSON.stringify(snap));
+      localStorage.setItem('smfta_last_autobackup_ts', String(Date.now()));
     } catch {
       showToast('⚠️ স্টোরেজ সীমার কারণে রোলব্যাক স্ন্যাপশট সংরক্ষণ করা যায়নি');
     }
   };
+
+  // Automatic local rollback snapshot when Auto Backup is enabled
+  useEffect(() => {
+    if (!settings.autoBackupEnabled) return;
+    const intervalMs = Math.max(1, settings.autoBackupIntervalHours || 24) * 3600 * 1000;
+    const checkAndSave = () => {
+      try {
+        const lastTs = Number(localStorage.getItem('smfta_last_autobackup_ts') || '0');
+        if (!Number.isFinite(lastTs) || Date.now() - lastTs >= intervalMs) {
+          handleSaveRollbackPoint();
+        }
+      } catch {
+        // ignore storage restrictions
+      }
+    };
+    checkAndSave();
+    const timer = window.setInterval(checkAndSave, 15 * 60 * 1000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.autoBackupEnabled, settings.autoBackupIntervalHours]);
 
   const handleRollback = () => {
     try {
@@ -4609,6 +4843,18 @@ export default function App() {
         if (parsed.autonomy) {
           setAutonomy(parsed.autonomy);
         }
+        if (parsed.mcpServers && parsed.mcpServers.length > 0) {
+          handleUpdateMcpServers(parsed.mcpServers);
+        }
+        if (parsed.dbConnections && parsed.dbConnections.length > 0) {
+          handleUpdateDbConnections(parsed.dbConnections);
+        }
+        if (parsed.dataBridgeConfig) {
+          handleUpdateDataBridgeConfig(parsed.dataBridgeConfig);
+        }
+        if (parsed.knowledgeDocs && parsed.knowledgeDocs.length > 0) {
+          handleUpdateKnowledgeDocs(parsed.knowledgeDocs);
+        }
         showToast(
           `Restored ${parsed.chats.length} chat(s) (v${parsed.schemaVersion} backup) ✓`
         );
@@ -4623,6 +4869,81 @@ export default function App() {
   };
 
   // P1-26: Full wipe of all local storage keys and application state
+  const handleClearChatHistory = () => {
+    try {
+      localStorage.removeItem(LS_KEYS.chats);
+    } catch {
+      // ignore storage access errors
+    }
+    if (cloudClient && userId && cloudReady) {
+      clearCloudChatSessions(cloudClient, userId)
+        .then(() => syncedSessionVersions.current.clear())
+        .catch(() => {});
+    }
+    const fresh: ChatSession = {
+      id: Date.now(),
+      title: 'New Chat',
+      titleSource: 'auto',
+      msgs: [],
+    };
+    setChats([fresh]);
+    setActiveId(fresh.id);
+    showToast('Chat history cleared');
+  };
+
+  const handleDeleteCloudData = async () => {
+    if (!cloudClient || !userId) {
+      showToast('Sign in to a cloud account first to wipe cloud data.');
+      return;
+    }
+    await wipeCloudWorkspace(cloudClient, userId);
+    syncedSessionVersions.current.clear();
+    setCloudStatus('saved');
+    showToast('Cloud account data deleted');
+  };
+
+  const handleRotateKeystoreKey = async () => {
+    await rotateKeystoreMasterKey(async ({ decryptOld, encryptNew }) => {
+      let reencrypted = 0;
+      if (settings.externalKeys) {
+        const plainSettingsKey = isEncrypted(settings.externalKeys)
+          ? await decryptOld(settings.externalKeys)
+          : settings.externalKeys;
+        if (plainSettingsKey) {
+          const sealed = await encryptNew(plainSettingsKey);
+          localStorage.setItem(
+            LS_KEYS.settings,
+            JSON.stringify({ ...settings, externalKeys: sealed })
+          );
+          reencrypted += 1;
+        }
+      }
+      if (savedProfiles.length > 0) {
+        const resealedProfiles = await Promise.all(
+          savedProfiles.map(async (p) => {
+            if (!p.externalKeys) return p;
+            const plain = isEncrypted(p.externalKeys)
+              ? await decryptOld(p.externalKeys)
+              : p.externalKeys;
+            if (plain) reencrypted += 1;
+            return { ...p, externalKeys: plain || '' };
+          })
+        );
+        persistSavedProfiles(resealedProfiles);
+      }
+      if (mcpServers.length > 0) {
+        reencrypted += mcpServers.filter((s) => Boolean(s.authSecret)).length;
+        await saveMcpServers(mcpServers);
+      }
+      if (dbConnections.length > 0) {
+        reencrypted += dbConnections.filter((d) => Boolean(d.secret)).length;
+        await saveDbConnections(dbConnections);
+      }
+      return reencrypted;
+    });
+    showToast('Master AES-256-GCM encryption key rotated');
+  };
+
   const handleFullClearAllData = () => {
     // When signed in, wipe the account's cloud rows as well so the reset is
     // complete on every device, not just this browser.
@@ -4641,6 +4962,10 @@ export default function App() {
     try {
       Object.values(LS_KEYS).forEach((k) => localStorage.removeItem(k));
       localStorage.removeItem(SAVED_PROFILES_KEY);
+      localStorage.removeItem(MCP_STORAGE_KEY);
+      localStorage.removeItem(DB_CONNECTIONS_STORAGE_KEY);
+      localStorage.removeItem(DB_BRIDGE_CONFIG_STORAGE_KEY);
+      localStorage.removeItem(TELEMETRY_LOG_KEY);
       localStorage.removeItem('smfta_autonomy');
       localStorage.removeItem('smfta_self_skills');
       localStorage.removeItem('smfta_battle_wins');
@@ -4661,6 +4986,18 @@ export default function App() {
     setNotes([]);
     setSelfWidgets([]);
     setSkills([]);
+    setMcpServers([]);
+    setDbConnections([]);
+    setDataBridgeConfig({
+      sourceConnectionId: '',
+      destinationConnectionId: '',
+      sourceTable: '',
+      destinationTable: '',
+      syncMode: 'upsert',
+      fieldMappings: [],
+    });
+    setKnowledgeDocs([]);
+    setTelemetryLogs([]);
     setConnections(sanitizeVaultConnections({}));
     setProviderTestStatus(null);
     setProviderLimitBanner(null);
@@ -6344,6 +6681,21 @@ export default function App() {
         onProviderTestResult={setProviderTestStatus}
         keystoreEphemeral={keystoreEphemeral}
         usageToday={usageToday}
+        mcpServers={mcpServers}
+        onUpdateMcpServers={handleUpdateMcpServers}
+        dbConnections={dbConnections}
+        onUpdateDbConnections={handleUpdateDbConnections}
+        dataBridgeConfig={dataBridgeConfig}
+        onUpdateDataBridgeConfig={handleUpdateDataBridgeConfig}
+        knowledgeDocs={knowledgeDocs}
+        onUpdateKnowledgeDocs={handleUpdateKnowledgeDocs}
+        telemetryLogs={telemetryLogs}
+        onClearTelemetryLogs={handleClearTelemetryLogs}
+        onRotateKeystoreKey={handleRotateKeystoreKey}
+        onClearChatHistory={handleClearChatHistory}
+        onDeleteCloudData={handleDeleteCloudData}
+        cloudConnected={Boolean(cloudClient && userId)}
+        cloudUserEmail={auth.user?.email || undefined}
       />
 
       {/* Image Lightbox */}

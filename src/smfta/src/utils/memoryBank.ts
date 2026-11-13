@@ -433,17 +433,97 @@ export function extractMemoryCandidates(text: string): string[] {
 }
 
 /**
- * Rejects passwords, API keys, Bearer tokens, or secret credentials from being stored in memory.
+ * Rejects passwords, API keys, Bearer tokens, financial numbers, NID/passport IDs,
+ * and private health/sensitive details from being stored in memory.
  */
 export function isSensitiveFact(text: string): boolean {
   if (!text) return false;
   const sensitiveRegexes = [
-    /(?:password|passcode|passwd|secret_key|private_key|token|api_key|access_token|refresh_token)\s*[:=]\s*[^\s]+/i,
+    /(?:password|passcode|passwd|secret_key|private_key|token|api_key|access_token|refresh_token|cvv|pin)\s*[:=]\s*[^\s]+/i,
     /\b(?:sk-[a-zA-Z0-9_-]{20,}|ghp_[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{20,}|AIza[0-9A-Za-z-_]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,})\b/,
     /\bBearer\s+[a-zA-Z0-9_\-\.]{20,}\b/i,
-    /(?:পাসওয়ার্ড|সিক্রেট|পিন\s*কোড|গোপন\s*কোড)\s*[:=]/i,
+    /(?:পাসওয়ার্ড|সিক্রেট|পিন\s*কোড|গোপন\s*কোড|ব্যাংক\s*অ্যাকাউন্ট|কার্ড\s*নম্বর|ক্রেডিট\s*কার্ড|ডেবিট\s*কার্ড|পাসপোর্ট|এনআইডি|জাতীয়\s*পরিচয়পত্র)\s*[:=ঃ\-]/i,
+    /\b(?:\d[ -]*?){13,19}\b/, // Credit / debit card or long account number pattern
+    /\b(?:IBAN|SWIFT|routing\s*(?:number|no)|account\s*(?:number|no)|nid|passport(?:\s*no|\s*number)?|ssn)\s*[:=#-]?\s*[a-zA-Z0-9-]{6,}/i,
+    /(?:ব্লাড\s*গ্রুপ|ডায়াবেটিস|রোগ|চিকিৎসা|প্রেসক্রিপশন|হেলথ|মেডিকেল\s*রিপোর্ট|diagnosis|prescription|blood\s*pressure|medical\s*record|mental\s*health)/i,
   ];
   return sensitiveRegexes.some((rx) => rx.test(text));
+}
+
+/**
+ * Parses an AI extraction response (strict JSON array or `{ facts: [...] }`) safely,
+ * rejecting any sensitive items and truncating overly long text.
+ */
+export function parseExtractedMemoriesJson(rawText: string): string[] {
+  const raw = (rawText || '').trim();
+  if (!raw) return [];
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try {
+        parsed = JSON.parse(arrMatch[0]);
+      } catch {
+        parsed = null;
+      }
+    }
+  }
+
+  let items: unknown[] = [];
+  if (Array.isArray(parsed)) {
+    items = parsed;
+  } else if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.facts)) items = obj.facts;
+    else if (Array.isArray(obj.memories)) items = obj.memories;
+    else if (Array.isArray(obj.items)) items = obj.items;
+  }
+
+  const out: string[] = [];
+  for (const item of items) {
+    let line = '';
+    if (typeof item === 'string') {
+      line = item.trim();
+    } else if (item && typeof item === 'object') {
+      const o = item as Record<string, unknown>;
+      const k = typeof o.key === 'string' ? o.key.trim() : typeof o.category === 'string' ? o.category.trim() : '';
+      const v = typeof o.value === 'string' ? o.value.trim() : typeof o.fact === 'string' ? o.fact.trim() : typeof o.text === 'string' ? o.text.trim() : '';
+      if (k && v && !v.includes(':')) line = `${k}: ${v}`;
+      else line = v;
+    }
+    line = line.replace(/\s+/g, ' ').trim().slice(0, 240);
+    if (!line || line.length < 3 || isSensitiveFact(line)) continue;
+    out.push(line);
+  }
+  return Array.from(new Set(out)).slice(0, 10);
+}
+
+/**
+ * Merges incoming AI-extracted facts into an existing flat `string[]` memory list,
+ * updating same-key entries rather than creating duplicates and preserving pins.
+ */
+export function mergeExtractedMemories(
+  existingFacts: string[],
+  incomingFacts: string[],
+  maxCount = MEMORY_MAX
+): { updated: string[]; added: string[] } {
+  const safeIncoming = (incomingFacts || []).filter((f) => f && !isSensitiveFact(f));
+  if (safeIncoming.length === 0) {
+    return { updated: existingFacts, added: [] };
+  }
+  const migrated = migrateMemory(existingFacts).facts;
+  const { facts, added } = addFacts(migrated, safeIncoming, { source: 'ai' });
+  return {
+    updated: factsToText(facts, maxCount),
+    added,
+  };
 }
 
 /**
