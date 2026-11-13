@@ -1167,7 +1167,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* API Key Input with Show/Hide Toggle */}
-          {!isKeylessProviderId(newProviderId) && (
+          {(!isKeylessProviderId(newProviderId) || newProviderId === 'custom') && (
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-[var(--text-2)] mb-1.5">
                 API Key
@@ -1276,7 +1276,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="cs-input w-full text-xs"
                   />
                 </div>
-                {!isKeylessProviderId(newProviderId) && (
+                {(!isBuiltinProviderId(newProviderId)) && (
                   <div>
                     <label className="block text-[11px] font-medium text-[var(--text-2)] mb-1">
                       Base URL
@@ -1598,7 +1598,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
 
-                    {!isKeylessProviderId(prof.provider) && (
+                    {!isBuiltinProviderId(prof.provider) && (
                       <>
                         <div>
                           <span className="block text-[11px] font-semibold text-[var(--text-2)] mb-1">
