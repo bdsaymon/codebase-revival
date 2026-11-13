@@ -6267,11 +6267,7 @@ export default function App() {
         onSelfRepair={handleSelfRepair}
         onProviderTestResult={setProviderTestStatus}
         keystoreEphemeral={keystoreEphemeral}
-        usageToday={{
-          date: new Date().toDateString(),
-          requests: usageToday,
-          chars: 0,
-        }}
+        usageToday={usageToday}
       />
 
       {/* Image Lightbox */}

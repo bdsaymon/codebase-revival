@@ -5726,3 +5726,31 @@ html[data-theme='dark'] .cs-account-avatar { color: var(--ink); }
     max-width: 100% !important;
   }
 }
+
+/* Focused settings workspace */
+:root { --settings-on-accent: #fff; --settings-danger: #db3455; --settings-overlay: #14111c88; }
+.settings-redesign .cs-nav { width: 220px; }
+.settings-redesign .cs-panel-body { gap: 24px; }
+.settings-redesign .cs-card { padding: 0 0 24px; }
+.settings-redesign .cs-card > header { border: 0; margin-bottom: 12px; padding-bottom: 0; }
+.settings-redesign .cs-card h3 { font-size: 15px; font-weight: 650; }
+.settings-redesign .cs-nav-item { min-height: 48px; }
+.settings-redesign .cs-nav-label { font-size: 13px; }
+.settings-redesign .cs-input, .settings-redesign .cs-textarea { border-radius: 6px; min-width: 0; }
+.settings-redesign .cs-textarea { display: block; padding: 12px; line-height: 1.6; margin-top: 8px; }
+.settings-redesign button { letter-spacing: 0; white-space: normal; height: auto; min-height: 32px; }
+.settings-redesign button:disabled { opacity: .5; }
+.settings-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 16px; }
+.settings-control { display: flex; flex-direction: column; gap: 8px; min-width: 0; color: var(--text-2); font-size: 12px; font-weight: 500; }
+.settings-control input, .settings-control select { width: 100%; font-weight: 400; }
+.settings-active-model { overflow-wrap: anywhere; }
+.settings-import { position: relative; overflow: hidden; display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 12px; cursor: pointer; }
+.settings-import input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+@media (max-width: 640px) {
+  .settings-redesign .cs-nav { display: none; }
+  .settings-control-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .settings-redesign .cs-panel-head { padding: 16px; }
+  .settings-redesign .cs-panel-body { padding: 20px 16px; }
+  .settings-redesign .cs-card .cs-seg { flex-shrink: 0; }
+  .settings-redesign .cs-input { max-width: 100%; }
+}

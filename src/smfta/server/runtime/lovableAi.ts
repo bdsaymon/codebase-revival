@@ -60,7 +60,7 @@ export async function streamFromLovableAi(params: {
         model,
         messages,
         stream: true,
-        ...(params.maxTokens ? { max_tokens: Math.min(params.maxTokens, 16384) } : {}),
+        ...(params.maxTokens ? { max_tokens: Math.min(params.maxTokens, 32768) } : {}),
         ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
       }),
       signal: params.signal,

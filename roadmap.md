@@ -1,4 +1,7 @@
 # Platform update
+- [x] Rebuild Settings with focused sections and working response, history and provider limits
+- [x] Verify redesigned Settings on desktop/mobile and after reload
+- [x] Verify real chat uses saved response controls and expose custom/local connection fields
 - [x] Fix custom-provider selection, exact-model routing and context limits
 - [ ] Verify live Mercury replies — saved credential rejected with HTTP 401; replacement required
 - [x] Remove app login/registration without exposing private records
