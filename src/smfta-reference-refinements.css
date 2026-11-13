@@ -334,3 +334,273 @@ body {
     opacity: 1;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   v19.1 — CLAUDE-STYLE SETTINGS PAGE (csx-*)
+   Pixel-matched to the reference "Settings" screenshot:
+   near-black canvas, grouped rounded cards, serif-ish page title,
+   white pill "Free", white "Upgrade" pill, blue iOS-style switch.
+   ════════════════════════════════════════════════════════════════════════ */
+
+.csx-page {
+  min-height: 100dvh;
+  background: #0a0d12;
+  color: #f5f5f4;
+  font-family: var(--ui-font, 'Inter', system-ui, sans-serif);
+  display: flex;
+  flex-direction: column;
+}
+
+.csx-topbar {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  padding: 10px 8px 6px;
+}
+
+.csx-topbar-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #f5f5f4;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.csx-topbar-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.csx-title {
+  margin: 0;
+  text-align: center;
+  font-family: 'Geist', 'Georgia', serif;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: #f5f5f4;
+}
+
+.csx-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px calc(24px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.csx-card {
+  background: #191c20;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* Plan chip card: mostly empty card with the white "Free" pill at right */
+.csx-plan-card {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 76px;
+  padding: 14px 16px;
+}
+
+.csx-plan-pill {
+  background: #ffffff;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 999px;
+}
+
+/* Upgrade card */
+.csx-upgrade-card {
+  padding: 22px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.csx-upgrade-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.csx-upgrade-sub {
+  margin: 0;
+  font-size: 15.5px;
+  color: #d4d4d4;
+  line-height: 1.5;
+}
+
+.csx-upgrade-btn {
+  margin-top: 14px;
+  border: 0;
+  background: #ffffff;
+  color: #111111;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 12px 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.15s;
+}
+
+.csx-upgrade-btn:hover {
+  opacity: 0.92;
+}
+
+.csx-upgrade-btn:active {
+  transform: scale(0.98);
+}
+
+/* Grouped rows */
+.csx-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.csx-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 62px;
+  padding: 12px 16px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #f5f5f4;
+  font-family: inherit;
+}
+
+.csx-row + .csx-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.csx-row-btn {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.csx-row-btn:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.csx-row-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  color: #f5f5f4;
+  flex-shrink: 0;
+}
+
+.csx-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.csx-row-label {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.csx-row-hint {
+  font-size: 14px;
+  color: #8a8f98;
+  line-height: 1.3;
+}
+
+/* iOS-style switch (haptic feedback) */
+.csx-switch {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.csx-switch.is-on {
+  background: #2f6fed;
+}
+
+.csx-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s;
+}
+
+.csx-switch.is-on .csx-switch-knob {
+  transform: translateX(22px);
+}
+
+/* Light theme parity */
+[data-theme='light'] .csx-page {
+  background: #f7f7f5;
+  color: #1a1a1a;
+}
+
+[data-theme='light'] .csx-card {
+  background: #ffffff;
+}
+
+[data-theme='light'] .csx-row + .csx-row {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='light'] .csx-row-label {
+  color: #1a1a1a;
+}
+
+[data-theme='light'] .csx-row-hint {
+  color: #6b7280;
+}
+
+[data-theme='light'] .csx-topbar-btn {
+  color: #1a1a1a;
+}
+
+[data-theme='light'] .csx-title {
+  color: #1a1a1a;
+}
+
+[data-theme='light'] .csx-upgrade-sub {
+  color: #525252;
+}
+
+/* Mobile hardening */
+@media (max-width: 400px) {
+  .csx-scroll {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .csx-title {
+    font-size: 21px;
+  }
+  .csx-row {
+    min-height: 56px;
+  }
+}
