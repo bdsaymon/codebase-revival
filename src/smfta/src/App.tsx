@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   Pin,
+  Brain,
   Edit2,
   Trash2,
   Settings,
@@ -28,26 +29,53 @@ import {
   Send,
   Moon,
   Sun,
-  Sparkles,
+  ArrowUp,
+  ChevronRight,
+  CircleHelp,
   Code2,
   FileArchive,
-  Play,
-  LayoutTemplate,
-  PenLine,
-  Brain,
-  Image as ImageIcon,
-  LayoutGrid,
   FolderOpen,
-  ArrowUpRight,
-  Wand2,
+  Image as ImageIcon,
   LayoutDashboard,
-  CircleHelp,
-  Server,
+  LayoutGrid,
+  LayoutTemplate,
   Loader2,
   LogOut,
-  Volume2,
+  MessageSquarePlus,
+  MoreHorizontal,
   Pause,
+  PenLine,
+  Play,
+  Server,
+  Sparkles,
+  Volume2,
+  Wand2,
 } from 'lucide-react';
+
+const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" className={className} aria-hidden="true">
+    <line x1="4" y1="6.5" x2="19" y2="6.5" />
+    <line x1="4" y1="12" x2="13.5" y2="12" />
+    <line x1="4" y1="17.5" x2="16.5" y2="17.5" />
+  </svg>
+);
+
+const SunburstMarkIcon: React.FC<{ className?: string }> = ({ className = 'w-11 h-11' }) => (
+  <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" className={className} aria-hidden="true">
+    <line x1="24" y1="5" x2="24" y2="15" />
+    <line x1="24" y1="33" x2="24" y2="43" />
+    <line x1="5" y1="24" x2="15" y2="24" />
+    <line x1="33" y1="24" x2="43" y2="24" />
+    <line x1="10.6" y1="10.6" x2="17.6" y2="17.6" />
+    <line x1="30.4" y1="30.4" x2="37.4" y2="37.4" />
+    <line x1="37.4" y1="10.6" x2="30.4" y2="17.6" />
+    <line x1="17.6" y1="30.4" x2="10.6" y2="37.4" />
+    <line x1="16.7" y1="6.4" x2="20.6" y2="15.7" />
+    <line x1="27.4" y1="32.3" x2="31.3" y2="41.6" />
+    <line x1="6.4" y1="31.3" x2="15.7" y2="27.4" />
+    <line x1="32.3" y1="20.6" x2="41.6" y2="16.7" />
+  </svg>
+);
 import {
   AINoteDraft,
   AppSettings,
@@ -479,6 +507,7 @@ export default function App() {
   const [topProviderMenuOpen, setTopProviderMenuOpen] = useState(false);
   const [bottomProviderMenuOpen, setBottomProviderMenuOpen] = useState(false);
   const [bottomModelMenuOpen, setBottomModelMenuOpen] = useState(false);
+  const [moreModelsOpen, setMoreModelsOpen] = useState(false);
   const [providerLimitBanner, setProviderLimitBanner] = useState<{
     profileName: string;
     message: string;
@@ -4669,9 +4698,147 @@ export default function App() {
 
   return (
     <div className="app-shell flex h-[100dvh] w-full overflow-hidden bg-[var(--bg)] text-[var(--text)]">
+      {/* Slide-over Navigation Drawer (opened from top-left staggered menu icon) */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-50 flex bg-black/50 backdrop-blur-[1px]"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <aside
+            className="w-[290px] max-w-[84vw] h-full bg-[var(--sidebar)] border-r border-[var(--border)] flex flex-col p-3.5 gap-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="ref-serif text-[18px] font-medium text-[var(--ink)]">
+                SMFTA AI
+              </span>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(false)}
+                className="w-8 h-8 rounded-full inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+                aria-label="Close sidebar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleNewChat();
+                setSidebarOpen(false);
+              }}
+              className="w-full h-10 px-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[13.5px] font-medium text-[var(--ink)] flex items-center gap-2.5 hover:bg-[var(--surface-2)] cursor-pointer"
+            >
+              <MessageSquarePlus className="w-4 h-4 text-[var(--primary)]" />
+              <span>New chat</span>
+            </button>
+
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-[var(--ink-dim)] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search chats..."
+                className="w-full h-9 pl-8 pr-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs text-[var(--ink)] placeholder:text-[var(--ink-dim)] outline-none focus:border-[var(--primary)]"
+              />
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-1 pr-0.5">
+              <div className="px-2 py-1 text-[11px] font-medium text-[var(--ink-dim)]">
+                Recent
+              </div>
+              {filteredChats.length === 0 ? (
+                <div className="px-2 py-4 text-xs text-[var(--ink-dim)]">
+                  No conversations yet.
+                </div>
+              ) : (
+                filteredChats.map((c) => {
+                  const isCurrent = c.id === activeId;
+                  return (
+                    <div
+                      key={c.id}
+                      className={`group flex items-center justify-between gap-1.5 px-2.5 py-2 rounded-xl text-[13px] cursor-pointer transition-colors ${
+                        isCurrent
+                          ? 'bg-[var(--surface-2)] text-[var(--ink)] font-medium'
+                          : 'text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)]'
+                      }`}
+                      onClick={() => {
+                        setActiveId(c.id);
+                        setSidebarOpen(false);
+                      }}
+                    >
+                      <span className="truncate flex-1">{c.title || 'New chat'}</span>
+                      <div className="flex items-center gap-0.5 opacity-80 sm:opacity-0 sm:group-hover:opacity-100">
+                        <button
+                          type="button"
+                          onClick={(e) => handleTogglePin(e, c.id)}
+                          className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--ink-dim)]"
+                          title={c.pinned ? 'Unpin' : 'Pin'}
+                        >
+                          <Pin className={`w-3 h-3 ${c.pinned ? 'text-[var(--primary)]' : ''}`} />
+                        </button>
+                        {chats.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteChat(e, c.id)}
+                            className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--ink-dim)] hover:text-rose-400"
+                            title="Delete chat"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2 border-t border-[var(--border)] space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setNotebookOpen(true);
+                  setSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
+              >
+                <FolderOpen className="w-4 h-4" />
+                <span>Notebook</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConnectionsOpen(true);
+                  setSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span>Connectors</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab('general');
+                  setSettingsOpen(true);
+                  setSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Settings</span>
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-5 py-2.5 rounded-xl text-xs font-medium shadow-lg border border-slate-700">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
           {toastMsg}
         </div>
       )}
@@ -4686,28 +4853,49 @@ export default function App() {
           />
         ) : (
           <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
-            {/* HEADER — AI Name + Clean Three-Dot (⋮) Options Menu */}
+            {/* HEADER — Screenshot 1 & 4: Staggered Menu Left, Quiet Brand, Pill Group [New Chat | •••] Right */}
             <header className="app-header">
-              <div className="app-header-title">
-                <strong>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  data-testid="drawer-menu-btn"
+                  onClick={() => setSidebarOpen(true)}
+                  className="ref-circle-btn"
+                  aria-label="Open menu"
+                  title="Conversations & Navigation"
+                >
+                  <StaggeredMenuIcon className="w-4 h-4" />
+                </button>
+                <span className="hidden sm:inline text-[15px] font-medium text-[var(--ink-muted)]">
                   {activeDisplayName === 'Msfta shop ai'
                     ? 'SMFTA AI'
                     : activeDisplayName || 'SMFTA AI'}
-                </strong>
+                </span>
               </div>
 
-              <div className="relative flex items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="header-menu-btn"
-                  onClick={() => setHeaderMenuOpen((v) => !v)}
-                  className="hdr-btn px-2"
-                  aria-label="Options & Settings"
-                  aria-expanded={headerMenuOpen}
-                  title="Options & Settings"
-                >
-                  <MoreVertical className="w-4 h-4" />
-                </button>
+              <div className="relative flex items-center">
+                <div className="ref-pill-group">
+                  <button
+                    type="button"
+                    onClick={handleNewChat}
+                    className="ref-pill-icon-btn"
+                    aria-label="New chat"
+                    title="New chat"
+                  >
+                    <MessageSquarePlus className="w-[17px] h-[17px]" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="header-menu-btn"
+                    onClick={() => setHeaderMenuOpen((v) => !v)}
+                    className="ref-pill-icon-btn"
+                    aria-label="Options & Settings"
+                    aria-expanded={headerMenuOpen}
+                    title="Options & Settings"
+                  >
+                    <MoreHorizontal className="w-[17px] h-[17px]" />
+                  </button>
+                </div>
 
                 {headerMenuOpen && (
                   <>
@@ -4772,6 +4960,31 @@ export default function App() {
                       >
                         <Brain className="w-3.5 h-3.5 text-[var(--primary)]" />
                         <span>Memory & Privacy</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettings((prev) => {
+                            const nextTheme = prev.theme === 'dark' ? 'light' : 'dark';
+                            return sanitizeSettings({
+                              ...prev,
+                              themeMode: nextTheme,
+                              theme: nextTheme,
+                            });
+                          });
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        {settings.theme === 'dark' ? (
+                          <Sun className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        ) : (
+                          <Moon className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        )}
+                        <span>
+                          Switch to {settings.theme === 'dark' ? 'Light' : 'Dark'} mode
+                        </span>
                       </button>
 
                       <button
@@ -4921,12 +5134,25 @@ export default function App() {
               >
                 {activeChat.msgs.length === 0 && !isWaitingFirstToken ? (
                   <div className="empty-state">
-                    <h1 className="empty-title">SMFTA AI</h1>
-                    <p className="empty-sub">What can I help with?</p>
+                    <SunburstMarkIcon className="ref-sunburst" />
+                    <h1 className="empty-title">What can I help with?</h1>
                   </div>
                 ) : (
-              <div className="w-full max-w-[900px] mx-auto">
-                {activeChat.msgs.map((m) => (
+              <div className="w-full max-w-[780px] mx-auto">
+                {activeChat.msgs.map((m) => {
+                  const attachedDocNames =
+                    m.role === 'user'
+                      ? Array.from(
+                          m.text.matchAll(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g)
+                        ).map((match) => match[1].trim())
+                      : [];
+                  const cleanUserText =
+                    m.role === 'user'
+                      ? m.text
+                          .replace(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g, '')
+                          .trim()
+                      : m.text;
+                  return (
                   <div key={m.id} className={`msg-row ${m.role === 'user' ? 'is-user' : 'is-ai'}`}>
                     {/* Message Body */}
                     <div
@@ -4937,16 +5163,12 @@ export default function App() {
                       }`}
                     >
                       {m.role === 'user' ? (
-                        <div className="msg-user-bubble">
-                          {m.text.replace(
-                            /⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g,
-                            (_match, fname) => `[Attached File: ${fname}]`
-                          )}
-                          {m.imgs && m.imgs.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {m.imgs.map((im, idx) => (
+                        <>
+                          {((m.imgs && m.imgs.length > 0) || attachedDocNames.length > 0) && (
+                            <div className="ref-attach-grid">
+                              {m.imgs?.map((im, idx) => (
                                 <img
-                                  key={idx}
+                                  key={`img-${idx}`}
                                   src={
                                     im.url ||
                                     `data:${im.mime};base64,${im.data}`
@@ -4959,23 +5181,29 @@ export default function App() {
                                         `data:${im.mime};base64,${im.data}`
                                     )
                                   }
-                                  className="w-20 h-20 object-cover rounded-lg border border-white/25 cursor-zoom-in"
+                                  className="ref-attach-img"
                                 />
                               ))}
+                              {attachedDocNames.map((fname, idx) => {
+                                const ext =
+                                  fname.split('.').pop()?.slice(0, 4).toUpperCase() ||
+                                  'FILE';
+                                return (
+                                  <div key={`doc-${idx}`} className="ref-attach-doc">
+                                    <span className="ref-attach-badge">{ext}</span>
+                                    <span className="ref-attach-name">{fname}</span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
-                        </div>
+                          {cleanUserText && (
+                            <div className="msg-user-bubble">{cleanUserText}</div>
+                          )}
+                        </>
                       ) : (
                         <div className="w-full min-w-0">
                           <div className="msg-ai-head">
-                            <div className="msg-ai-avatar">
-                              <Sparkles className="w-3.5 h-3.5" />
-                            </div>
-                            <span className="msg-ai-name">
-                              {activeDisplayName === 'Msfta shop ai'
-                                ? 'SMFTA Pro'
-                                : activeDisplayName}
-                            </span>
                             <span className="msg-ai-model">
                               {m.v2ModelId
                                 ? getV2ModelSpec(m.v2ModelId).label
@@ -5077,19 +5305,11 @@ export default function App() {
                             highlightCode={settings.codeHighlight !== false}
                           />
 
-                          {/* Self-Update & Memory Confirmation Banner */}
+                          {/* Artifact / Downloadable Card (Screenshot 1 style) */}
                           {(m.selfUpdateSummary ||
                             m.selfUpdateWidgetId ||
                             (m.memoryAdded && m.memoryAdded.length > 0)) && (
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              {m.selfUpdateSummary && (
-                                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-medium text-emerald-500">
-                                  <Zap className="w-3.5 h-3.5 shrink-0" />
-                                  <span>
-                                    Self-updated: {m.selfUpdateSummary}
-                                  </span>
-                                </div>
-                              )}
+                            <div className="mt-3 space-y-2">
                               {m.selfUpdateWidgetId && (
                                 <button
                                   type="button"
@@ -5103,15 +5323,30 @@ export default function App() {
                                       setSelfEvolutionOpen(true);
                                     }
                                   }}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold shadow-xs hover:opacity-90 cursor-pointer"
+                                  className="ref-artifact-card"
                                 >
-                                  <Cpu className="w-3.5 h-3.5" />
-                                  <span>Open Live Widget</span>
+                                  <span className="ref-artifact-thumb">
+                                    <LayoutTemplate className="w-5 h-5" />
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[15.5px] font-semibold text-[var(--ink)] truncate">
+                                      {m.selfUpdateSummary || 'Interactive App Solution'}
+                                    </span>
+                                    <span className="block text-[13px] text-[var(--ink-dim)] mt-0.5">
+                                      Interactive Artifact · Open
+                                    </span>
+                                  </span>
                                 </button>
                               )}
+                              {!m.selfUpdateWidgetId && m.selfUpdateSummary && (
+                                <div className="text-xs text-[var(--ink-dim)] flex items-center gap-1.5">
+                                  <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span>{m.selfUpdateSummary}</span>
+                                </div>
+                              )}
                               {m.memoryAdded && m.memoryAdded.length > 0 && (
-                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[var(--primary-soft)] border border-[var(--primary-border)] text-[11px] text-[var(--primary)]">
-                                  <span>Memory saved</span>
+                                <div className="text-[11px] text-[var(--ink-dim)]">
+                                  Memory updated
                                 </div>
                               )}
                             </div>
@@ -5359,18 +5594,13 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
-                {/* Live, honest pipeline status before the first answer token.
-                    Only connection/processing/streaming phases are shown —
-                    never fabricated model reasoning. */}
+                {/* Live, honest pipeline status before the first answer token */}
                 {isWaitingFirstToken && (
                   <div className="msg-row is-ai">
                     <div className="msg-ai-head">
-                      <div className="msg-ai-avatar">
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="msg-ai-name">SMFTA Pro</span>
                       <span className="msg-ai-model">{activeModelLabel}</span>
                     </div>
                     <div className="gen-status" role="status" aria-live="polite">
@@ -5716,14 +5946,13 @@ export default function App() {
                           ? activeModelLabel
                           : activeDisplayName
                     } anything…`}
-                    className="w-full bg-transparent border-none outline-none resize-none text-[15px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[48px] max-h-[160px] leading-relaxed pl-7 pr-3 pt-3.5"
+                    className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
                   />
-                  <Sparkles className="composer-input-spark" aria-hidden="true" />
                   </div>
 
-                  {/* Unified Bottom Bar Inside Chat Box (+ | Mic | Web  ...  Model Pill | Paper-Plane Send) */}
+                  {/* Screenshot 1 Unified Composer Toolbar: [+  Model Pill  ...  Mic  Terracotta ↑] */}
                   <div className="composer-bar">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
@@ -5735,11 +5964,16 @@ export default function App() {
 
                       <button
                         type="button"
-                        onClick={toggleMic}
-                        className={`composer-icon ${isListening ? 'is-on' : ''}`}
-                        title={isListening ? 'Stop Listening' : 'Voice Input'}
+                        data-testid="model-selector-btn"
+                        onClick={() => {
+                          setMoreModelsOpen(!activeIsBuiltin);
+                          setBottomModelMenuOpen((v) => !v);
+                        }}
+                        className="composer-model"
+                        title="Select Model"
                       >
-                        <Mic className="w-4 h-4" />
+                        <span className="truncate">{activeModelLabel}</span>
+                        <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
                       </button>
 
                       <button
@@ -5770,400 +6004,29 @@ export default function App() {
                         <Globe className="w-4 h-4" />
                       </button>
 
-                      {/* v18.9 redesign — Syntrix-style tool pills */}
                       <button
                         type="button"
-                        className="composer-pill"
+                        className="composer-icon hidden sm:inline-flex"
                         onClick={() => setPromptBankOpen(true)}
-                        title="Open the tool and prompt library"
+                        title="Open tool and prompt library"
                       >
-                        <Wand2 className="w-3.5 h-3.5" />
-                        <span className="composer-pill-label">Tools</span>
-                        <ChevronDown className="w-3 h-3 opacity-60" />
-                      </button>
-                      <button
-                        type="button"
-                        className={`composer-pill ${settings.mode === 'power' ? 'is-on' : ''}`}
-                        onClick={() => {
-                          const nextPower = settings.mode !== 'power';
-                          const nextMode = nextPower ? 'power' : 'balanced';
-                          setSettings((prev) => {
-                            const next = sanitizeSettings({ ...prev, mode: nextMode });
-                            // Keep the built-in tier model id aligned with the
-                            // mode so selector label and request never diverge.
-                            if (activeIsBuiltin) {
-                              next.externalModel = builtinTierForModel(
-                                null,
-                                nextMode
-                              ).model;
-                            }
-                            return next;
-                          });
-                          if (activeIsBuiltin && activeProfile) {
-                            const tierModel = builtinTierForModel(
-                              null,
-                              nextMode
-                            ).model;
-                            handleUpdateProfiles(
-                              savedProfiles.map((p) =>
-                                p.id === activeProfile.id
-                                  ? { ...p, externalModel: tierModel }
-                                  : p
-                              )
-                            );
-                          }
-                          showToast(nextPower ? 'Deep Think on — power mode' : 'Deep Think off — balanced mode');
-                        }}
-                        title="Deep Think: slower, deeper reasoning"
-                      >
-                        <Brain className="w-3.5 h-3.5" />
-                        <span className="composer-pill-label">Deep Think</span>
-                        <ChevronDown className="w-3 h-3 opacity-60" />
+                        <Wand2 className="w-4 h-4" />
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          data-testid="model-selector-btn"
-                          onClick={() => setBottomModelMenuOpen((v) => !v)}
-                          className="chip-btn composer-model"
-                          title="Switch Active AI Model"
-                        >
-                          <span className="truncate max-w-[125px] sm:max-w-[180px]">
-                            {activeModelLabel}
-                          </span>
-                          {activeIsV2 && activeV2QuotaStatus && (
-                            <span className="text-[10px] font-mono opacity-75 hidden sm:inline">
-                              ·{' '}
-                              {activeV2QuotaStatus.isUnlimited
-                                ? '∞'
-                                : activeV2QuotaStatus.isTestingBypass
-                                  ? `${activeV2QuotaStatus.testingRemaining}`
-                                  : `${activeV2QuotaStatus.remaining}/${activeV2QuotaStatus.limit}`}
-                            </span>
-                          )}
-                          <ChevronDown className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                        </button>
-
-                        {bottomModelMenuOpen && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-30"
-                              onClick={() => setBottomModelMenuOpen(false)}
-                            />
-                            <div
-                              data-testid="model-menu-popover"
-                              className="absolute right-0 bottom-full mb-2 w-80 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-2 z-40 space-y-2 max-h-[70vh] overflow-y-auto"
-                            >
-                              {!activeIsBuiltin && (
-                                <div>
-                                  <div className="pt-1 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
-                                    <span>Active provider models</span>
-                                    <span className="text-[var(--primary)] truncate max-w-[58%]">
-                                      {activeDisplayName}
-                                    </span>
-                                  </div>
-                                  <div className="max-h-40 overflow-y-auto space-y-0.5">
-                                    {activeAvailableModels.length === 0 ? (
-                                      <p className="px-3 py-2.5 text-[11px] leading-relaxed text-[var(--ink-dim)]">
-                                        No verified model yet. Add or test this
-                                        provider in Settings — only models that
-                                        actually respond are listed here.
-                                      </p>
-                                    ) : (
-                                      activeAvailableModels.map((mId) => {
-                                        const isCurrentModel =
-                                          mId === activeModelName;
-                                        return (
-                                          <button
-                                            key={mId}
-                                            type="button"
-                                            onClick={() => {
-                                              handleSelectModel(mId);
-                                              setBottomModelMenuOpen(false);
-                                            }}
-                                            className={`w-full text-left px-3 py-2 text-xs font-mono rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                                              isCurrentModel
-                                                ? 'bg-[var(--primary-soft)] text-[var(--primary)] font-semibold'
-                                                : 'text-[var(--ink)] hover:bg-[var(--surface-2)]'
-                                            }`}
-                                          >
-                                            <span className="truncate">{mId}</span>
-                                            {isCurrentModel && (
-                                              <Check className="w-3.5 h-3.5 shrink-0" />
-                                            )}
-                                          </button>
-                                        );
-                                      })
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {savedProfiles
-                                .filter(
-                                  (p) =>
-                                    !isBuiltinProviderId(p.provider) &&
-                                    p.enabled !== false &&
-                                    (activeIsBuiltin || p.id !== activeProfile?.id)
-                                )
-                                .map((customProf) => {
-                                  const vModels = getModelsForProfile(customProf);
-                                  if (vModels.length === 0) return null;
-                                  const isProfVerified =
-                                    customProf.verified === true ||
-                                    customProf.verificationStatus === 'verified';
-                                  return (
-                                    <div
-                                      key={customProf.id}
-                                      className="pt-1.5 border-t border-[var(--border)]"
-                                    >
-                                      <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
-                                        <span className="truncate max-w-[65%]">
-                                          {customProf.name}
-                                        </span>
-                                        <span
-                                          className={`font-semibold ${
-                                            isProfVerified
-                                              ? 'text-emerald-500'
-                                              : 'text-amber-500'
-                                          }`}
-                                        >
-                                          {isProfVerified ? 'Verified' : 'Custom'}
-                                        </span>
-                                      </div>
-                                      <div className="space-y-0.5 max-h-32 overflow-y-auto">
-                                        {vModels.map((mId) => (
-                                          <button
-                                            key={`${customProf.id}-${mId}`}
-                                            type="button"
-                                            onClick={() => {
-                                              handleSelectProfile({
-                                                ...customProf,
-                                                externalModel: mId,
-                                              });
-                                              setBottomModelMenuOpen(false);
-                                            }}
-                                            className="w-full text-left px-3 py-1.5 text-xs font-mono rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors text-[var(--ink)] hover:bg-[var(--surface-2)]"
-                                          >
-                                            <span className="truncate">{mId}</span>
-                                            <span className="text-[10px] text-[var(--ink-dim)]">
-                                              Switch
-                                            </span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-
-                              {/* Group 1: V1 – Natural (Existing System, 100% Untouched) */}
-                              <div
-                                className={
-                                  !activeIsBuiltin
-                                    ? 'pt-1.5 border-t border-[var(--border)]'
-                                    : ''
-                                }
-                              >
-                                <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
-                                  <span>V1 – Natural</span>
-                                  <span className="text-[var(--primary)] font-semibold">
-                                    Existing
-                                  </span>
-                                </div>
-                                <div className="space-y-0.5">
-                                  {BUILTIN_TIERS.map((tier) => {
-                                    const isSelectedTier =
-                                      activeIsBuiltin &&
-                                      !activeIsV2 &&
-                                      activeModelName === tier.model;
-                                    return (
-                                      <button
-                                        key={tier.model}
-                                        type="button"
-                                        data-testid={`select-model-${tier.model}`}
-                                        onClick={() => {
-                                          if (!activeIsBuiltin) {
-                                            const builtinProf =
-                                              savedProfiles.find((p) =>
-                                                isBuiltinProviderId(p.provider)
-                                              ) || DEFAULT_BUILTIN_PROFILE;
-                                            handleSelectProfile({
-                                              ...builtinProf,
-                                              externalModel: tier.model,
-                                            });
-                                          }
-                                          handleSelectModel(tier.model);
-                                          setBottomModelMenuOpen(false);
-                                        }}
-                                        className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                                          isSelectedTier
-                                            ? 'bg-[var(--primary)] text-white font-semibold'
-                                            : 'text-[var(--ink)] hover:bg-[var(--surface-2)]'
-                                        }`}
-                                      >
-                                        <div className="min-w-0">
-                                          <div className="font-semibold">
-                                            {tier.label}
-                                          </div>
-                                          <div
-                                            className={`text-[10px] truncate ${
-                                              isSelectedTier
-                                                ? 'text-white/80'
-                                                : 'text-[var(--ink-dim)]'
-                                            }`}
-                                          >
-                                            {tier.desc}
-                                          </div>
-                                        </div>
-                                        {isSelectedTier && (
-                                          <Check className="w-3.5 h-3.5 shrink-0" />
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                              {/* Group 2: V2 – Special (Independent Firebase AI System) */}
-                              <div className="pt-1.5 border-t border-[var(--border)]">
-                                <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
-                                  <span>V2 – Special</span>
-                                  <span className="text-emerald-400 font-semibold">
-                                    V2 Engine
-                                  </span>
-                                </div>
-                                <div className="space-y-0.5">
-                                  {V2_SPECIAL_MODELS.map((spec) => {
-                                    const isSelectedV2 =
-                                      activeIsBuiltin &&
-                                      activeModelName === spec.id;
-                                    const qStat = getV2QuotaStatusForModel(spec.id);
-                                    return (
-                                      <button
-                                        key={spec.id}
-                                        type="button"
-                                        data-testid={`select-model-${spec.id}`}
-                                        onClick={() => {
-                                          handleSelectModel(spec.id);
-                                          setBottomModelMenuOpen(false);
-                                        }}
-                                        className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                                          isSelectedV2
-                                            ? 'bg-[var(--primary)] text-white font-semibold'
-                                            : 'text-[var(--ink)] hover:bg-[var(--surface-2)]'
-                                        }`}
-                                      >
-                                        <div className="min-w-0 flex-1">
-                                          <div className="flex items-center justify-between gap-2">
-                                            <span className="font-semibold truncate">
-                                              {spec.label}
-                                            </span>
-                                            <span
-                                              className={`text-[10px] font-mono shrink-0 ${
-                                                isSelectedV2
-                                                  ? 'text-white/90'
-                                                  : qStat.isUnlimited
-                                                    ? 'text-emerald-400'
-                                                    : qStat.isBlocked
-                                                      ? 'text-rose-400'
-                                                      : qStat.isWarning
-                                                        ? 'text-amber-400'
-                                                        : 'text-[var(--ink-dim)]'
-                                              }`}
-                                            >
-                                              {qStat.isUnlimited
-                                                ? 'Unlimited'
-                                                : qStat.isTestingBypass
-                                                  ? `Test ${qStat.testingRemaining}`
-                                                  : `${qStat.remaining}/${qStat.limit}`}
-                                            </span>
-                                          </div>
-                                          <div
-                                            className={`text-[10px] truncate ${
-                                              isSelectedV2
-                                                ? 'text-white/80'
-                                                : 'text-[var(--ink-dim)]'
-                                            }`}
-                                          >
-                                            {spec.desc}
-                                          </div>
-                                        </div>
-                                        {isSelectedV2 && (
-                                          <Check className="w-3.5 h-3.5 shrink-0" />
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                                <div className="px-2.5 pt-1.5 text-[10px] text-[var(--ink-dim)] flex items-center justify-between gap-2">
-                                  <span>
-                                    {isV2AuthorizedTester
-                                      ? 'Admin Unlimited · Zero daily limits'
-                                      : `Resets ${v2ResetInfo.label}`}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Firebase Cloud Memory & Auth Sync Row */}
-                              <div className="pt-1.5 border-t border-[var(--border)] px-2 pb-1 space-y-1.5">
-                                <div className="flex items-center justify-between gap-2 text-[11px]">
-                                  <span className="text-[var(--ink-dim)] truncate">
-                                    {firebaseUser
-                                      ? `Synced: ${firebaseUser.email || firebaseUser.displayName || 'Account'}`
-                                      : 'Firestore Sync: Sign in to sync devices'}
-                                  </span>
-                                  {firebaseUser ? (
-                                    <button
-                                      type="button"
-                                      data-testid="firebase-signout-btn"
-                                      onClick={() => void signOutFromFirebase()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--surface-2)] text-[var(--ink)] hover:text-rose-400 cursor-pointer shrink-0"
-                                    >
-                                      <LogOut className="w-3 h-3" />
-                                      <span>Sign out</span>
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      data-testid="firebase-signin-btn"
-                                      onClick={() =>
-                                        void signInWithFirebaseGoogle().catch((e) =>
-                                          showToast(
-                                            e instanceof Error
-                                              ? e.message
-                                              : 'Sign-in cancelled'
-                                          )
-                                        )
-                                      }
-                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--primary)] text-white font-medium cursor-pointer shrink-0"
-                                    >
-                                      <Cloud className="w-3 h-3" />
-                                      <span>Sync</span>
-                                    </button>
-                                  )}
-                                </div>
-
-                                {isV2AuthorizedTester && (
-                                  <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-[var(--border)]/60">
-                                    <span className="text-emerald-400 font-medium">
-                                      Admin Unlimited Active
-                                    </span>
-                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500 text-white">
-                                      Unlimited
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={toggleMic}
+                        className={`composer-icon ${isListening ? 'is-on' : ''}`}
+                        title={isListening ? 'Stop Listening' : 'Voice Input'}
+                      >
+                        <Mic className="w-4 h-4" />
+                      </button>
 
                       <button
                         type="button"
+                        data-testid="send-btn"
                         onClick={() => {
                           if (isGenerating) {
                             abortRef.current?.abort();
@@ -6175,16 +6038,321 @@ export default function App() {
                         title={
                           isGenerating ? 'Stop generation' : 'Send message'
                         }
+                        aria-label={isGenerating ? 'Stop generating' : 'Send message'}
                       >
                         {isGenerating ? (
                           <Square className="w-4 h-4 fill-current" />
                         ) : (
-                          <Send className="w-4 h-4" />
+                          <ArrowUp className="w-4 h-4 stroke-[2.4]" />
                         )}
                       </button>
                     </div>
                   </div>
                 </div>
+
+                {/* Screenshot 4 Bottom-Sheet "Select model" Modal */}
+                {bottomModelMenuOpen && (
+                  <div
+                    className="ref-sheet-backdrop"
+                    onClick={() => setBottomModelMenuOpen(false)}
+                  >
+                    <div
+                      data-testid="model-menu-popover"
+                      className="ref-sheet space-y-4"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="ref-sheet-head">
+                        <button
+                          type="button"
+                          onClick={() => setBottomModelMenuOpen(false)}
+                          className="ref-sheet-close"
+                          aria-label="Close model selector"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                        <div className="ref-sheet-title">Select model</div>
+                      </div>
+
+                      {/* Primary Model Group (V2 Special) */}
+                      <div className="ref-sheet-group">
+                        {[...V2_SPECIAL_MODELS]
+                          .sort((a, b) => {
+                            const order = { 'smfta-max': 0, 'smfta-v2-pro': 1, 'smfta-v5': 2 } as Record<string, number>;
+                            return (order[a.id] ?? 9) - (order[b.id] ?? 9);
+                          })
+                          .map((spec) => {
+                            const isSelectedV2 =
+                              activeIsBuiltin && activeModelName === spec.id;
+                            const qStat = getV2QuotaStatusForModel(spec.id);
+                            const tagText =
+                              spec.id === 'smfta-max'
+                                ? qStat.isUnlimited
+                                  ? 'Max'
+                                  : 'Pro or Max'
+                                : spec.id === 'smfta-v2-pro'
+                                  ? 'Pro'
+                                  : null;
+                            return (
+                              <button
+                                key={spec.id}
+                                type="button"
+                                data-testid={`select-model-${spec.id}`}
+                                onClick={() => {
+                                  handleSelectModel(spec.id);
+                                  setBottomModelMenuOpen(false);
+                                }}
+                                className="ref-sheet-row"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="ref-sheet-row-title truncate">
+                                      {spec.label}
+                                    </span>
+                                    {tagText && (
+                                      <span className="ref-sheet-tag">{tagText}</span>
+                                    )}
+                                  </div>
+                                  <div className="ref-sheet-row-desc truncate">
+                                    {spec.desc}
+                                  </div>
+                                </div>
+                                {isSelectedV2 ? (
+                                  <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                ) : (
+                                  <span className="text-[11px] text-[var(--ink-dim)] font-mono shrink-0">
+                                    {qStat.isUnlimited
+                                      ? '∞'
+                                      : qStat.isTestingBypass
+                                        ? qStat.testingRemaining
+                                        : `${qStat.remaining}/${qStat.limit}`}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+
+                      {/* Footnote Caption matching Screenshot 4 */}
+                      <div className="px-1 text-[13px] leading-snug text-[var(--ink-dim)]">
+                        {isV2AuthorizedTester
+                          ? 'Admin Unlimited active with zero daily limits. '
+                          : `Daily limits reset in ${v2ResetInfo.label}. `}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBottomModelMenuOpen(false);
+                            setSettingsTab('providers');
+                            setSettingsOpen(true);
+                          }}
+                          className="underline text-[var(--ink-muted)] hover:text-[var(--ink)] cursor-pointer"
+                        >
+                          Learn more
+                        </button>
+                      </div>
+
+                      {/* Effort / Processing Mode Row matching Screenshot 4 */}
+                      <div className="ref-sheet-group">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const order: AppSettings['mode'][] = ['fast', 'balanced', 'power'];
+                            const nextMode =
+                              order[(order.indexOf(settings.mode) + 1) % order.length] ||
+                              'balanced';
+                            setSettings((prev) => {
+                              const next = sanitizeSettings({ ...prev, mode: nextMode });
+                              if (activeIsBuiltin && !activeIsV2) {
+                                next.externalModel = builtinTierForModel(
+                                  null,
+                                  nextMode
+                                ).model;
+                              }
+                              return next;
+                            });
+                            if (activeIsBuiltin && !activeIsV2 && activeProfile) {
+                              const tierModel = builtinTierForModel(
+                                null,
+                                nextMode
+                              ).model;
+                              handleUpdateProfiles(
+                                savedProfiles.map((p) =>
+                                  p.id === activeProfile.id
+                                    ? { ...p, externalModel: tierModel }
+                                    : p
+                                )
+                              );
+                            }
+                          }}
+                          className="ref-sheet-row"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="ref-sheet-row-title">Effort</span>
+                            <span className="ref-sheet-tag">Recommended</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)]">
+                            <span>
+                              {settings.mode === 'fast'
+                                ? 'Low'
+                                : settings.mode === 'power'
+                                  ? 'High'
+                                  : 'Medium'}
+                            </span>
+                            <ChevronRight className="w-4 h-4" />
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* More Models (V1 Natural + Custom Providers + Firestore Sync) */}
+                      <div className="ref-sheet-group">
+                        <button
+                          type="button"
+                          onClick={() => setMoreModelsOpen((v) => !v)}
+                          className="ref-sheet-row"
+                        >
+                          <span className="ref-sheet-row-title">More models</span>
+                          <ChevronRight
+                            className={`w-4 h-4 text-[var(--ink-dim)] transition-transform ${
+                              moreModelsOpen ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
+
+                        {moreModelsOpen && (
+                          <div className="border-t border-[var(--border)] bg-[var(--surface)]/50">
+                            <div className="px-4 pt-2.5 pb-1 text-[11px] font-medium text-[var(--ink-dim)]">
+                              V1 – Natural
+                            </div>
+                            {BUILTIN_TIERS.map((tier) => {
+                              const isSelectedTier =
+                                activeIsBuiltin &&
+                                !activeIsV2 &&
+                                activeModelName === tier.model;
+                              return (
+                                <button
+                                  key={tier.model}
+                                  type="button"
+                                  data-testid={`select-model-${tier.model}`}
+                                  onClick={() => {
+                                    if (!activeIsBuiltin) {
+                                      const builtinProf =
+                                        savedProfiles.find((p) =>
+                                          isBuiltinProviderId(p.provider)
+                                        ) || DEFAULT_BUILTIN_PROFILE;
+                                      handleSelectProfile({
+                                        ...builtinProf,
+                                        externalModel: tier.model,
+                                      });
+                                    }
+                                    handleSelectModel(tier.model);
+                                    setBottomModelMenuOpen(false);
+                                  }}
+                                  className="ref-sheet-row"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="ref-sheet-row-title truncate">
+                                      {tier.label}
+                                    </div>
+                                    <div className="ref-sheet-row-desc truncate">
+                                      {tier.desc}
+                                    </div>
+                                  </div>
+                                  {isSelectedTier && (
+                                    <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                  )}
+                                </button>
+                              );
+                            })}
+
+                            {savedProfiles
+                              .filter(
+                                (p) =>
+                                  !isBuiltinProviderId(p.provider) &&
+                                  p.enabled !== false
+                              )
+                              .map((customProf) => {
+                                const vModels = getModelsForProfile(customProf);
+                                if (vModels.length === 0) return null;
+                                return (
+                                  <div key={customProf.id} className="border-t border-[var(--border)]">
+                                    <div className="px-4 pt-2.5 pb-1 text-[11px] font-medium text-[var(--ink-dim)] flex items-center justify-between">
+                                      <span className="truncate">{customProf.name}</span>
+                                      <span>
+                                        {customProf.verified || customProf.verificationStatus === 'verified'
+                                          ? 'Verified'
+                                          : 'Custom'}
+                                      </span>
+                                    </div>
+                                    {vModels.map((mId) => {
+                                      const isSelectedCustom =
+                                        !activeIsBuiltin &&
+                                        activeProfile?.id === customProf.id &&
+                                        activeModelName === mId;
+                                      return (
+                                        <button
+                                          key={`${customProf.id}-${mId}`}
+                                          type="button"
+                                          onClick={() => {
+                                            handleSelectProfile({
+                                              ...customProf,
+                                              externalModel: mId,
+                                            });
+                                            setBottomModelMenuOpen(false);
+                                          }}
+                                          className="ref-sheet-row"
+                                        >
+                                          <span className="text-[14px] font-mono truncate">
+                                            {mId}
+                                          </span>
+                                          {isSelectedCustom && (
+                                            <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })}
+
+                            <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between gap-2 text-xs">
+                              <span className="text-[var(--ink-dim)] truncate">
+                                {firebaseUser
+                                  ? `Synced: ${firebaseUser.email || firebaseUser.displayName || 'Account'}`
+                                  : 'Firestore Sync: Sign in to sync'}
+                              </span>
+                              {firebaseUser ? (
+                                <button
+                                  type="button"
+                                  data-testid="firebase-signout-btn"
+                                  onClick={() => void signOutFromFirebase()}
+                                  className="px-2.5 py-1 rounded-full bg-[var(--surface-3)] text-[var(--ink)] cursor-pointer shrink-0"
+                                >
+                                  Sign out
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  data-testid="firebase-signin-btn"
+                                  onClick={() =>
+                                    void signInWithFirebaseGoogle().catch((e) =>
+                                      showToast(
+                                        e instanceof Error
+                                          ? e.message
+                                          : 'Sign-in cancelled'
+                                      )
+                                    )
+                                  }
+                                  className="px-3 py-1 rounded-full bg-[var(--primary)] text-white font-medium cursor-pointer shrink-0"
+                                >
+                                  Sync
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               </section>
 

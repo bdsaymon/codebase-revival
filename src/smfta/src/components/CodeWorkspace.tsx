@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Maximize2,
   Minimize2,
+  MoreHorizontal,
   Play,
   RotateCw,
   Terminal,
@@ -272,7 +273,8 @@ export const CodeWorkspaceModal: React.FC<CodeWorkspaceModalProps> = ({
   const [active, setActive] = useState(0);
   const [nonce, setNonce] = useState(0);
   const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
-  const [full, setFull] = useState(false);
+  const [viewTab, setViewTab] = useState<'preview' | 'code'>(project.runnable ? 'preview' : 'code');
+  const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const blobUrl = useRef<string | null>(null);
   // Keep the latest onClose without re-arming the effect on every parent render.
@@ -321,93 +323,171 @@ export const CodeWorkspaceModal: React.FC<CodeWorkspaceModalProps> = ({
   };
 
   return (
-    <div className="codews-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`codews${full ? ' is-full' : ''}`}>
-        <header className="codews-head">
-          <div className="codews-head-main">
-            <span className="codews-badge">{project.languageLabel}</span>
-            <div className="codews-titles">
-              <strong>{project.title}</strong>
-              <span>
-                {project.files.length} file{project.files.length === 1 ? '' : 's'}
-                {project.runnable ? ' · live preview' : ' · download only'}
-              </span>
+    <div className="ref-preview-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="ref-preview-sheet" onClick={(e) => e.stopPropagation()}>
+        {/* Screenshot 3 crisp white top bar: × left, ••• actions right */}
+        <header className="ref-preview-sheet-head relative">
+          <button
+            type="button"
+            onClick={onClose}
+            className="ref-preview-icon-btn"
+            aria-label="Close preview"
+            title="Close (Esc)"
+          >
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="min-w-0 text-center px-3">
+            <div className="text-[14px] font-semibold text-[#1A1918] truncate">
+              {project.title}
             </div>
           </div>
-          <div className="codews-head-actions">
-            {project.runnable && (
-              <div className="codews-devices">
-                {(['mobile', 'tablet', 'desktop'] as const).map((d) => (
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="ref-preview-icon-btn"
+              aria-label="Preview options"
+              title="Preview options"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl bg-[#2C2B28] border border-white/10 shadow-2xl p-1.5 z-20 text-xs text-[#F5F4EE] space-y-0.5">
+                  {project.runnable && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewTab(viewTab === 'preview' ? 'code' : 'preview');
+                        setMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 flex items-center justify-between cursor-pointer"
+                    >
+                      <span>{viewTab === 'preview' ? 'View source code' : 'View live preview'}</span>
+                    </button>
+                  )}
                   <button
-                    key={d}
                     type="button"
-                    onClick={() => setDevice(d)}
-                    className={device === d ? 'is-on' : ''}
+                    onClick={() => {
+                      setNonce((n) => n + 1);
+                      setMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 flex items-center gap-2 cursor-pointer"
                   >
-                    {d === 'mobile' ? 'Mobile' : d === 'tablet' ? 'Tablet' : 'Desktop'}
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>Reload</span>
                   </button>
-                ))}
-              </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      try {
+                        await navigator.clipboard.writeText(file?.content || '');
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 1600);
+                        notify?.('Code copied');
+                      } catch {
+                        notify?.('কপি করা যায়নি');
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 flex items-center gap-2 cursor-pointer"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>Copy code</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      openTab();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 flex items-center gap-2 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open in new tab</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      try {
+                        downloadCodeProject(project);
+                        notify?.('.zip ডাউনলোড হচ্ছে');
+                      } catch {
+                        notify?.('ZIP তৈরি করা যায়নি');
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download .zip</span>
+                  </button>
+                </div>
+              </>
             )}
-            <button type="button" onClick={() => setNonce((n) => n + 1)} title="Reload preview">
-              <RotateCw className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              title="Copy the code"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(file?.content || '');
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1600);
-                  notify?.('Code copied');
-                } catch {
-                  notify?.('কপি করা যায়নি');
-                }
-              }}
-            >
-              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-            </button>
-            <button type="button" onClick={openTab} title="Open in a new tab">
-              <ExternalLink className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setFull((v) => !v)}
-              title={full ? 'Exit fullscreen' : 'Fullscreen'}
-              className="hidden sm:grid"
-            >
-              {full ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </button>
-            <button type="button" onClick={onClose} title="Close (Esc)">
-              <X className="w-4 h-4" />
-            </button>
           </div>
         </header>
 
-        <div className="codews-body">
-          <section className="codews-code">
-            <FileTabs files={project.files} active={active} onPick={setActive} />
-            <CodePane file={file} />
-          </section>
-          <section className="codews-preview">
-            {project.runnable && project.previewHtml ? (
-              <PreviewFrame html={project.previewHtml} device={device} nonce={nonce} />
-            ) : (
-              <div className="code-inline-hint">
-                <Terminal className="w-5 h-5" />
-                <p>{project.runHint}</p>
+        {/* Dark #22211F interactive workspace body */}
+        <div className="flex-1 min-h-0 flex flex-col bg-[#22211F] p-3 sm:p-4 gap-3 overflow-hidden">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-[16px] font-semibold text-[#F5F4EE]">
+                {project.title}
+              </div>
+              <div className="text-[12px] text-[#9E9B94]">
+                {project.files.length} file{project.files.length === 1 ? '' : 's'} · {project.languageLabel}
+              </div>
+            </div>
+            {project.runnable && (
+              <div className="flex items-center gap-1 bg-[#2C2B28] p-1 rounded-xl border border-white/10 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewTab('preview')}
+                  className={`px-3 py-1 rounded-lg cursor-pointer transition-colors ${
+                    viewTab === 'preview' ? 'bg-[#3D3C38] text-white font-medium' : 'text-[#9E9B94]'
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewTab('code')}
+                  className={`px-3 py-1 rounded-lg cursor-pointer transition-colors ${
+                    viewTab === 'code' ? 'bg-[#3D3C38] text-white font-medium' : 'text-[#9E9B94]'
+                  }`}
+                >
+                  Code
+                </button>
               </div>
             )}
-          </section>
-        </div>
+          </div>
 
-        <footer className="codews-foot">
-          <span className="codews-foot-note">{project.runHint}</span>
-          <div className="codews-foot-actions">
+          <div className="flex-1 min-h-0 rounded-2xl bg-[#2C2B28] border border-white/[0.08] overflow-hidden flex flex-col">
+            {viewTab === 'preview' && project.runnable && project.previewHtml ? (
+              <PreviewFrame html={project.previewHtml} device={device} nonce={nonce} compact />
+            ) : (
+              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <FileTabs files={project.files} active={active} onPick={setActive} />
+                <CodePane file={file} />
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-1 shrink-0">
             <button
               type="button"
-              className="codews-primary"
+              onClick={() => setDevice(device === 'mobile' ? 'desktop' : 'mobile')}
+              className="h-11 rounded-xl bg-[#2C2B28] hover:bg-[#363532] border border-white/[0.08] text-[#F5F4EE] text-sm font-medium cursor-pointer"
+            >
+              {device === 'mobile' ? 'Desktop view' : 'Mobile view'}
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 try {
                   downloadCodeProject(project);
@@ -416,15 +496,13 @@ export const CodeWorkspaceModal: React.FC<CodeWorkspaceModalProps> = ({
                   notify?.('ZIP তৈরি করা যায়নি');
                 }
               }}
+              className="h-11 rounded-xl bg-gradient-to-r from-[#585B9E] to-[#6E72B8] text-white text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer hover:opacity-95"
             >
-              <Download className="w-3.5 h-3.5" />
-              Download .zip
-            </button>
-            <button type="button" className="codews-ghost" onClick={onClose}>
-              বন্ধ করুন
+              <Download className="w-4 h-4" />
+              <span>Download .zip</span>
             </button>
           </div>
-        </footer>
+        </div>
       </div>
     </div>
   );

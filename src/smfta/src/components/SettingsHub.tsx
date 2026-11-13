@@ -1,23 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import {
+  AudioLines,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  CircleDollarSign,
+  CornerDownLeft,
   Cpu,
   Eye,
   EyeOff,
   Globe,
+  Info,
   Key,
   Layers,
+  LayoutGrid,
   Loader2,
   Moon,
   Plus,
   RefreshCw,
   Shield,
   Sliders,
+  SlidersVertical,
   Sparkles,
   Sun,
   Trash2,
+  UserCircle,
   X,
 } from 'lucide-react';
 import {
@@ -242,14 +250,14 @@ const ToggleRow: React.FC<{
         </div>
       ) : null}
     </div>
-    <Button variant="ghost"
+    <button
       type="button"
       role="switch"
       data-testid={testId}
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors ${
+      className={`relative inline-flex h-6 w-11 p-0 shrink-0 cursor-pointer items-center rounded-full border transition-colors ${
         checked
           ? 'bg-[var(--primary)] border-[var(--primary)]'
           : 'bg-[var(--surface-2)] border-[var(--border)]'
@@ -260,7 +268,7 @@ const ToggleRow: React.FC<{
           checked ? 'translate-x-5' : 'translate-x-1'
         }`}
       />
-    </Button>
+    </button>
   </div>
 );
 
@@ -278,15 +286,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSave,
   onUpdateMemory,
   onClearMemory,
+  onOpenWhatsNew,
+  connections,
+  onOpenNotebook,
   notify,
   onProviderTestResult,
-  onExportBackup, onImportBackup, onResetSettings,
+  onExportBackup,
+  onImportBackup,
+  onResetSettings,
 }) => {
   const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
+  const [mobileDetailOpen, setMobileDetailOpen] = useState<boolean>(() =>
+    Boolean(initialTab && initialTab !== 'general')
+  );
 
   useEffect(() => {
-    if (initialTab) setTab(normalizeTab(initialTab));
+    if (initialTab) {
+      setTab(normalizeTab(initialTab));
+      setMobileDetailOpen(initialTab !== 'general');
+    }
   }, [initialTab]);
 
   const [draft, setDraft] = useState<AppSettings>(() => sanitizeSettings(settings));
@@ -2052,86 +2071,368 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const currentMeta = SECTION_META[tab];
 
+  const enabledCapabilitiesCount = [
+    draft.autoMemory !== false,
+    draft.includeHistory !== false,
+    draft.markdownRender !== false,
+    draft.codeHighlight !== false,
+    draft.sendOnEnter,
+    draft.autoVoice,
+  ].filter(Boolean).length;
+
+  const connectedServicesCount = connections
+    ? Object.values(connections).filter((c) => Boolean(c && (c as { connected?: boolean }).connected)).length
+    : 0;
+
+  const openSection = (sec: SectionId) => {
+    setTab(sec);
+    setMobileDetailOpen(true);
+  };
+
+  const cycleColorMode = () => {
+    if (draft.themeMode === 'system') {
+      patch({ themeMode: 'dark', theme: 'dark' });
+    } else if (draft.theme === 'dark') {
+      patch({ themeMode: 'light', theme: 'light' });
+    } else {
+      patch({ themeMode: 'system' });
+    }
+  };
+
+  const cycleFontStyle = () => {
+    const order: Array<AppSettings['fontsize']> = ['normal', 'large', 'small'];
+    const idx = order.indexOf(draft.fontsize);
+    const next = order[(idx + 1) % order.length] || 'normal';
+    patch({ fontsize: next });
+  };
+
+  const renderGroupedOverview = () => (
+    <div className="space-y-2.5 pb-6">
+      {/* Top Account & Plan Pill Card */}
+      <div className="rounded-[18px] bg-[var(--surface)] border border-[var(--border)] px-4 py-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[14.5px] font-medium text-[var(--ink)] truncate">
+            {profileName || 'SAYMON HASAN'}
+          </div>
+          <div className="text-[12px] text-[var(--ink-dim)] truncate">
+            {activeProfile.name} · {activeProfile.externalModel || 'SMFTA Pro'}
+          </div>
+        </div>
+        <span className="ref-settings-plan-pill">
+          {activeProfile.provider === 'xrahat' ? 'Active' : 'Custom'}
+        </span>
+      </div>
+
+      {/* Engine / Providers Callout Card */}
+      <div className="rounded-[18px] bg-[var(--surface)] border border-[var(--border)] px-4 py-3.5">
+        <div className="text-[15px] font-semibold text-[var(--ink)]">
+          Need custom models or limits?
+        </div>
+        <div className="text-[13px] text-[var(--ink-muted)] mt-0.5 leading-snug">
+          Configure Mercury, Gemini, OpenAI, Anthropic, or custom API endpoints.
+        </div>
+        <div className="mt-2.5">
+          <button
+            type="button"
+            onClick={() => openSection('providers')}
+            className="ref-settings-cta-btn"
+          >
+            Manage Providers
+          </button>
+        </div>
+      </div>
+
+      {/* Group 1: Profile & Providers */}
+      <div className="ref-settings-group">
+        <button
+          type="button"
+          data-testid="settings-tab-general"
+          onClick={() => openSection('general')}
+          className={`ref-settings-row ${tab === 'general' ? 'md:bg-[var(--surface-hover)]' : ''}`}
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <UserCircle className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Profile</span>
+              <span className="block ref-settings-row-sub truncate">
+                {profileName || 'User'} · {(draft.appLanguage || 'bn') === 'bn' ? 'বাংলা' : 'English'}
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+        </button>
+
+        <button
+          type="button"
+          data-testid="settings-tab-providers"
+          onClick={() => openSection('providers')}
+          className={`ref-settings-row ${tab === 'providers' ? 'md:bg-[var(--surface-hover)]' : ''}`}
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <CircleDollarSign className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">AI Providers</span>
+              <span className="block ref-settings-row-sub truncate">
+                {activeProfile.name} ({savedProfilesCountText(localProfiles.length)})
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+        </button>
+      </div>
+
+      {/* Group 2: Capabilities, Connectors & Permissions */}
+      <div className="ref-settings-group">
+        <button
+          type="button"
+          data-testid="settings-tab-responses"
+          onClick={() => openSection('responses')}
+          className={`ref-settings-row ${tab === 'responses' ? 'md:bg-[var(--surface-hover)]' : ''}`}
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <SlidersVertical className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Capabilities</span>
+              <span className="block ref-settings-row-sub">
+                {enabledCapabilitiesCount} enabled
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            if (onOpenNotebook) {
+              onClose();
+              onOpenNotebook();
+            } else {
+              openSection('privacy');
+            }
+          }}
+          className="ref-settings-row"
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <LayoutGrid className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Connectors & Notes</span>
+              <span className="block ref-settings-row-sub">
+                {connectedServicesCount > 0 ? `${connectedServicesCount} connected` : 'Notebook & integrations'}
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+        </button>
+
+        <button
+          type="button"
+          data-testid="settings-tab-privacy"
+          onClick={() => openSection('privacy')}
+          className={`ref-settings-row ${tab === 'privacy' ? 'md:bg-[var(--surface-hover)]' : ''}`}
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <Shield className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Permissions & Memory</span>
+              <span className="block ref-settings-row-sub">
+                {memory.length} saved facts
+              </span>
+            </span>
+          </span>
+          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0 md:hidden" />
+        </button>
+      </div>
+
+      {/* Group 3: Color mode, Font style, Voice, Send on Enter */}
+      <div className="ref-settings-group">
+        <button
+          type="button"
+          onClick={cycleColorMode}
+          className="ref-settings-row"
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <Moon className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Color mode</span>
+              <span className="block ref-settings-row-sub">
+                {draft.themeMode === 'system'
+                  ? 'System'
+                  : draft.theme === 'dark'
+                  ? 'Dark'
+                  : 'Light'}
+              </span>
+            </span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={cycleFontStyle}
+          className="ref-settings-row"
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon font-semibold text-[15px]">
+              Aa
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Font style</span>
+              <span className="block ref-settings-row-sub">
+                {draft.fontsize === 'small'
+                  ? 'Compact'
+                  : draft.fontsize === 'large'
+                  ? 'Large'
+                  : 'Default'}
+              </span>
+            </span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => patch({ autoVoice: !draft.autoVoice })}
+          className="ref-settings-row"
+        >
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <AudioLines className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Voice</span>
+              <span className="block ref-settings-row-sub">
+                {draft.autoVoice ? 'Auto-speak replies' : 'Manual playback'}
+              </span>
+            </span>
+          </span>
+        </button>
+
+        <div className="ref-settings-row">
+          <span className="flex items-center gap-3.5 min-w-0">
+            <span className="ref-settings-row-icon">
+              <CornerDownLeft className="w-5 h-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block ref-settings-row-label">Send on Enter</span>
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.sendOnEnter}
+            aria-label="Send on Enter"
+            onClick={() => patch({ sendOnEnter: !draft.sendOnEnter })}
+            className={`ref-toggle ${draft.sendOnEnter ? 'is-on' : 'is-off'}`}
+          >
+            <span className="ref-toggle-knob" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const shellContent = (
     <div
-      className={`cs-shell settings-redesign ${isInline ? 'is-inline' : ''}`}
+      className={`ref-settings-shell settings-redesign ${isInline ? 'is-inline' : ''}`}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Left Navigation: Strictly 3 Clean Tabs */}
-      <aside className="cs-nav hidden sm:flex" aria-label="Settings sections">
-        <div className="cs-nav-head px-4 pt-4 pb-2 flex items-center justify-between">
-          <div className="cs-nav-title">Settings</div>
-        </div>
-
-        <nav className="cs-nav-list" data-testid="settings-nav-tabs">
-          {SECTION_ORDER.map((id) => {
-            const meta = SECTION_META[id];
-            const Icon = meta.icon;
-            const active = tab === id;
-            return (
-              <Button variant="ghost"
-                key={id}
-                type="button"
-                data-section={id}
-                data-testid={`settings-tab-${id}`}
-                onClick={() => setTab(id)}
-                className={`cs-nav-item ${active ? 'active' : ''}`}
-              >
-                <span className="cs-nav-icon">
-                  <Icon className="w-4 h-4" />
-                </span>
-                <span className="cs-nav-meta">
-                  <span className="cs-nav-label">{meta.label}</span>
-                  <span className="cs-nav-hint">{meta.hint}</span>
-                </span>
-              </Button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      {/* Main Content Area */}
-      <div className="cs-panel">
-        <header className="cs-panel-head justify-between">
-          <div className="min-w-0">
-            <h2>{currentMeta.label}</h2>
-            <p className="settings-active-model">{activeProfile.name} · {activeProfile.externalModel || "Auto"}</p>
-          </div>
-          {(
-            <Button variant="ghost"
+      {/* Top Bar: Back / Close Left, Serif "Settings" Centered, Info Icon Right */}
+      <header className="ref-settings-header border-b border-[var(--border)]">
+        <div className="flex items-center gap-1 min-w-[44px]">
+          {mobileDetailOpen ? (
+            <button
+              type="button"
+              onClick={() => setMobileDetailOpen(false)}
+              className="md:hidden w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
+              aria-label="Back to Settings"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
               type="button"
               onClick={onClose}
-              className="cs-close"
+              className="md:hidden w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
               aria-label="Close settings"
             >
               <X className="w-5 h-5" />
-            </Button>
+            </button>
           )}
-        </header>
-
-        {/* Mobile 3-Tab Pill Switcher for compact viewports */}
-        <div className="flex sm:hidden items-center gap-1.5 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface)] overflow-x-auto">
-          {SECTION_ORDER.map((id) => {
-            const meta = SECTION_META[id];
-            const active = tab === id;
-            return (
-              <Button variant="ghost"
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border transition-colors ${
-                  active
-                    ? 'border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]'
-                    : 'border-[var(--border)] bg-[var(--bg)] text-[var(--text-2)]'
-                }`}
-              >
-                {meta.label}
-              </Button>
-            );
-          })}
+          <button
+            type="button"
+            onClick={onClose}
+            className="hidden md:inline-flex w-9 h-9 rounded-full items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
+            aria-label="Close settings"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="cs-panel-body">{renderActiveSection()}</div>
+        <h1 className="ref-settings-title truncate">
+          {mobileDetailOpen ? (
+            <>
+              <span className="md:hidden">{currentMeta.label}</span>
+              <span className="hidden md:inline">Settings</span>
+            </>
+          ) : (
+            'Settings'
+          )}
+        </h1>
+
+        <div className="flex items-center justify-end min-w-[44px]">
+          <button
+            type="button"
+            onClick={onOpenWhatsNew}
+            className="w-9 h-9 rounded-full inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:bg-[var(--surface)] cursor-pointer"
+            aria-label="About and updates"
+            title="About & Updates"
+          >
+            <Info className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* Responsive Body: Mobile shows Screenshot 2 grouped overview OR drilled-down detail; Desktop shows 2-column split */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <aside
+          aria-label="Settings sections"
+          className={`${
+            mobileDetailOpen ? 'hidden md:block' : 'block'
+          } w-full md:w-[340px] shrink-0 overflow-y-auto px-4 py-4 md:border-r md:border-[var(--border)]`}
+        >
+          {renderGroupedOverview()}
+        </aside>
+
+        <main
+          className={`${
+            mobileDetailOpen ? 'flex' : 'hidden md:flex'
+          } flex-1 min-w-0 flex-col overflow-hidden bg-[var(--bg)]`}
+        >
+          <div className="hidden md:flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+            <div className="min-w-0">
+              <h2 className="text-[16px] font-semibold text-[var(--ink)]">
+                {currentMeta.label}
+              </h2>
+              <p className="text-xs text-[var(--ink-dim)] settings-active-model">
+                {activeProfile.name} · {activeProfile.externalModel || 'Auto'}
+              </p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 space-y-6">
+            {renderActiveSection()}
+          </div>
+        </main>
       </div>
     </div>
   );
@@ -2141,11 +2442,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--settings-overlay)] backdrop-blur-xs p-2 sm:p-4"
-      onClick={onClose}
-    >
-      <div className="cs-modal">{shellContent}</div>
+    <div className="ref-settings-backdrop" onClick={onClose}>
+      {shellContent}
     </div>
   );
 };
+
+function savedProfilesCountText(count: number): string {
+  return count === 1 ? '1 profile' : `${count} profiles`;
+}
