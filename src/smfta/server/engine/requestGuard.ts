@@ -228,7 +228,12 @@ export function sanitizeChatBody(
       }
     }
 
+    const isLastMessage = index === rawMessages.length - 1;
+    const isNonUserHistory = !isLastMessage && role !== 'user';
     if (!text.trim() && imgs.length === 0) {
+      if (isNonUserHistory) {
+        continue;
+      }
       return reject(
         422,
         'BAD_REQUEST',
@@ -237,6 +242,14 @@ export function sanitizeChatBody(
     }
 
     messages.push({ role, text, imgs });
+  }
+
+  if (messages.length === 0) {
+    return reject(
+      422,
+      'BAD_REQUEST',
+      'messages array must contain at least one valid message.'
+    );
   }
 
   return { ok: true, messages, totalChars };

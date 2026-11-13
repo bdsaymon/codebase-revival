@@ -16,13 +16,15 @@ export interface V2ModelSpec {
   badge: string;
   desc: string;
   defaultDailyLimit: number;
-  /** Server-side @google/genai model alias. */
+  /** Direct server-side @google/genai lightweight model ID. */
   serverGeminiModel: string;
-  /** Client-side Firebase AI Logic (firebase/ai) model ID. */
+  /** Direct client-side Firebase AI Logic (firebase/ai) lightweight model ID. */
   firebaseAiModel: string;
-  thinkingLevel: 'LOW' | 'HIGH' | 'XHIGH';
+  temperature: number;
+  thinkingLevel: 'MINIMAL' | 'LOW' | 'HIGH';
   maxOutputTokens: number;
   contextWindow: number;
+  useSearchGrounding: boolean;
   capabilities: string[];
   systemDirective: string;
 }
@@ -31,61 +33,68 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
   {
     id: 'smfta-v5',
     label: 'SMFTA V5',
-    badge: 'Fast · Everyday',
-    desc: 'Prioritizes speed, low latency, and everyday tasks',
+    badge: 'Fast · Everyday · Voice',
+    desc: 'Fast everyday Q&A, smart chat & bilingual voice',
     defaultDailyLimit: 100,
-    serverGeminiModel: 'gemini-4-hydrogen',
+    serverGeminiModel: 'gemini-3.1-flash-lite',
     firebaseAiModel: 'gemini-2.5-flash-lite',
-    thinkingLevel: 'LOW',
-    maxOutputTokens: 2048,
+    temperature: 0.7,
+    thinkingLevel: 'MINIMAL',
+    maxOutputTokens: 1024,
     contextWindow: 256_000,
+    useSearchGrounding: false,
     capabilities: [
-      'High-Speed Everyday Tasks',
-      'Real-Time Streaming',
+      'Fast Everyday Responses',
+      'Bilingual Voice Interaction',
       'Firestore Memory Sync',
+      'Real-Time Streaming',
     ],
     systemDirective:
-      'You are operating as SMFTA V5 (V2 Special Fast Engine). Prioritize speed, crisp clarity, and immediate practical answers for everyday tasks. Keep explanations concise and action-oriented unless asked for length.',
+      'You are operating as SMFTA V5 (V2 Special Fast Engine). Prioritize fast, clear, natural answers for everyday questions and bilingual voice conversations. Keep responses crisp, accurate, and conversational unless more detail is requested.',
   },
   {
     id: 'smfta-v2-pro',
     label: 'SMFTA Pro',
-    badge: 'Reasoning · Complex',
-    desc: 'Handles advanced reasoning, coding, and complex tasks',
+    badge: 'Coding · Structured',
+    desc: 'Coding, architecture & structured problem-solving',
     defaultDailyLimit: 40,
-    serverGeminiModel: 'gemini-4-hydrogen',
-    firebaseAiModel: 'gemini-2.5-flash',
-    thinkingLevel: 'HIGH',
-    maxOutputTokens: 4096,
+    serverGeminiModel: 'gemini-3.1-flash-lite',
+    firebaseAiModel: 'gemini-2.5-flash-lite',
+    temperature: 0.4,
+    thinkingLevel: 'LOW',
+    maxOutputTokens: 2048,
     contextWindow: 512_000,
+    useSearchGrounding: false,
     capabilities: [
-      'Advanced Multi-Step Reasoning',
-      'Complex Coding & Architecture',
+      'Programming & Architecture',
+      'Structured Technical Output',
+      'Problem Solving',
       'Firestore Memory Sync',
-      'Real-Time Streaming',
     ],
     systemDirective:
-      'You are operating as SMFTA Pro (V2 Special Reasoning Engine). Handle advanced reasoning, structured problem-solving, and complex engineering tasks with rigorous accuracy, clear trade-offs, and complete working code.',
+      'You are operating as SMFTA Pro (V2 Special Technical Engine). Focus on programming accuracy, structured step-by-step explanations, edge-case awareness, and clean production-ready code with clear reasoning.',
   },
   {
     id: 'smfta-max',
     label: 'SMFTA Max',
-    badge: 'Deep Analysis · Max',
-    desc: 'Prioritizes deeper analysis and demanding multi-step tasks',
+    badge: 'Deep Analysis · Search',
+    desc: 'Deep multi-step analysis & search-grounded answers',
     defaultDailyLimit: 15,
     serverGeminiModel: 'gemini-4-hydrogen',
-    firebaseAiModel: 'gemini-2.5-pro',
-    thinkingLevel: 'XHIGH',
-    maxOutputTokens: 8192,
+    firebaseAiModel: 'gemini-2.5-flash',
+    temperature: 0.2,
+    thinkingLevel: 'HIGH',
+    maxOutputTokens: 4096,
     contextWindow: 1_000_000,
+    useSearchGrounding: true,
     capabilities: [
-      'Deepest Analytical Synthesis',
-      'Demanding Research & Verification',
+      'Deep Multi-Step Analysis',
+      'Search-Grounded Answers',
+      'Complex Task Decomposition',
       'Firestore Memory Sync',
-      'Real-Time Streaming',
     ],
     systemDirective:
-      'You are operating as SMFTA Max (V2 Special Deep-Analysis Engine). Prioritize exhaustive analysis, edge-case verification, first-principles reasoning, and comprehensive depth for the most demanding tasks.',
+      'You are operating as SMFTA Max (V2 Special Deep-Analysis Engine). Prioritize thorough analytical verification, multi-factor synthesis, grounded factual accuracy, and well-structured depth for demanding tasks.',
   },
 ];
 
@@ -243,6 +252,7 @@ export interface V2ModelQuotaStatus {
   isWarning: boolean;
   isBlocked: boolean;
   isTestingBypass: boolean;
+  isUnlimited?: boolean;
   testingUsed: number;
   testingAllowance: number;
   testingRemaining: number;
@@ -270,21 +280,30 @@ export function evaluateV2ModelQuota(params: {
   const dateRiyadh = getRiyadhDateKey(params.nowMs);
   const resetInfo = getNextRiyadhResetInfo(params.nowMs);
 
-  const isTestingBypass = Boolean(
-    params.isAuthorizedTester && cleanCfg.testingBypassEnabled
-  );
-  const testingAllowance = cleanCfg.testingAllowance;
-  const testingRemaining = Math.max(0, testingAllowance - testingUsed);
+  const isUnlimitedAdmin = Boolean(params.isAuthorizedTester);
+  const isTestingBypass =
+    isUnlimitedAdmin ||
+    Boolean(params.isAuthorizedTester && cleanCfg.testingBypassEnabled);
+  const testingAllowance = isUnlimitedAdmin ? 0 : cleanCfg.testingAllowance;
+  const testingRemaining = isUnlimitedAdmin
+    ? 999_999
+    : Math.max(0, testingAllowance - testingUsed);
 
-  const remaining = Math.max(0, limit - used);
-  const percentUsed =
-    limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 100;
+  const remaining = isUnlimitedAdmin ? 999_999 : Math.max(0, limit - used);
+  const percentUsed = isUnlimitedAdmin
+    ? 0
+    : limit > 0
+      ? Math.min(100, Math.round((used / limit) * 100))
+      : 100;
   const warningThreshold = Math.ceil(limit * V2_WARNING_THRESHOLD_RATIO);
 
-  const isWarning = !isTestingBypass && used >= warningThreshold && used < limit;
-  const isBlocked = isTestingBypass
-    ? testingAllowance > 0 && testingUsed >= testingAllowance
-    : used >= limit;
+  const isWarning =
+    !isUnlimitedAdmin && !isTestingBypass && used >= warningThreshold && used < limit;
+  const isBlocked = isUnlimitedAdmin
+    ? false
+    : isTestingBypass
+      ? testingAllowance > 0 && testingUsed >= testingAllowance
+      : used >= limit;
 
   let warningMessage: string | null = null;
   if (isWarning) {
@@ -298,9 +317,11 @@ export function evaluateV2ModelQuota(params: {
       : `⛔ Daily limit reached for ${spec.label} (${used}/${limit} requests used today). Quota resets at midnight Saudi Arabia time in ${resetInfo.label}.`;
   }
 
-  const statusText = isTestingBypass
-    ? `Testing Mode · ${testingRemaining}/${testingAllowance} test reqs left (Normal quota ${used}/${limit} untouched)`
-    : `${remaining}/${limit} left today`;
+  const statusText = isUnlimitedAdmin
+    ? 'Admin · Unlimited (Zero daily limit)'
+    : isTestingBypass
+      ? `Testing Mode · ${testingRemaining}/${testingAllowance} test reqs left`
+      : `${remaining}/${limit} left today`;
 
   return {
     modelId: params.modelId,
@@ -314,6 +335,7 @@ export function evaluateV2ModelQuota(params: {
     isWarning,
     isBlocked,
     isTestingBypass,
+    isUnlimited: isUnlimitedAdmin,
     testingUsed,
     testingAllowance,
     testingRemaining,

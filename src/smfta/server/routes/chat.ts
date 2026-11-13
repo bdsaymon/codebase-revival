@@ -38,6 +38,19 @@ import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
 import { mergeContinuationText } from '../../src/utils/streamGuard';
 import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
+import {
+  isV2ModelId,
+  getV2ModelSpec,
+  V2ModelId,
+} from '../../src/utils/v2UsageLimits';
+import {
+  checkAndConsumeServerV2Quota,
+  getAllV2ModelStatusesForUser,
+  isServerAuthorizedTester,
+  setServerV2UsageCountForTesting,
+  streamV2FirebaseModel,
+  updateServerV2QuotaConfig,
+} from '../v2FirebaseAi';
 
 export const chatRouter = Router();
 
@@ -725,10 +738,18 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     projectContext = '',
     supportsStreaming = true,
     contextWindow,
+    firebaseUid = '',
+    firebaseUserEmail = '',
+    firebaseEmailVerified = false,
+    v2TestingBypass = false,
+    v2QuotaConfig,
   } = req.body || {};
 
   // P0-01 & P0-03: Derive isolated user scope from authenticated server identity
   const scopedUserId = String(req.userId || sessionId || 'default').slice(0, 64);
+  const v2ScopedUserId = String(
+    firebaseUid || req.userId || sessionId || 'default-user'
+  ).slice(0, 128);
 
   if (
     typeof trainingData === 'string' ||
@@ -820,6 +841,151 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     requestedProvider: effectiveProvider,
     requestedModel: activeCustomModelName || 'default',
   });
+
+  // ============================================================================
+  // INDEPENDENT V2 – SPECIAL (FIREBASE AI SYSTEM) BRANCH
+  // Strictly isolated from V1 – Natural. Never routes to or falls back to V1.
+  // ============================================================================
+  if (isV2ModelId(activeCustomModelName)) {
+    const v2ModelId = activeCustomModelName as V2ModelId;
+    const v2Spec = getV2ModelSpec(v2ModelId);
+    const v2AuthorizedTester = isServerAuthorizedTester(
+      typeof firebaseUserEmail === 'string' ? firebaseUserEmail : undefined,
+      v2ScopedUserId,
+      Boolean(firebaseEmailVerified)
+    );
+    const effectiveV2Config = {
+      ...(v2QuotaConfig && typeof v2QuotaConfig === 'object' ? v2QuotaConfig : {}),
+      testingBypassEnabled: Boolean(v2TestingBypass && v2AuthorizedTester),
+    };
+
+    const memList = Array.isArray(memory)
+      ? memory
+          .map((item: unknown) => String(item || '').trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
+
+    const quotaCheck = checkAndConsumeServerV2Quota({
+      userId: v2ScopedUserId,
+      userEmail:
+        typeof firebaseUserEmail === 'string' ? firebaseUserEmail : undefined,
+      emailVerified: Boolean(firebaseEmailVerified),
+      modelId: v2ModelId,
+      configOverride: effectiveV2Config,
+    });
+
+    const allQuotaSnapshot = getAllV2ModelStatusesForUser({
+      userId: v2ScopedUserId,
+      userEmail:
+        typeof firebaseUserEmail === 'string' ? firebaseUserEmail : undefined,
+      emailVerified: Boolean(firebaseEmailVerified),
+      configOverride: effectiveV2Config,
+    });
+
+    emitEvent({
+      type: 'v2_quota',
+      status: quotaCheck.status,
+      snapshot: allQuotaSnapshot,
+    });
+
+    if (!quotaCheck.allowed) {
+      const blockedMsg =
+        quotaCheck.status.blockedMessage ||
+        `Daily usage limit reached for ${v2Spec.label}.`;
+      emitEvent({
+        type: 'error',
+        ok: false,
+        code: 'V2_DAILY_LIMIT_REACHED',
+        httpStatus: 429,
+        retryable: false,
+        requestId,
+        message: blockedMsg,
+        text: blockedMsg,
+        delta: blockedMsg,
+      });
+      finishStream();
+      return;
+    }
+
+    const v2SystemInstruction = buildSystemInstruction({
+      mode: mode as 'fast' | 'balanced' | 'power',
+      style: style as 'concise' | 'detailed',
+      replyLang: replyLang as 'auto' | 'bn' | 'en',
+      workPersona,
+      creativity,
+      customInst,
+      responseTone,
+      codingPrefs,
+      memory: memList,
+      activeWidgets,
+      userName,
+      chatHistorySummary: effectiveHistorySummary,
+      projectContext:
+        typeof projectContext === 'string' ? projectContext.slice(0, 60_000) : '',
+    });
+
+    const v2StreamRes = await streamV2FirebaseModel({
+      modelId: v2ModelId,
+      systemInstruction: v2SystemInstruction,
+      history:
+        normalizedHistory.length > 0
+          ? normalizedHistory
+          : [
+              {
+                role: 'user',
+                content: lastUserText || 'Hello',
+                imgs: lastUserImgs,
+              },
+            ],
+      signal: upstreamAbortController.signal,
+      emitDelta,
+    });
+
+    if (!v2StreamRes.ok && !clientClosed) {
+      const errText =
+        v2StreamRes.error ||
+        `${v2Spec.label} failed to complete your request.`;
+      emitEvent({
+        type: 'error',
+        ok: false,
+        code: v2StreamRes.errorCode || 'V2_AI_UNAVAILABLE',
+        httpStatus: v2StreamRes.httpStatus,
+        retryable: false,
+        requestId,
+        message: errText,
+        text: errText,
+        delta: errText,
+      });
+      finishStream();
+      return;
+    }
+
+    if (v2StreamRes.sources && v2StreamRes.sources.length > 0) {
+      emitEvent({
+        type: 'sources',
+        sources: v2StreamRes.sources,
+      });
+    }
+
+    finishStream({
+      type: 'done',
+      ok: true,
+      requestId,
+      requestedProvider: 'firebase_v2',
+      requestedModel: v2ModelId,
+      providerUsed: 'firebase_v2',
+      modelUsed: v2ModelId,
+      sources: v2StreamRes.sources,
+      attemptCount: 1,
+      ttftMs:
+        firstTokenPerf !== null
+          ? Math.max(1, Math.round(firstTokenPerf - streamStartPerf))
+          : undefined,
+      latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+    });
+    return;
+  }
 
   // 0. Identity / creator / privacy interception (only for built-in default engine)
   if (lastUserImgs.length === 0 && !isCustomProviderActive) {
@@ -1590,4 +1756,104 @@ chatRouter.post('/battle', async (req: Request, res: Response) => {
     engineA,
     engineB,
   });
+});
+
+// ============================================================================
+// 3. V2 – SPECIAL (FIREBASE AI) QUOTA & TESTING ENDPOINTS
+// ============================================================================
+chatRouter.get('/v2/quota', (req: Request, res: Response) => {
+  const userId = String(
+    req.query?.userId || req.userId || 'default-user'
+  ).slice(0, 128);
+  const userEmail = String(req.query?.userEmail || '').slice(0, 128);
+  const emailVerified = req.query?.emailVerified === 'true';
+
+  const snapshot = getAllV2ModelStatusesForUser({
+    userId,
+    userEmail: userEmail || undefined,
+    emailVerified,
+  });
+
+  return res.json({
+    ok: true,
+    ...snapshot,
+  });
+});
+
+chatRouter.post('/v2/quota/config', (req: Request, res: Response) => {
+  const {
+    userId = 'default-user',
+    userEmail = '',
+    emailVerified = false,
+    v5Limit,
+    proLimit,
+    maxLimit,
+    testingAllowance,
+    testingBypassEnabled,
+  } = req.body || {};
+
+  const authorized = isServerAuthorizedTester(
+    typeof userEmail === 'string' ? userEmail : undefined,
+    typeof userId === 'string' ? userId : undefined,
+    Boolean(emailVerified)
+  );
+  if (!authorized) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Only authorized admin/testing accounts can update V2 quota config.',
+    });
+  }
+
+  const updated = updateServerV2QuotaConfig(String(userId), {
+    v5Limit,
+    proLimit,
+    maxLimit,
+    testingAllowance,
+    testingBypassEnabled,
+  });
+  const snapshot = getAllV2ModelStatusesForUser({
+    userId: String(userId),
+    userEmail: typeof userEmail === 'string' ? userEmail : undefined,
+    emailVerified: Boolean(emailVerified),
+    configOverride: updated,
+  });
+  return res.json({ ok: true, ...snapshot });
+});
+
+chatRouter.post('/v2/quota/simulate', (req: Request, res: Response) => {
+  const {
+    userId = 'default-user',
+    userEmail = '',
+    emailVerified = false,
+    modelId = 'smfta-v5',
+    usedCount = 0,
+    testingUsedCount,
+  } = req.body || {};
+
+  const authorized = isServerAuthorizedTester(
+    typeof userEmail === 'string' ? userEmail : undefined,
+    typeof userId === 'string' ? userId : undefined,
+    Boolean(emailVerified)
+  );
+  if (!authorized || !isV2ModelId(modelId)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Unauthorized or invalid V2 modelId for simulation.',
+    });
+  }
+
+  const status = setServerV2UsageCountForTesting({
+    userId: String(userId),
+    userEmail: typeof userEmail === 'string' ? userEmail : undefined,
+    modelId,
+    usedCount: Number(usedCount) || 0,
+    testingUsedCount:
+      typeof testingUsedCount === 'number' ? testingUsedCount : undefined,
+  });
+  const snapshot = getAllV2ModelStatusesForUser({
+    userId: String(userId),
+    userEmail: typeof userEmail === 'string' ? userEmail : undefined,
+    emailVerified: Boolean(emailVerified),
+  });
+  return res.json({ ok: true, status, ...snapshot });
 });

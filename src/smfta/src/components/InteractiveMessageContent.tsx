@@ -5,24 +5,15 @@ import {
   Check,
   X,
   Copy,
-  Play,
-  Terminal,
-  Download,
   Wand2,
   Edit3,
   RotateCcw,
   Lightbulb,
   ArrowRight,
-  Loader2,
   ChevronDown,
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
 import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
-import {
-  buildPreviewDocument,
-  hasPreviewableCode,
-} from '../utils/livePreview';
-import { InlineCodePreview } from './CodeWorkspace';
 
 interface InteractiveMessageContentProps {
   messageId: string;
@@ -598,52 +589,12 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
     ].includes(l);
   };
 
-  const getFriendlyWebFileLabel = (lang: string, index: number): { filename: string; badge: string } => {
-    const l = lang.toLowerCase().trim();
-    if (l === 'html' || l === 'htm' || l === 'xml') {
-      return { filename: index === 0 ? 'index.html' : `page-${index + 1}.html`, badge: 'HTML Page Layout' };
-    }
-    if (l === 'css' || l === 'scss' || l === 'less') {
-      return { filename: index === 0 ? 'styles.css' : `styles-${index + 1}.css`, badge: 'Stylesheet' };
-    }
-    if (l === 'tsx' || l === 'jsx' || l === 'react') {
-      return { filename: index === 0 ? 'src/App.tsx' : `src/Component${index + 1}.tsx`, badge: 'React Component' };
-    }
-    if (l === 'ts' || l === 'typescript') {
-      return { filename: index === 0 ? 'src/main.ts' : `src/module-${index + 1}.ts`, badge: 'TypeScript Module' };
-    }
-    if (l === 'js' || l === 'javascript' || l === 'mjs') {
-      return { filename: index === 0 ? 'app.js' : `module-${index + 1}.js`, badge: 'Interactive Script' };
-    }
-    if (l === 'svg') {
-      return { filename: `graphic-${index + 1}.svg`, badge: 'Vector Graphic' };
-    }
-    return { filename: `file-${index + 1}.${CODE_EXTS[l] || 'txt'}`, badge: l.toUpperCase() };
-  };
-
   // v18.11 — markdown off: keep the raw text as one plain block (code fences
   // are displayed literally, exactly as the model wrote them).
   const blocks: ParsedBlock[] =
     renderMarkdown === false
       ? [{ type: 'text', content: cleanResponse }]
       : parseBlocks(cleanResponse);
-
-  // Everything the Live Preview needs, computed once per render.
-  const codeBlocks = blocks
-    .filter((b) => b.type === 'code')
-    .map((b, i) => ({ lang: b.lang || 'code', content: b.content, index: i }));
-  const livePreview =
-    !isStreaming && hasPreviewableCode(codeBlocks)
-      ? buildPreviewDocument(codeBlocks, { title: 'AI Live Demo' })
-      : null;
-
-  // v18.8.0 — every code answer becomes a workspace: the code gets named files,
-  // and (when the language can run in a browser) the page starts on the side by
-  // itself. The raw per-block cards are replaced so nothing is shown twice.
-  const useWorkspace =
-    !isStreaming &&
-    codeBlocks.some((b) => b.content.trim().length > 0) &&
-    Boolean(onOpenCodeWorkspace);
 
   const handleOpenInlineEditor = (idx: number, blockContent: string) => {
     if (isStreaming) return;
@@ -772,6 +723,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
 
   return (
     <div className="msg-prose space-y-1.5 text-[var(--text)]">
+
       {/* Modern Collapsible "Thinking" UI with Animated Aurora Gradient Glow */}
       {(Boolean(thinkingText) || isThinkingActive) && (
         <div
@@ -883,196 +835,82 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
         </div>
       )}
 
-      {/* Render Interactive Blocks (v19.0.0: Web source code hidden by default; Preview-first experience) */}
-      {(() => {
-        let codeBlockCounter = -1;
-        return blocks.map((block, idx) => {
-          if (block.type === 'code') {
-            codeBlockCounter += 1;
-            const currentCodeIdx = codeBlockCounter;
-            const lang = block.lang || 'code';
-            const lineCount = Math.max(1, block.content.split('\n').length);
-            const isWebCode = isWebCodeLang(lang);
-            const isCodeVisible = isWebCode
-              ? Boolean(expandedCodeBlocks[idx])
-              : expandedCodeBlocks[idx] !== false;
-            const fileMeta = getFriendlyWebFileLabel(lang, currentCodeIdx);
+      {/* Clean standard message blocks & simple code boxes */}
+      {blocks.map((block, idx) => {
+        if (block.type === 'code') {
+          const lang = (block.lang || 'code').trim();
 
-            // v18.11 — Code Syntax Highlight off: plain, unadorned block with workspace action.
-            if (highlightCode === false) {
-              return (
-                <div key={idx} className="my-2">
-                  <div className="flex items-center justify-between text-xs text-[var(--text-3)] mb-1">
-                    <span className="font-mono-num uppercase">{fileMeta.filename} ({lang})</span>
-                    <div className="flex items-center gap-2">
-                      {isWebCode && (
-                        <button
-                          type="button"
-                          data-testid="chat-toggle-code-view-btn"
-                          onClick={() =>
-                            setExpandedCodeBlocks((prev) => ({
-                              ...prev,
-                              [idx]: !prev[idx],
-                            }))
-                          }
-                          className="underline cursor-pointer"
-                        >
-                          {isCodeVisible ? 'Hide Code' : 'Code View'}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleCopyCode(block.content, idx)}
-                        className="underline cursor-pointer"
-                      >
-                        {copiedCodeIdx === idx ? 'Copied' : 'Copy Code'}
-                      </button>
-                      {onOpenCodeWorkspace && (
-                        <button
-                          type="button"
-                          data-testid="open-in-code-workspace-btn"
-                          onClick={() =>
-                            onOpenCodeWorkspace(codeBlocks, currentCodeIdx, messageId)
-                          }
-                          className="underline font-semibold text-[var(--primary)] cursor-pointer"
-                        >
-                          Open Live Preview
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {isCodeVisible && (
-                    <pre className="px-3 py-2 rounded-lg overflow-x-auto whitespace-pre-wrap font-mono-num text-[12px] leading-relaxed border border-[var(--border)]">
-                      <code>{block.content}</code>
-                    </pre>
-                  )}
-                </div>
-              );
-            }
-
+          if (highlightCode === false) {
             return (
-              <div
-                key={idx}
-                className="chat-code-block my-3 rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-slate-100"
-                data-testid="chat-code-block"
-                data-code-lang={lang}
-                data-code-hidden={!isCodeVisible ? 'true' : 'false'}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
-                    <span className="font-mono-num text-slate-100 font-semibold truncate">
-                      {isWebCode ? fileMeta.filename : lang}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10.5px] text-slate-300 font-medium">
-                      {fileMeta.badge}
-                    </span>
-                    <span className="text-[11px] text-slate-400">
-                      · {lineCount} {lineCount === 1 ? 'line' : 'lines'}
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {onOpenCodeWorkspace && (
-                      <button
-                        type="button"
-                        data-testid="open-in-code-workspace-btn"
-                        onClick={() =>
-                          onOpenCodeWorkspace(codeBlocks, currentCodeIdx, messageId)
-                        }
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-[var(--primary)] text-white hover:opacity-90 transition-opacity cursor-pointer whitespace-nowrap font-semibold shadow-xs"
-                        title="Open in Code Workspace"
-                      >
-                        <Play className="w-3 h-3" />
-                        <span>Open in Code Workspace</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      data-testid="chat-toggle-code-view-btn"
-                      onClick={() =>
-                        setExpandedCodeBlocks((prev) => ({
-                          ...prev,
-                          [idx]: !isCodeVisible,
-                        }))
-                      }
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
-                      title="Developer Option: Toggle Raw Source Code View"
-                    >
-                      <Terminal className="w-3 h-3" />
-                      <span>{isCodeVisible ? 'Hide Code' : 'Code View'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadCode(block.content, lang)}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer"
-                      title="Download file"
-                      aria-label={`Download ${lang} code`}
-                    >
-                      <Download className="w-3 h-3" />
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="copy-code-btn"
-                      onClick={() => handleCopyCode(block.content, idx)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
-                    >
-                      {copiedCodeIdx === idx ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" /> Copied
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" /> Copy Code
-                        </>
-                      )}
-                    </button>
-                  </div>
+              <div key={idx} className="my-2">
+                <div className="flex items-center justify-between text-xs text-[var(--text-3)] mb-1">
+                  <span className="font-mono-num uppercase">{lang}</span>
+                  <button
+                    type="button"
+                    data-testid="copy-code-btn"
+                    onClick={() => handleCopyCode(block.content, idx)}
+                    className="underline cursor-pointer"
+                  >
+                    {copiedCodeIdx === idx ? 'Copied' : 'Copy'}
+                  </button>
                 </div>
-                {isCodeVisible ? (
-                  <pre
-                    className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-slate-100"
-                    data-testid="chat-code-source-pre"
-                  >
-                    <code>{block.content}</code>
-                  </pre>
-                ) : (
-                  <div
-                    className="px-3.5 py-2.5 text-xs text-slate-300 flex items-center justify-between gap-2 bg-slate-900/50"
-                    data-testid="chat-code-hidden-notice"
-                  >
-                    <span>
-                      ✓ Background project file ready ({fileMeta.filename}) · Source code hidden by default
-                    </span>
-                    {onOpenCodeWorkspace && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onOpenCodeWorkspace(codeBlocks, currentCodeIdx, messageId)
-                        }
-                        className="text-indigo-300 hover:text-indigo-200 font-semibold underline cursor-pointer shrink-0"
-                      >
-                        Launch Preview →
-                      </button>
-                    )}
-                  </div>
-                )}
+                <pre className="px-3 py-2 rounded-lg overflow-x-auto whitespace-pre-wrap font-mono-num text-[12px] leading-relaxed border border-[var(--border)]">
+                  <code>{block.content}</code>
+                </pre>
               </div>
             );
           }
 
           return (
-            <div key={idx} className="py-0.5">
-              {renderMarkdown === false ? (
-                <div className="whitespace-pre-wrap leading-relaxed">
-                  {block.content}
-                </div>
-              ) : (
-                renderParagraphContent(block.content)
-              )}
+            <div
+              key={idx}
+              className="chat-code-block my-3 rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-slate-100"
+              data-testid="chat-code-block"
+              data-code-lang={lang}
+            >
+              <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs">
+                <span className="font-mono-num text-slate-300 font-medium truncate">
+                  {lang}
+                </span>
+                <button
+                  type="button"
+                  data-testid="copy-code-btn"
+                  onClick={() => handleCopyCode(block.content, idx)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {copiedCodeIdx === idx ? (
+                    <>
+                      <Check className="w-3 h-3 text-emerald-400" /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Copy
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre
+                className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-slate-100"
+                data-testid="chat-code-source-pre"
+              >
+                <code>{block.content}</code>
+              </pre>
             </div>
           );
-        });
-      })()}
+        }
+
+        return (
+          <div key={idx} className="py-0.5">
+            {renderMarkdown === false ? (
+              <div className="whitespace-pre-wrap leading-relaxed">
+                {block.content}
+              </div>
+            ) : (
+              renderParagraphContent(block.content)
+            )}
+          </div>
+        );
+      })}
 
       {isStreaming && (
         <span className="inline-block w-2 h-4 bg-[var(--primary)] rounded-sm animate-pulse ml-1 align-middle" />

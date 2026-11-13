@@ -23,7 +23,7 @@
     },
     "UserProfileDoc": {
       "title": "UserProfileDoc",
-      "description": "User workspace profile and testing configuration without PII.",
+      "description": "User workspace profile without PII.",
       "type": "object",
       "properties": {
         "userId": {
@@ -111,6 +111,103 @@
         "updatedAt"
       ]
     },
+    "SessionDoc": {
+      "title": "SessionDoc",
+      "description": "Normalized session parent document holding conversation metadata for message subcollections.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "systemVersion": {
+          "type": "string",
+          "enum": ["v1", "v2"]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "sessionId",
+        "title",
+        "systemVersion",
+        "modelId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SessionMessageDoc": {
+      "title": "SessionMessageDoc",
+      "description": "Individual message inside a user session for real-time cross-device synchronization.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sessionId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "messageId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "ai"]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32000
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "sessionId",
+        "messageId",
+        "role",
+        "text",
+        "modelId",
+        "createdAt"
+      ]
+    },
     "MemoryDoc": {
       "title": "MemoryDoc",
       "description": "Persistent AI memory fact associated with a user.",
@@ -154,7 +251,7 @@
     },
     "DailyUsageDoc": {
       "title": "DailyUsageDoc",
-      "description": "Per-user per-model daily request counter reset at Asia/Riyadh midnight.",
+      "description": "Per-user per-model daily request counter reset at Asia/Riyadh midnight (read-only to normal clients).",
       "type": "object",
       "properties": {
         "userId": {
@@ -267,13 +364,21 @@
       "schema": "ConversationDoc",
       "description": "Persistent conversations synchronized across sessions and devices."
     },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": "SessionDoc",
+      "description": "Normalized session parent documents for per-message subcollections."
+    },
+    "/users/{userId}/sessions/{sessionId}/messages/{messageId}": {
+      "schema": "SessionMessageDoc",
+      "description": "Individual messages stored inside a user's session."
+    },
     "/users/{userId}/memories/{memoryId}": {
       "schema": "MemoryDoc",
       "description": "Persistent AI memory items automatically saved and retrieved."
     },
     "/users/{userId}/usage/{usageKey}": {
       "schema": "DailyUsageDoc",
-      "description": "Per-user per-model daily quota tracking reset at Asia/Riyadh time."
+      "description": "Per-user per-model daily quota tracking reset at Asia/Riyadh time (write-locked against non-admin client writes)."
     },
     "/system_configs/{configId}": {
       "schema": "SystemConfigDoc",

@@ -45,6 +45,8 @@ import {
   Server,
   Loader2,
   LogOut,
+  Volume2,
+  Pause,
 } from 'lucide-react';
 import {
   AINoteDraft,
@@ -152,10 +154,7 @@ import {
 } from './utils/workspaceHandoff';
 import { CodeBlockInfo } from './utils/livePreview';
 import {
-  buildStarterDemoPage,
   extractCodeBlocks,
-  hasPreviewableCode,
-  isWebsiteBuildRequest,
 } from './utils/livePreview';
 import {
   applyProjectFileEdits,
@@ -173,8 +172,11 @@ import {
 import {
   addFacts,
   clearEntireMemoryBank,
+  ensureMasterProfileMemory,
   extractMemoryCandidates,
   factsToText,
+  MASTER_PROFILE_FACTS,
+  MASTER_PROFILE_NAME,
   migrateMemory,
   retrieveRelevantMemories,
   MEMORY_MAX,
@@ -259,6 +261,44 @@ import {
   wipeCloudWorkspace,
 } from './utils/cloudSync';
 import { friendlyAuthError } from './utils/authErrors';
+import type { User as FirebaseUser } from 'firebase/auth';
+import {
+  V2ModelId,
+  V2_SPECIAL_MODELS,
+  V2ModelQuotaStatus,
+  V2QuotaConfig,
+  DEFAULT_V2_QUOTA_CONFIG,
+  isV2ModelId,
+  evaluateV2ModelQuota,
+  getNextRiyadhResetInfo,
+  getV2ModelSpec,
+} from './utils/v2UsageLimits';
+import {
+  signInWithFirebaseGoogle,
+  signOutFromFirebase,
+  observeFirebaseAuth,
+  syncConversationToFirestore,
+  subscribeToFirestoreConversations,
+  saveMemoryFactToFirestore,
+  subscribeToFirestoreMemories,
+  clearAllFirestoreMemories,
+  subscribeToFirestoreV2Usage,
+  saveSessionMessageToFirestore,
+  selectRelevantFirestoreMemories,
+  isAuthorizedTestingUser,
+  tryStreamViaFirebaseAiLogic,
+  FirestoreUsageSnapshot,
+} from './utils/firebaseV2Client';
+import {
+  bilingualSpeechPlayer,
+  isSpeechRecognitionSupported,
+  resolveRecognitionLanguage,
+  VoiceLangMode,
+} from './utils/voiceEngine';
+import {
+  cleanupStaleLocalStorage,
+  runSystemDiagnostics,
+} from './utils/systemDiagnostics';
 
 /** A pasted code block means real work — never short-circuit it with a self answer. */
 function mentionsPastedCode(text: string): boolean {
@@ -291,9 +331,16 @@ function loadJSON<T>(key: string, fallback: T): T {
 const STATE_PENDING_KEY = 'smfta_state_pending_uid';
 
 export default function App() {
-  const [profile, setProfile] = useState<UserProfile>(() =>
-    loadJSON<UserProfile>(LS_KEYS.profile, { name: 'Bossবোদা' })
-  );
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    const loaded = loadJSON<UserProfile>(LS_KEYS.profile, {
+      name: MASTER_PROFILE_NAME,
+    });
+    const cleanName = (loaded?.name || '').trim();
+    if (!cleanName || cleanName === 'Bossবোদা' || cleanName === 'Boss') {
+      return { ...loaded, name: MASTER_PROFILE_NAME };
+    }
+    return loaded;
+  });
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = loadJSON<Partial<AppSettings>>(LS_KEYS.settings, {});
     return sanitizeSettings({
@@ -385,14 +432,13 @@ export default function App() {
   const syncedSessionVersions = useRef<Map<number, string>>(new Map());
   const sessionPushTimer = useRef<number | null>(null);
   const statePushTimer = useRef<number | null>(null);
-  // v18.2.0 memory bank: migrate the old flat list, then restore from the
-  // backup key if the primary copy was ever wiped by a storage error.
+  // v18.2.0 memory bank: migrate and ensure Master Profile baseline (SAYMON HASAN) is always saved.
   const [memory, setMemory] = useState<string[]>(() => {
     const primary = loadJSON<unknown>(LS_KEYS.memory, []);
     const primaryFacts = migrateMemory(primary).facts;
-    if (primaryFacts.length > 0) return factsToText(primaryFacts);
+    if (primaryFacts.length > 0) return ensureMasterProfileMemory(primaryFacts);
     const backup = loadJSON<unknown>(LS_KEYS.memoryBackup, []);
-    return factsToText(migrateMemory(backup).facts);
+    return ensureMasterProfileMemory(migrateMemory(backup).facts);
   });
   const memoryRef = useRef<string[]>(memory);
   useEffect(() => {
@@ -535,6 +581,22 @@ export default function App() {
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
+  const [speechState, setSpeechState] = useState<'idle' | 'speaking' | 'paused'>('idle');
+  const [voiceLangMode, setVoiceLangMode] = useState<VoiceLangMode>('auto');
+  const [voiceReviewPending, setVoiceReviewPending] = useState(false);
+
+  // V2 – Special (Firebase AI) Auth, Firestore Memory Sync & Quota State
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [v2QuotaConfig, setV2QuotaConfig] = useState<V2QuotaConfig>(
+    DEFAULT_V2_QUOTA_CONFIG
+  );
+  const [v2ServerQuotaMap, setV2ServerQuotaMap] = useState<Record<
+    V2ModelId,
+    V2ModelQuotaStatus
+  > | null>(null);
+  const [firestoreUsageSnapshot, setFirestoreUsageSnapshot] =
+    useState<FirestoreUsageSnapshot | null>(null);
+  const [v2TestingBypass, setV2TestingBypass] = useState(false);
 
   // Renaming chat inline state
   const [renamingChatId, setRenamingChatId] = useState<number | null>(null);
@@ -592,7 +654,182 @@ export default function App() {
     ? builtinTierLabel(activeModelName, settings.mode)
     : activeModelName || 'No model selected';
 
-  const activeAvailableModels = getModelsForProfile(activeProfile);
+  const activeIsV2 = isV2ModelId(activeModelName);
+  const isV2AuthorizedTester = isAuthorizedTestingUser(firebaseUser);
+  const v2ResetInfo = getNextRiyadhResetInfo();
+
+  const getV2QuotaStatusForModel = (modelId: V2ModelId): V2ModelQuotaStatus => {
+    if (v2ServerQuotaMap && v2ServerQuotaMap[modelId]) {
+      return v2ServerQuotaMap[modelId];
+    }
+    const usedCount = firestoreUsageSnapshot?.usedByModel?.[modelId] ?? 0;
+    const testingUsedCount =
+      firestoreUsageSnapshot?.testingUsedByModel?.[modelId] ?? 0;
+    return evaluateV2ModelQuota({
+      modelId,
+      usedCount,
+      testingUsedCount,
+      config: {
+        ...v2QuotaConfig,
+        testingBypassEnabled: isV2AuthorizedTester
+          ? true
+          : Boolean(v2TestingBypass && isV2AuthorizedTester),
+      },
+      isAuthorizedTester: isV2AuthorizedTester,
+    });
+  };
+
+  const activeV2QuotaStatus = activeIsV2
+    ? getV2QuotaStatusForModel(activeModelName as V2ModelId)
+    : null;
+
+  useEffect(() => {
+    const unsubSpeech = bilingualSpeechPlayer.subscribe((st) => {
+      setSpeechState(st.status);
+      setSpeakingMsgId(st.msgId);
+    });
+    return () => unsubSpeech();
+  }, []);
+
+  const firestoreSyncedChatSigsRef = useRef<Map<number, string>>(new Map());
+  const masterSeededUidRef = useRef<string | null>(null);
+
+  // Observe Firebase Auth & attach real Cloud Firestore listeners when authenticated
+  useEffect(() => {
+    let unsubConvs: (() => void) | null = null;
+    let unsubMems: (() => void) | null = null;
+    let unsubUsage: (() => void) | null = null;
+
+    const unsubAuth = observeFirebaseAuth((user) => {
+      setFirebaseUser(user);
+      unsubConvs?.();
+      unsubMems?.();
+      unsubUsage?.();
+      unsubConvs = null;
+      unsubMems = null;
+      unsubUsage = null;
+
+      if (user && user.emailVerified) {
+        unsubConvs = subscribeToFirestoreConversations(user, (remoteSessions) => {
+          setChats((prev) => {
+            const byId = new Map(prev.map((c) => [c.id, c]));
+            let changed = false;
+            for (const rs of remoteSessions) {
+              const local = byId.get(rs.id);
+              if (
+                !local ||
+                rs.msgs.length > local.msgs.length ||
+                (rs.msgs.length === local.msgs.length && rs.title !== local.title)
+              ) {
+                byId.set(rs.id, rs);
+                changed = true;
+              }
+            }
+            if (!changed) return prev;
+            const all = Array.from(byId.values());
+            const emptyFirst = all.filter((c) => c.msgs.length === 0);
+            const nonEmpty = all
+              .filter((c) => c.msgs.length > 0)
+              .sort((a, b) => {
+                const ta = a.msgs[a.msgs.length - 1]?.ts || a.id;
+                const tb = b.msgs[b.msgs.length - 1]?.ts || b.id;
+                return tb - ta;
+              });
+            return [...emptyFirst.slice(0, 1), ...nonEmpty];
+          });
+        });
+
+        unsubMems = subscribeToFirestoreMemories(user, (remoteFacts) => {
+          setMemory((prev) => {
+            const merged = ensureMasterProfileMemory([...prev, ...remoteFacts]);
+            memoryRef.current = merged;
+            return merged;
+          });
+          if (masterSeededUidRef.current !== user.uid) {
+            masterSeededUidRef.current = user.uid;
+            for (const fact of MASTER_PROFILE_FACTS) {
+              if (!remoteFacts.some((rf) => rf.includes(fact))) {
+                void saveMemoryFactToFirestore(
+                  user,
+                  fact,
+                  'master_profile',
+                  'smfta-system'
+                ).catch(() => {});
+              }
+            }
+          }
+        });
+
+        unsubUsage = subscribeToFirestoreV2Usage(user, (snap) => {
+          setFirestoreUsageSnapshot(snap);
+        });
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      unsubConvs?.();
+      unsubMems?.();
+      unsubUsage?.();
+    };
+  }, []);
+
+  // Automatically sync all persisted chats (both V1 and V2) to Cloud Firestore when signed in
+  useEffect(() => {
+    if (!firebaseUser?.uid || !firebaseUser.emailVerified) return;
+    if (streamingMsgId !== null) return;
+    const timer = window.setTimeout(() => {
+      for (const session of chats) {
+        if (!session.msgs || session.msgs.length === 0) continue;
+        const lastMsg = session.msgs[session.msgs.length - 1];
+        const sig = `${session.title}:${session.msgs.length}:${lastMsg?.id || ''}:${(lastMsg?.text || '').length}`;
+        if (firestoreSyncedChatSigsRef.current.get(session.id) === sig) continue;
+        firestoreSyncedChatSigsRef.current.set(session.id, sig);
+        const hasV2 = session.msgs.some((m) => Boolean(m.v2ModelId));
+        const modelTag =
+          [...session.msgs].reverse().find((m) => m.v2ModelId)?.v2ModelId ||
+          activeModelName ||
+          'smfta-flash';
+        void syncConversationToFirestore(
+          firebaseUser,
+          session,
+          hasV2 ? 'v2' : 'v1',
+          modelTag
+        ).catch(() => {});
+      }
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [chats, firebaseUser, streamingMsgId, activeModelName]);
+
+  // Sync V2 server-side daily quota status on mount or user change
+  useEffect(() => {
+    let cancelled = false;
+    const fetchV2Quota = async () => {
+      try {
+        const uid = firebaseUser?.uid || 'default-user';
+        const email = firebaseUser?.email || '';
+        const verified = Boolean(firebaseUser?.emailVerified);
+        const qs = new URLSearchParams({
+          userId: uid,
+          userEmail: email,
+          emailVerified: verified ? 'true' : 'false',
+        });
+        const res = await fetch(`/api/v2/quota?${qs.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data?.ok && data.models) {
+          setV2ServerQuotaMap(data.models);
+          if (data.config) setV2QuotaConfig(data.config);
+        }
+      } catch {
+        // Ignore offline/standalone quota fetch
+      }
+    };
+    void fetchV2Quota();
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser]);
 
   const handleSelectProfile = (prof: SavedProviderProfile) => {
     const nextModel =
@@ -629,6 +866,7 @@ export default function App() {
   const handleSelectModel = (modelId: string) => {
     const trimmed = modelId.trim();
     if (!trimmed) return;
+    const isV2 = isV2ModelId(trimmed);
     // Picking a built-in tier also switches the reasoning mode so request and
     // label stay consistent; external models only change the model id.
     const tier = BUILTIN_TIERS.find((t) => t.model === trimmed);
@@ -636,17 +874,41 @@ export default function App() {
       sanitizeSettings(
         tier
           ? { ...prev, externalModel: trimmed, mode: tier.id }
+          : isV2
+          ? {
+              ...prev,
+              provider: 'smfta_cloud',
+              externalModel: trimmed,
+              mode:
+                trimmed === 'smfta-v5'
+                  ? 'fast'
+                  : trimmed === 'smfta-max'
+                    ? 'power'
+                    : 'balanced',
+            }
           : { ...prev, externalModel: trimmed }
       )
     );
     if (activeProfile) {
       const updated = savedProfiles.map((p) =>
-        p.id === activeProfile.id ? { ...p, externalModel: trimmed } : p
+        p.id === activeProfile.id
+          ? {
+              ...p,
+              provider: isV2 ? 'smfta_cloud' : p.provider,
+              externalModel: trimmed,
+            }
+          : p
       );
       handleUpdateProfiles(updated);
     }
     setBottomModelMenuOpen(false);
-    showToast(tier ? `Model: ${tier.label}` : `Model: ${trimmed}`);
+    showToast(
+      tier
+        ? `Model: ${tier.label}`
+        : isV2
+          ? `V2 – Special: ${getV2ModelSpec(trimmed).label}`
+          : `Model: ${trimmed}`
+    );
   };
 
   // ── v19.0.0 Full-screen Code Workspace (/workspace/code) handoff ─────────
@@ -662,6 +924,17 @@ export default function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    cleanupStaleLocalStorage();
+    if (typeof window !== 'undefined') {
+      (
+        window as Window & {
+          runSystemDiagnostics?: typeof runSystemDiagnostics;
+        }
+      ).runSystemDiagnostics = () => runSystemDiagnostics();
+    }
   }, []);
 
   const handleOpenCodeWorkspace = (
@@ -2123,56 +2396,24 @@ export default function App() {
     scrollToBottom(true);
   };
 
-  // Speech synthesis
+  // Bilingual Speech synthesis (Bengali + English mixed segmentation)
   const speakText = (text: string, msgId?: string, onDone?: () => void) => {
-    if (!('speechSynthesis' in window) || !text) {
-      onDone?.();
-      return;
-    }
-    window.speechSynthesis.cancel();
-    if (msgId && speakingMsgId === msgId) {
-      setSpeakingMsgId(null);
-      return;
-    }
-    const clean = text
-      .replace(/```[\s\S]*?```/g, ' code block ')
-      .replace(/[#*_>`~]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 1400);
-
-    const utter = new SpeechSynthesisUtterance(clean);
-    const isBn = /[\u0980-\u09FF]/.test(clean);
-    const pref = (settings.vlang || 'bn-BD').slice(0, 2);
-    const voices = window.speechSynthesis.getVoices() || [];
-    const voice =
-      voices.find((v) => v.lang?.startsWith(pref)) ||
-      voices.find((v) => v.lang?.startsWith(isBn ? 'bn' : 'en'));
-    if (voice) {
-      utter.voice = voice;
-      utter.lang = voice.lang;
-    } else {
-      utter.lang = isBn ? 'bn-BD' : settings.vlang;
-    }
-    utter.onend = () => {
-      setSpeakingMsgId(null);
-      onDone?.();
-    };
-    utter.onerror = () => {
-      setSpeakingMsgId(null);
-      onDone?.();
-    };
-    if (msgId) setSpeakingMsgId(msgId);
-    utter.rate = Math.min(2.0, Math.max(0.5, settings.voiceSpeed || 1.0));
-    window.speechSynthesis.speak(utter);
+    bilingualSpeechPlayer.speak({
+      text,
+      msgId,
+      preferredLang: voiceLangMode,
+      rate: settings.voiceSpeed || 1.0,
+      onDone,
+    });
   };
 
-  // Voice Recognition (Mic)
+  // Bilingual Voice Recognition (Mic: bn-BD / en-US / Banglish)
   const toggleMic = () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      showToast('Voice input works in Chrome / Edge');
+    if (!isSpeechRecognitionSupported()) {
+      showToast(
+        'Voice input is unavailable in this browser — type or edit your message in the box below.',
+        4000
+      );
       return;
     }
     if (isListening && recogRef.current) {
@@ -2180,9 +2421,12 @@ export default function App() {
       setIsListening(false);
       return;
     }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const r = new SR();
-    r.lang = settings.vlang || 'bn-BD';
+    r.lang = resolveRecognitionLanguage(voiceLangMode, settings.appLanguage);
     r.interimResults = true;
+    r.continuous = false;
     let finalTranscript = '';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     r.onresult = (e: any) => {
@@ -2197,16 +2441,27 @@ export default function App() {
     };
     r.onend = () => {
       setIsListening(false);
-      if ((talkMode || voiceCallOpen) && finalTranscript.trim()) {
-        handleSend(finalTranscript.trim());
+      const captured = finalTranscript.trim();
+      if ((talkMode || voiceCallOpen) && captured) {
+        setVoiceReviewPending(false);
+        handleSend(captured);
+      } else if (captured) {
+        setVoiceReviewPending(true);
+        composerRef.current?.focus();
       }
     };
-    r.onerror = () => setIsListening(false);
+    r.onerror = () => {
+      setIsListening(false);
+      showToast('Voice capture interrupted — you can edit text or try again.');
+    };
     recogRef.current = r;
     try {
       r.start();
       setIsListening(true);
-      showToast('Listening — speak now');
+      setVoiceReviewPending(false);
+      showToast(
+        `Listening (${r.lang === 'bn-BD' ? 'বাংলা / Banglish' : 'English'}) — speak now`
+      );
     } catch (err: unknown) {
       console.warn(
         '[App.toggleMic]',
@@ -2224,6 +2479,23 @@ export default function App() {
     const files = [...pendingFiles];
 
     if (!rawTxt && imgs.length === 0 && files.length === 0) return;
+
+    // V2 – Special independent daily quota pre-check (blocks cleanly at 100%)
+    if (activeIsV2 && activeV2QuotaStatus?.isBlocked) {
+      showToast(
+        activeV2QuotaStatus.blockedMessage ||
+          `Daily limit reached for ${activeV2QuotaStatus.label}.`,
+        5200
+      );
+      notifyUser(
+        settings,
+        'usageLimit',
+        `${activeV2QuotaStatus.label} limit reached`,
+        activeV2QuotaStatus.blockedMessage || 'Daily request limit reached.'
+      );
+      return;
+    }
+    setVoiceReviewPending(false);
 
     // v18.11 — real daily cap, enforced before any state change or request.
     const dailyCap = settings.dailyMessageLimit ?? 0;
@@ -2470,9 +2742,9 @@ export default function App() {
       }
     }
 
-    // 4. Auto-extract implicit user memory when autoMemory is enabled
+    // 4. Auto-extract implicit user memory only for concise personal messages (never block/pollute on large notes)
     let currentMemory = [...memory];
-    if (settings.autoMemory !== false) {
+    if (settings.autoMemory !== false && rawTxt.length <= 450) {
       const implicit = extractImplicitUserMemory(rawTxt);
       if (implicit.detectedName) {
         setProfile((prev) => ({ ...prev, name: implicit.detectedName as string }));
@@ -2492,12 +2764,28 @@ export default function App() {
       }
     }
 
-      // Initialize Multi-Step Task Plan if request describes a workflow or multiple steps
-      if (isMultiStepRequest(rawTxt)) {
-        setActiveTaskPlan(
-          parseTaskPlanFromText(rawTxt) ||
-            createTaskPlan('Multi-step Task Execution', [{ title: rawTxt.slice(0, 80) }])
-        );
+    // Clear any stale task progress panel so large notes process cleanly without step bars
+    if (activeTaskPlan) {
+      setActiveTaskPlan(null);
+    }
+
+      // Persist implicit extracted facts to Cloud Firestore for cross-device sync when signed in
+      if (
+        firebaseUser &&
+        firebaseUser.emailVerified &&
+        settings.autoMemory !== false &&
+        rawTxt.length <= 450 &&
+        currentMemory.length > 0
+      ) {
+        const latestFact = currentMemory[currentMemory.length - 1];
+        if (latestFact) {
+          void saveMemoryFactToFirestore(
+            firebaseUser,
+            latestFact,
+            'conversation',
+            activeModelName || 'smfta-v5'
+          ).catch(() => {});
+        }
       }
 
       // 5. Stream from Server-Side Neural Engine (0ms delay, no blocking pre-fetches)
@@ -2579,6 +2867,8 @@ export default function App() {
           settings.externalModel?.trim() ||
           '';
 
+    const isV2Request =
+      !overrideProvider && isV2ModelId(effectiveExternalModel);
     let accumulated = appendToMsg
       ? appendToMsg.prefixText + (appendToMsg.prefixText.endsWith('\n') ? '' : '\n')
       : '';
@@ -2596,17 +2886,29 @@ export default function App() {
     try {
       // v18.11 + v19.0 — history is user-controlled: off sends only the current
       // prompt; on, the count follows maxHistoryMessages (1..40, default 24).
+      // Always filter out empty or failed placeholder messages so stale blank turns
+      // never trigger 422 `messages[1] must contain text or at least one image`.
+      const cleanHistoryMsgs = historyMsgs.filter(
+        (m) =>
+          !m.isError &&
+          m.status !== 'failed' &&
+          (String(m.text || '').trim().length > 0 ||
+            (Array.isArray(m.imgs) && m.imgs.length > 0))
+      );
       const historyLimit =
         settings.includeHistory === false
           ? 1
           : Math.min(40, Math.max(1, settings.maxHistoryMessages ?? 24));
-      const contextSlice = historyMsgs
+      const contextSlice = cleanHistoryMsgs
         .slice(-historyLimit)
         .map((m) => ({
           role: m.role,
-          text: m.text,
+          text: String(m.text || '').trim(),
           imgs: m.imgs?.map((im) => ({ mime: im.mime, data: im.data })),
-        }));
+        }))
+        .filter(
+          (m) => m.text.length > 0 || (Array.isArray(m.imgs) && m.imgs.length > 0)
+        );
 
       const lastUserPrompt =
         contextSlice[contextSlice.length - 1]?.text?.trim() || '';
@@ -2615,18 +2917,20 @@ export default function App() {
       );
 
       const targetSession = chats.find((c) => c.id === chatId) || activeChat;
-      const contextRelevantMemory = retrieveRelevantMemories(
-        lastUserPrompt,
-        latestMemory || memory,
-        12
-      );
+      const contextRelevantMemory = isV2Request
+        ? selectRelevantFirestoreMemories(
+            lastUserPrompt,
+            latestMemory || memory,
+            8
+          )
+        : retrieveRelevantMemories(lastUserPrompt, latestMemory || memory, 12);
 
       // Build 7-Layer Smart Conversation Context (Parts 7–10)
       const smartCtx =
         settings.includeHistory === false
           ? null
           : buildSmartConversationContext({
-              messages: historyMsgs,
+              messages: cleanHistoryMsgs,
               currentPrompt: lastUserPrompt,
               existingSummary: targetSession?.conversationSummary,
               memoryFacts: contextRelevantMemory,
@@ -2817,7 +3121,7 @@ export default function App() {
         trainingData: settings.trainingData || '',
         fastDecision: settings.fastDecision !== false,
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
-        userName: profile.name || 'Boss',
+        userName: profile.name || MASTER_PROFILE_NAME,
         chatHistorySummary,
         activeSkills: matchedSkills
           .filter((sk) => sk.type === 'prompt' && sk.prompt)
@@ -2829,6 +3133,13 @@ export default function App() {
           title: n.title || 'Untitled',
           content: (n.content || '').slice(0, 1200),
         })),
+        firebaseUid: firebaseUser?.uid || '',
+        firebaseUserEmail: firebaseUser?.email || '',
+        firebaseEmailVerified: Boolean(firebaseUser?.emailVerified),
+        v2TestingBypass: isV2AuthorizedTester
+          ? true
+          : Boolean(v2TestingBypass && isV2AuthorizedTester),
+        v2QuotaConfig,
         selfState: {
           displayName: activeDisplayName,
           provider: activeProvider,
@@ -2869,7 +3180,8 @@ export default function App() {
       const inStandaloneApk = isStandaloneApkEnv();
 
       if (!inStandaloneApk) {
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const fetchRetries = isV2Request ? 0 : maxRetries;
+        for (let attempt = 0; attempt <= fetchRetries; attempt++) {
           if (abortCtrl.signal.aborted) break;
           try {
             const res = await fetch('/api/chat/stream', {
@@ -2879,8 +3191,9 @@ export default function App() {
               signal: abortCtrl.signal,
             });
             if (
+              !isV2Request &&
               (res.status === 502 || res.status === 503 || res.status === 504) &&
-              attempt < maxRetries
+              attempt < fetchRetries
             ) {
               await new Promise((r) => setTimeout(r, 120));
               continue;
@@ -2896,7 +3209,7 @@ export default function App() {
             if (fetchErr instanceof Error && fetchErr.name === 'AbortError') {
               throw fetchErr;
             }
-            if (attempt < maxRetries && !abortCtrl.signal.aborted) {
+            if (attempt < fetchRetries && !abortCtrl.signal.aborted) {
               await new Promise((r) => setTimeout(r, 120));
               continue;
             }
@@ -2940,6 +3253,9 @@ export default function App() {
       const paintReveal = () => {
         const visible = safeSlice(revealTarget, revealShown);
         if (!bubbleCreated) {
+          if (!visible.trim() && !liveThinking.trim()) {
+            return;
+          }
           bubbleCreated = true;
           setIsWaitingFirstToken(false);
           setStreamingMsgId(aiMsgId);
@@ -2949,6 +3265,7 @@ export default function App() {
             role: 'ai',
             text: visible || ' ',
             thinking: liveThinking || undefined,
+            v2ModelId: isV2Request ? effectiveExternalModel : undefined,
             ts: reqStart,
             turnId,
             status: 'streaming',
@@ -2963,7 +3280,7 @@ export default function App() {
         } else {
           updateMessageInChat(chatId, aiMsgId, (m) => ({
             ...m,
-            text: visible || ' ',
+            text: visible || m.text || ' ',
             thinking: liveThinking || m.thinking,
           }));
         }
@@ -3076,10 +3393,14 @@ export default function App() {
                   | 'error'
                   | 'reset'
                   | 'sources'
-                  | 'progress';
+                  | 'progress'
+                  | 'v2_quota';
                 ok?: boolean;
                 code?: string;
                 step?: string;
+                label?: string;
+                status?: unknown;
+                snapshot?: { models?: Record<V2ModelId, V2ModelQuotaStatus>; config?: V2QuotaConfig };
                 detail?: string;
                 message?: string;
                 error?: string;
@@ -3113,6 +3434,20 @@ export default function App() {
                 errObj.code = parsed.code;
                 errObj.requestId = parsed.requestId;
                 throw errObj;
+              }
+
+              if (parsed.type === 'v2_quota') {
+                if (parsed.snapshot?.models) {
+                  setV2ServerQuotaMap(parsed.snapshot.models);
+                }
+                if (parsed.snapshot?.config) {
+                  setV2QuotaConfig(parsed.snapshot.config);
+                }
+                const qStatus = parsed.status as V2ModelQuotaStatus | undefined;
+                if (qStatus?.warningMessage) {
+                  showToast(qStatus.warningMessage, 5000);
+                }
+                continue;
               }
 
               if (parsed.type === 'progress') {
@@ -3215,13 +3550,53 @@ export default function App() {
         await pipeSSE(response);
       } else if (response && !response.ok) {
         const errPayload = await response.json().catch(() => null);
-        const httpErr = new Error(
-          errPayload?.error || errPayload?.message || `HTTP ${response.status}`
-        ) as Error & { code?: string };
-        httpErr.code = errPayload?.errorCode;
+        const extractedError =
+          typeof errPayload?.error === 'string'
+            ? errPayload.error
+            : typeof errPayload?.error?.message === 'string'
+            ? errPayload.error.message
+            : typeof errPayload?.message === 'string'
+            ? errPayload.message
+            : `HTTP ${response.status}`;
+        const httpErr = new Error(extractedError) as Error & { code?: string };
+        httpErr.code = errPayload?.errorCode || errPayload?.error?.code;
         throw httpErr;
+      } else if (isV2Request) {
+        // Standalone APK / direct Firebase AI Logic client path (V2-only, zero retry loops)
+        const v2Spec = getV2ModelSpec(effectiveExternalModel);
+        const fbOk = await tryStreamViaFirebaseAiLogic({
+          modelId: effectiveExternalModel as V2ModelId,
+          systemInstruction: v2Spec.systemDirective,
+          history: contextSlice.map((m) => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: m.text,
+          })),
+          signal: abortCtrl.signal,
+          onDelta: (deltaTxt) => {
+            if (!deltaTxt) return;
+            if (firstTokenPerf === null) {
+              firstTokenPerf =
+                typeof performance !== 'undefined'
+                  ? performance.now()
+                  : Date.now();
+              firstTokenIso = new Date().toISOString();
+              setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
+            }
+            accumulated += deltaTxt;
+            if (!bubbleCreated) {
+              flushStreamText();
+            } else {
+              scheduleFlush();
+            }
+          },
+        });
+        if (!fbOk) {
+          throw new Error(
+            `${v2Spec.label} is temporarily unavailable. Verify server API configuration or try again shortly.`
+          );
+        }
       } else {
-        // Standalone APK or direct client-side fallback
+        // Standalone APK or direct client-side fallback (V1 untouched)
         try {
           let streamedViaCallback = false;
           const directReply = await runStandaloneClientSideAI({
@@ -3369,17 +3744,6 @@ export default function App() {
       let finalText = dropStallSentences(polished) || polished;
 
       finalText = matchAnswerLength(finalText, lastUserPrompt);
-
-      if (
-        isWebsiteBuildRequest(lastUserPrompt) &&
-        !hasPreviewableCode(extractCodeBlocks(finalText))
-      ) {
-        finalText +=
-          '\n\nনিচে একটি চলমান ডেমো — চ্যাটের Live Preview বাটনে ক্লিক করে দেখুন।' +
-          '\n\n```html\n' +
-          buildStarterDemoPage(lastUserPrompt, 'SMFTA Live Demo') +
-          '\n```';
-      }
 
       // v19.0.0 — Background Website Project Engine: incrementally update project files
       // while preserving existing untouched files across conversations.
@@ -3542,13 +3906,15 @@ export default function App() {
           : undefined);
       const latencySecFormatted = `${(computedLatencyMs / 1000).toFixed(2)}s`;
 
-      updateMessageInChat(chatId, aiMsgId, (m) => ({
-        ...m,
+      const finalCompletedMsg: ChatMessage = {
+        id: aiMsgId,
+        role: 'ai',
         text: finalText || cleanText || accumulated,
-        thinking: extractedThinking || liveThinking || m.thinking || undefined,
+        thinking: extractedThinking || liveThinking || undefined,
+        v2ModelId: isV2Request ? effectiveExternalModel : undefined,
+        ts: reqStart,
         status: 'complete',
         turnId,
-        requestId: responderMeta.requestId,
         requestedProvider: activeProvider,
         requestedModel: effectiveExternalModel || activeModelName,
         providerUsed: actualProvider,
@@ -3571,7 +3937,66 @@ export default function App() {
         selfUpdateWidgetId: appliedWidgetId,
         projectFilesUpdated:
           projectFilesUpdated.length > 0 ? projectFilesUpdated : undefined,
+      };
+
+      updateMessageInChat(chatId, aiMsgId, (m) => ({
+        ...m,
+        ...finalCompletedMsg,
+        thinking: finalCompletedMsg.thinking || m.thinking,
       }));
+
+      // Synchronize ALL persistent sessions (V1 & V2) & memory to Cloud Firestore when authenticated
+      if (firebaseUser && firebaseUser.emailVerified) {
+        const lastUserMessageObj = historyMsgs[historyMsgs.length - 1];
+        const sessionVersionTag = isV2Request ? 'v2' : 'v1';
+        const sessionModelTag =
+          effectiveExternalModel || activeModelName || 'smfta-v5';
+        void (async () => {
+          try {
+            if (lastUserMessageObj) {
+              await saveSessionMessageToFirestore({
+                user: firebaseUser,
+                sessionId: chatId,
+                sessionTitle: targetSession?.title || 'SMFTA Chat',
+                messageId: lastUserMessageObj.id,
+                role: 'user',
+                text: lastUserMessageObj.text,
+                modelId: sessionModelTag,
+                systemVersion: sessionVersionTag,
+              });
+            }
+            await saveSessionMessageToFirestore({
+              user: firebaseUser,
+              sessionId: chatId,
+              sessionTitle: targetSession?.title || 'SMFTA Chat',
+              messageId: aiMsgId,
+              role: 'ai',
+              text: finalCompletedMsg.text,
+              modelId: sessionModelTag,
+              systemVersion: sessionVersionTag,
+            });
+            await syncConversationToFirestore(
+              firebaseUser,
+              {
+                ...targetSession,
+                msgs: [...historyMsgs, finalCompletedMsg],
+              },
+              sessionVersionTag,
+              sessionModelTag
+            );
+            for (const newFact of newlySavedMemories) {
+              await saveMemoryFactToFirestore(
+                firebaseUser,
+                newFact,
+                isV2Request ? 'v2_memory' : 'v1_memory',
+                sessionModelTag
+              );
+            }
+          } catch {
+            // Logged in firebaseV2Client
+          }
+        })();
+      }
 
       if (responderMeta.fallbackNotice) {
         showToast(`ℹ️ ${responderMeta.fallbackNotice}`, 3800);
@@ -3642,8 +4067,9 @@ export default function App() {
             ? 'NETWORK_ERROR'
             : 'SERVER_ERROR');
 
-        // P1-05: Only fallback to built-in keyless engine if user explicitly enabled allowKeylessFallback AND no partial tokens were painted yet
+        // P1-05: Only fallback to built-in keyless engine for V1 if user explicitly enabled allowKeylessFallback AND no partial tokens were painted yet
         if (
+          !isV2Request &&
           settings.allowKeylessFallback === true &&
           !isDefaultUnlimitedProfile &&
           !accumulated.trim()
@@ -3699,46 +4125,56 @@ export default function App() {
           showToast(finalErrText.slice(0, 140), 4500);
         }
 
-        setProviderTestStatus({
-          ok: false,
-          message: finalErrText,
-          testedAt: Date.now(),
-          provider: activeProvider,
-          model: effectiveExternalModel || activeModelName,
-        });
-        if (profileSnapshot) {
-          setSavedProfiles((prev) => {
-            const next = prev.map((p) =>
-              p.id === profileSnapshot.id
-                ? {
-                    ...p,
-                    verified:
-                      errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
-                        ? false
-                        : p.verified,
-                    verificationStatus:
-                      errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
-                        ? ('failed' as const)
-                        : ('degraded' as const),
-                    quotaExhausted: isTrueQuotaExhausted,
-                    statusMessage: finalErrText,
-                    lastTestedAt: Date.now(),
-                  }
-                : p
-            );
-            persistSavedProfiles(next);
-            return next;
+        if (!isV2Request) {
+          setProviderTestStatus({
+            ok: false,
+            message: finalErrText,
+            testedAt: Date.now(),
+            provider: activeProvider,
+            model: effectiveExternalModel || activeModelName,
+          });
+          if (profileSnapshot) {
+            setSavedProfiles((prev) => {
+              const next = prev.map((p) =>
+                p.id === profileSnapshot.id
+                  ? {
+                      ...p,
+                      verified:
+                        errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
+                          ? false
+                          : p.verified,
+                      verificationStatus:
+                        errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
+                          ? ('failed' as const)
+                          : ('degraded' as const),
+                      quotaExhausted: isTrueQuotaExhausted,
+                      statusMessage: finalErrText,
+                      lastTestedAt: Date.now(),
+                    }
+                  : p
+              );
+              persistSavedProfiles(next);
+              return next;
+            });
+          }
+          setProviderLimitBanner({
+            profileName: activeDisplayName,
+            message: isTrueQuotaExhausted
+              ? `Quota/credits exhausted on "${activeDisplayName}". Please switch to another saved property manually below.`
+              : isRateLimited
+              ? `Rate limit (429) reached on "${activeDisplayName}". Wait briefly or switch to another saved property below.`
+              : `"${activeDisplayName}" returned an error [${errCode}]: ${cleanErr.slice(0, 280)}`,
+            profileId: profileSnapshot?.id,
+          });
+        } else {
+          const v2Display = getV2ModelLabel(effectiveExternalModel);
+          setProviderLimitBanner({
+            profileName: v2Display,
+            message: isRateLimited
+              ? `${v2Display} reached a temporary rate limit (429). Please wait a moment and try again.`
+              : `${v2Display} error [${errCode}]: ${cleanErr.slice(0, 280)}`,
           });
         }
-        setProviderLimitBanner({
-          profileName: activeDisplayName,
-          message: isTrueQuotaExhausted
-            ? `Quota/credits exhausted on "${activeDisplayName}". Please switch to another saved property manually below.`
-            : isRateLimited
-            ? `Rate limit (429) reached on "${activeDisplayName}". Wait briefly or switch to another saved property below.`
-            : `"${activeDisplayName}" returned an error [${errCode}]: ${cleanErr.slice(0, 280)}`,
-          profileId: profileSnapshot?.id,
-        });
 
         // P1-09: If partial text was already streamed in this bubble, keep it and mark status 'failed'; otherwise append a single error message
         if (accumulated.trim()) {
@@ -3759,6 +4195,15 @@ export default function App() {
             },
           }));
         } else {
+          if (bubbleCreated) {
+            setChats((prev) =>
+              prev.map((c) =>
+                c.id === chatId
+                  ? { ...c, msgs: c.msgs.filter((m) => m.id !== aiMsgId) }
+                  : c
+              )
+            );
+          }
           appendMessageToChat(chatId, {
             id: createUniqueId('err'),
             role: 'ai',
@@ -3787,10 +4232,7 @@ export default function App() {
       setIsGenerating(false);
       setGenPhase(nextGenPhase(null, { type: 'stop' }));
       setGenStepDetail(null);
-      setActiveTaskPlan((prev) => {
-        if (!prev || prev.status === 'completed' || prev.status === 'cancelled') return prev;
-        return advanceTaskPlan(prev, { success: true });
-      });
+      setActiveTaskPlan(null);
     }
   };
 
@@ -4194,7 +4636,7 @@ export default function App() {
           />
         ) : (
           <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
-            {/* HEADER — AI Name only */}
+            {/* HEADER — AI Name + Clean Three-Dot (⋮) Options Menu */}
             <header className="app-header">
               <div className="app-header-title">
                 <strong>
@@ -4202,6 +4644,141 @@ export default function App() {
                     ? 'SMFTA AI'
                     : activeDisplayName || 'SMFTA AI'}
                 </strong>
+              </div>
+
+              <div className="relative flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="header-menu-btn"
+                  onClick={() => setHeaderMenuOpen((v) => !v)}
+                  className="hdr-btn px-2"
+                  aria-label="Options & Settings"
+                  aria-expanded={headerMenuOpen}
+                  title="Options & Settings"
+                >
+                  <MoreVertical className="w-4 h-4" />
+                </button>
+
+                {headerMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-30"
+                      onClick={() => setHeaderMenuOpen(false)}
+                    />
+                    <div
+                      data-testid="header-menu-popover"
+                      className="absolute right-0 top-full mt-2 w-60 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
+                    >
+                      <button
+                        type="button"
+                        data-testid="header-menu-new-chat"
+                        onClick={() => {
+                          handleNewChat();
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>New Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-settings"
+                        onClick={() => {
+                          setSettingsTab('general');
+                          setSettingsOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Settings className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>Settings</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-providers"
+                        onClick={() => {
+                          setSettingsTab('providers');
+                          setSettingsOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Cpu className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>Providers & Models</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-memory"
+                        onClick={() => {
+                          setSettingsTab('privacy');
+                          setSettingsOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Brain className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>Memory & Privacy</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-diagnostics"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          void runSystemDiagnostics().then((res) => {
+                            if (res.success && res.report) {
+                              showToast(
+                                `System ${res.report.status} · Firestore: ${res.report.firestoreMemory}`,
+                                3600
+                              );
+                            }
+                          });
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>System Health</span>
+                      </button>
+
+                      {chats.some((c) => c.msgs.length > 0) && (
+                        <div className="pt-1 mt-1 border-t border-[var(--border)]">
+                          <div className="px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)]">
+                            Saved Chats
+                          </div>
+                          <div className="max-h-36 overflow-y-auto space-y-0.5">
+                            {chats
+                              .filter((c) => c.msgs.length > 0)
+                              .slice(0, 6)
+                              .map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveId(c.id);
+                                    setHeaderMenuOpen(false);
+                                  }}
+                                  className={`w-full text-left px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                                    c.id === activeId
+                                      ? 'bg-[var(--primary-soft)] text-[var(--primary)] font-semibold'
+                                      : 'text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]'
+                                  }`}
+                                >
+                                  <span className="truncate">{c.title || 'Chat'}</span>
+                                  <span className="text-[10px] shrink-0">
+                                    {c.msgs.length}
+                                  </span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </header>
 
@@ -4349,7 +4926,11 @@ export default function App() {
                                 ? 'SMFTA Pro'
                                 : activeDisplayName}
                             </span>
-                            <span className="msg-ai-model">{activeModelLabel}</span>
+                            <span className="msg-ai-model">
+                              {m.v2ModelId
+                                ? getV2ModelSpec(m.v2ModelId).label
+                                : activeModelLabel}
+                            </span>
                           </div>
                           <InteractiveMessageContent
                             messageId={m.id}
@@ -4441,13 +5022,6 @@ export default function App() {
                                 showToast('Installed into your self-update tools');
                               }
                             }}
-                            onOpenCodeWorkspace={(blocks, selectedIdx, msgId) =>
-                              handleOpenCodeWorkspace(
-                                blocks,
-                                selectedIdx ?? 0,
-                                msgId || m.id
-                              )
-                            }
                             onToast={showToast}
                             renderMarkdown={settings.markdownRender !== false}
                             highlightCode={settings.codeHighlight !== false}
@@ -4635,6 +5209,60 @@ export default function App() {
                                 <RotateCcw className="w-3 h-3" />
                                 <span>Retry</span>
                               </button>
+
+                              {/* Bilingual TTS controls (Speak / Pause / Resume / Stop) */}
+                              <button
+                                type="button"
+                                data-testid="msg-tts-btn"
+                                onClick={() => {
+                                  if (speakingMsgId === m.id) {
+                                    if (speechState === 'paused') {
+                                      bilingualSpeechPlayer.resume();
+                                    } else {
+                                      bilingualSpeechPlayer.pause();
+                                    }
+                                  } else {
+                                    speakText(m.text, m.id);
+                                  }
+                                }}
+                                className="msg-action"
+                                title={
+                                  speakingMsgId === m.id
+                                    ? speechState === 'paused'
+                                      ? 'Resume speech'
+                                      : 'Pause speech'
+                                    : 'Read aloud (Bengali & English)'
+                                }
+                              >
+                                {speakingMsgId === m.id && speechState === 'speaking' ? (
+                                  <>
+                                    <Pause className="w-3 h-3" />
+                                    <span>Pause</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Volume2 className="w-3 h-3" />
+                                    <span>
+                                      {speakingMsgId === m.id && speechState === 'paused'
+                                        ? 'Resume'
+                                        : 'Listen'}
+                                    </span>
+                                  </>
+                                )}
+                              </button>
+
+                              {speakingMsgId === m.id && (
+                                <button
+                                  type="button"
+                                  data-testid="msg-tts-stop-btn"
+                                  onClick={() => bilingualSpeechPlayer.stop()}
+                                  className="msg-action text-rose-400"
+                                  title="Stop speech"
+                                >
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  <span>Stop</span>
+                                </button>
+                              )}
                             </>
                           ) : (
                             <>
@@ -4907,6 +5535,82 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* V2 Daily Quota Warning / Limit Banner (only when V2 model selected & >=80% or blocked) */}
+                  {activeIsV2 &&
+                    activeV2QuotaStatus &&
+                    (activeV2QuotaStatus.isWarning ||
+                      activeV2QuotaStatus.isBlocked) && (
+                      <div
+                        data-testid="v2-quota-alert-banner"
+                        className={`mb-2 px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                          activeV2QuotaStatus.isBlocked
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                            : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                        }`}
+                      >
+                        <span className="truncate">
+                          {activeV2QuotaStatus.blockedMessage ||
+                            activeV2QuotaStatus.warningMessage}
+                        </span>
+                        <span className="text-[10px] font-mono shrink-0 opacity-80">
+                          {activeV2QuotaStatus.statusText}
+                        </span>
+                      </div>
+                    )}
+
+                  {/* Bilingual Voice Input Review Bar (editable in composer before send) */}
+                  {(isListening || voiceReviewPending) && (
+                    <div
+                      data-testid="voice-review-bar"
+                      className="mb-2 px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-wrap items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2 text-[var(--text-2)]">
+                        <Mic
+                          className={`w-3.5 h-3.5 ${
+                            isListening ? 'text-rose-400 animate-pulse' : 'text-[var(--primary)]'
+                          }`}
+                        />
+                        <span>
+                          {isListening
+                            ? 'Listening... speak naturally'
+                            : 'Review & edit captured voice before sending'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {(['auto', 'bn-BD', 'en-US'] as VoiceLangMode[]).map(
+                          (lng) => (
+                            <button
+                              key={lng}
+                              type="button"
+                              onClick={() => setVoiceLangMode(lng)}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-medium cursor-pointer ${
+                                voiceLangMode === lng
+                                  ? 'bg-[var(--primary)] text-white'
+                                  : 'bg-[var(--surface)] text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                              }`}
+                            >
+                              {lng === 'auto'
+                                ? 'Auto'
+                                : lng === 'bn-BD'
+                                  ? 'বাংলা'
+                                  : 'English'}
+                            </button>
+                          )
+                        )}
+                        {voiceReviewPending && (
+                          <button
+                            type="button"
+                            onClick={() => setVoiceReviewPending(false)}
+                            className="p-0.5 text-[var(--ink-dim)] hover:text-[var(--ink)] cursor-pointer"
+                            title="Dismiss voice notice"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Textarea */}
                   <div className="composer-input-wrap">
                   <textarea
@@ -4956,9 +5660,11 @@ export default function App() {
                       }
                     }}
                     placeholder={`Ask ${
-                      activeDisplayName === 'Msfta shop ai'
-                        ? 'SMFTA Pro'
-                        : activeDisplayName
+                      activeIsBuiltin
+                        ? activeModelLabel
+                        : activeDisplayName === 'Msfta shop ai'
+                          ? activeModelLabel
+                          : activeDisplayName
                     } anything…`}
                     className="w-full bg-transparent border-none outline-none resize-none text-[15px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[48px] max-h-[160px] leading-relaxed pl-7 pr-3 pt-3.5"
                   />
@@ -5070,6 +5776,7 @@ export default function App() {
                       <div className="relative">
                         <button
                           type="button"
+                          data-testid="model-selector-btn"
                           onClick={() => setBottomModelMenuOpen((v) => !v)}
                           className="chip-btn composer-model"
                           title="Switch Active AI Model"
@@ -5077,6 +5784,16 @@ export default function App() {
                           <span className="truncate max-w-[125px] sm:max-w-[180px]">
                             {activeModelLabel}
                           </span>
+                          {activeIsV2 && activeV2QuotaStatus && (
+                            <span className="text-[10px] font-mono opacity-75 hidden sm:inline">
+                              ·{' '}
+                              {activeV2QuotaStatus.isUnlimited
+                                ? '∞'
+                                : activeV2QuotaStatus.isTestingBypass
+                                  ? `${activeV2QuotaStatus.testingRemaining}`
+                                  : `${activeV2QuotaStatus.remaining}/${activeV2QuotaStatus.limit}`}
+                            </span>
+                          )}
                           <ChevronDown className="w-3.5 h-3.5 opacity-70 shrink-0" />
                         </button>
 
@@ -5086,7 +5803,10 @@ export default function App() {
                               className="fixed inset-0 z-30"
                               onClick={() => setBottomModelMenuOpen(false)}
                             />
-                            <div className="absolute right-0 bottom-full mb-2 w-80 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-2 z-40 space-y-2 max-h-[70vh] overflow-y-auto">
+                            <div
+                              data-testid="model-menu-popover"
+                              className="absolute right-0 bottom-full mb-2 w-80 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-2 z-40 space-y-2 max-h-[70vh] overflow-y-auto"
+                            >
                               {!activeIsBuiltin && (
                                 <div>
                                   <div className="pt-1 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
@@ -5189,6 +5909,7 @@ export default function App() {
                                   );
                                 })}
 
+                              {/* Group 1: V1 – Natural (Existing System, 100% Untouched) */}
                               <div
                                 className={
                                   !activeIsBuiltin
@@ -5197,20 +5918,22 @@ export default function App() {
                                 }
                               >
                                 <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
-                                  <span>SMFTA built-in engine</span>
+                                  <span>V1 – Natural</span>
                                   <span className="text-[var(--primary)] font-semibold">
-                                    Keyless
+                                    Existing
                                   </span>
                                 </div>
                                 <div className="space-y-0.5">
                                   {BUILTIN_TIERS.map((tier) => {
                                     const isSelectedTier =
                                       activeIsBuiltin &&
+                                      !activeIsV2 &&
                                       activeModelName === tier.model;
                                     return (
                                       <button
                                         key={tier.model}
                                         type="button"
+                                        data-testid={`select-model-${tier.model}`}
                                         onClick={() => {
                                           if (!activeIsBuiltin) {
                                             const builtinProf =
@@ -5252,6 +5975,137 @@ export default function App() {
                                     );
                                   })}
                                 </div>
+                              </div>
+
+                              {/* Group 2: V2 – Special (Independent Firebase AI System) */}
+                              <div className="pt-1.5 border-t border-[var(--border)]">
+                                <div className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)] flex items-center justify-between">
+                                  <span>V2 – Special</span>
+                                  <span className="text-emerald-400 font-semibold">
+                                    V2 Engine
+                                  </span>
+                                </div>
+                                <div className="space-y-0.5">
+                                  {V2_SPECIAL_MODELS.map((spec) => {
+                                    const isSelectedV2 =
+                                      activeIsBuiltin &&
+                                      activeModelName === spec.id;
+                                    const qStat = getV2QuotaStatusForModel(spec.id);
+                                    return (
+                                      <button
+                                        key={spec.id}
+                                        type="button"
+                                        data-testid={`select-model-${spec.id}`}
+                                        onClick={() => {
+                                          handleSelectModel(spec.id);
+                                          setBottomModelMenuOpen(false);
+                                        }}
+                                        className={`w-full text-left px-3 py-2 text-xs rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
+                                          isSelectedV2
+                                            ? 'bg-[var(--primary)] text-white font-semibold'
+                                            : 'text-[var(--ink)] hover:bg-[var(--surface-2)]'
+                                        }`}
+                                      >
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <span className="font-semibold truncate">
+                                              {spec.label}
+                                            </span>
+                                            <span
+                                              className={`text-[10px] font-mono shrink-0 ${
+                                                isSelectedV2
+                                                  ? 'text-white/90'
+                                                  : qStat.isUnlimited
+                                                    ? 'text-emerald-400'
+                                                    : qStat.isBlocked
+                                                      ? 'text-rose-400'
+                                                      : qStat.isWarning
+                                                        ? 'text-amber-400'
+                                                        : 'text-[var(--ink-dim)]'
+                                              }`}
+                                            >
+                                              {qStat.isUnlimited
+                                                ? 'Unlimited'
+                                                : qStat.isTestingBypass
+                                                  ? `Test ${qStat.testingRemaining}`
+                                                  : `${qStat.remaining}/${qStat.limit}`}
+                                            </span>
+                                          </div>
+                                          <div
+                                            className={`text-[10px] truncate ${
+                                              isSelectedV2
+                                                ? 'text-white/80'
+                                                : 'text-[var(--ink-dim)]'
+                                            }`}
+                                          >
+                                            {spec.desc}
+                                          </div>
+                                        </div>
+                                        {isSelectedV2 && (
+                                          <Check className="w-3.5 h-3.5 shrink-0" />
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div className="px-2.5 pt-1.5 text-[10px] text-[var(--ink-dim)] flex items-center justify-between gap-2">
+                                  <span>
+                                    {isV2AuthorizedTester
+                                      ? 'Admin Unlimited · Zero daily limits'
+                                      : `Resets ${v2ResetInfo.label}`}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Firebase Cloud Memory & Auth Sync Row */}
+                              <div className="pt-1.5 border-t border-[var(--border)] px-2 pb-1 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2 text-[11px]">
+                                  <span className="text-[var(--ink-dim)] truncate">
+                                    {firebaseUser
+                                      ? `Synced: ${firebaseUser.email || firebaseUser.displayName || 'Account'}`
+                                      : 'Firestore Sync: Sign in to sync devices'}
+                                  </span>
+                                  {firebaseUser ? (
+                                    <button
+                                      type="button"
+                                      data-testid="firebase-signout-btn"
+                                      onClick={() => void signOutFromFirebase()}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--surface-2)] text-[var(--ink)] hover:text-rose-400 cursor-pointer shrink-0"
+                                    >
+                                      <LogOut className="w-3 h-3" />
+                                      <span>Sign out</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      data-testid="firebase-signin-btn"
+                                      onClick={() =>
+                                        void signInWithFirebaseGoogle().catch((e) =>
+                                          showToast(
+                                            e instanceof Error
+                                              ? e.message
+                                              : 'Sign-in cancelled'
+                                          )
+                                        )
+                                      }
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[var(--primary)] text-white font-medium cursor-pointer shrink-0"
+                                    >
+                                      <Cloud className="w-3 h-3" />
+                                      <span>Sync</span>
+                                    </button>
+                                  )}
+                                </div>
+
+                                {isV2AuthorizedTester && (
+                                  <div className="flex items-center justify-between gap-2 text-[11px] pt-1 border-t border-[var(--border)]/60">
+                                    <span className="text-emerald-400 font-medium">
+                                      Admin Unlimited Active
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500 text-white">
+                                      Unlimited
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </>
@@ -5353,13 +6207,67 @@ export default function App() {
         }}
       />
 
-      {/* CODE WORKSPACE — code, running site, .zip download */}
-      <CodeWorkspaceModal
-        isOpen={codeWorkspace !== null}
-        onClose={() => setCodeWorkspace(null)}
-        blocks={codeWorkspace?.blocks || []}
-        title={codeWorkspace?.title}
+      {/* Settings Hub Modal (Opened cleanly from Header Three-Dot Menu) */}
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        initialTab={settingsTab}
+        profile={profile}
+        settings={settings}
+        memory={memory}
+        savedProfiles={savedProfiles}
+        onUpdateProfiles={handleUpdateProfiles}
+        onSelectProfile={handleSelectProfile}
+        onSave={(newProfile, newSettings) => {
+          setProfile(newProfile);
+          setSettings(sanitizeSettings(newSettings));
+          showToast('Settings saved');
+        }}
+        onResetSettings={() => {
+          setSettings({ ...DEFAULT_SETTINGS });
+          showToast('Settings reset to defaults');
+        }}
+        onUpdateMemory={(next) => {
+          const migrated = factsToText(migrateMemory(next).facts, MEMORY_MAX);
+          memoryRef.current = migrated;
+          setMemory(migrated);
+        }}
+        onClearMemory={() => {
+          forgetAllMemory();
+          if (firebaseUser && firebaseUser.emailVerified) {
+            void clearAllFirestoreMemories(firebaseUser).catch(() => {});
+          }
+        }}
+        onExportBackup={handleExportBackup}
+        onImportBackup={handleImportBackup}
+        onSaveRollbackPoint={handleSaveRollbackPoint}
+        onRollback={handleRollback}
+        hasRollbackPoint={Boolean(
+          typeof window !== 'undefined' && localStorage.getItem(LS_KEYS.rollback)
+        )}
+        onClearAllData={handleFullClearAllData}
+        onOpenWhatsNew={() => setInfoModal('whatsnew')}
+        connections={connections}
+        onUpdateConnections={handleUpdateConnections}
+        notes={notes}
+        onOpenNotebook={() => setNotebookOpen(true)}
+        selfWidgets={selfWidgets}
+        onUpdateWidgets={setSelfWidgets}
+        onOpenWidget={(w) => setActiveWidgetModal(w)}
         notify={showToast}
+        onBackupToGithub={handleBackupToGithub}
+        skills={skills}
+        onUpdateSkills={setSkills}
+        autonomy={autonomy}
+        onAutonomyChange={setAutonomy}
+        onSelfRepair={handleSelfRepair}
+        onProviderTestResult={setProviderTestStatus}
+        keystoreEphemeral={keystoreEphemeral}
+        usageToday={{
+          date: new Date().toDateString(),
+          requests: usageToday,
+          chars: 0,
+        }}
       />
 
       {/* Image Lightbox */}

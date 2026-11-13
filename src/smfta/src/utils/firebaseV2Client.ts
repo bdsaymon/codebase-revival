@@ -43,8 +43,6 @@ import {
   V2_MODEL_IDS,
   getV2ModelSpec,
   getRiyadhDateKey,
-  buildFirestoreUsageDocId,
-  DEFAULT_V2_LIMITS,
   ADMIN_EMAILS,
 } from './v2UsageLimits';
 
@@ -152,7 +150,6 @@ export async function validateFirestoreConnection(
       console.error('Please check your Firebase configuration.');
       return false;
     }
-    // Permission denied on /test/connection proves the server is reachable and rules are active
     return true;
   }
 }
@@ -225,7 +222,7 @@ function sanitizeDocId(rawId: string | number): string {
 
 /**
  * Ensures the root `/users/{userId}` document exists so Master Gate subcollections
- * (`conversations`, `memories`, `usage`) pass relational existence checks.
+ * (`conversations`, `sessions`, `memories`, `usage`) pass relational existence checks.
  */
 export async function ensureFirestoreUserProfile(
   user: FirebaseUser,
@@ -239,9 +236,9 @@ export async function ensureFirestoreUserProfile(
   const ref = doc(db, 'users', userId);
   try {
     const snap = await getDoc(ref);
-    const safeName = (displayName || user.displayName || 'SMFTA User')
-      .trim()
-      .slice(0, 80) || 'SMFTA User';
+    const safeName =
+      (displayName || user.displayName || 'SMFTA User').trim().slice(0, 80) ||
+      'SMFTA User';
     if (!snap.exists()) {
       await setDoc(ref, {
         userId,
@@ -250,6 +247,109 @@ export async function ensureFirestoreUserProfile(
         testingAllowance: 0,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function ensureFirestoreSessionDoc(
+  user: FirebaseUser,
+  sessionId: string | number,
+  title: string,
+  systemVersion: 'v1' | 'v2',
+  modelId: string
+): Promise<void> {
+  if (!user?.uid || !user.emailVerified) return;
+  const { db } = getFirebaseServices();
+  await ensureFirestoreUserProfile(user, user.displayName || 'SMFTA User', db);
+
+  const userId = sanitizeDocId(user.uid);
+  const cleanSessionId = sanitizeDocId(`sess_${sessionId}`);
+  const path = `users/${userId}/sessions/${cleanSessionId}`;
+  const ref = doc(db, 'users', userId, 'sessions', cleanSessionId);
+  const safeTitle = (title || 'Conversation').trim().slice(0, 200) || 'Conversation';
+  const safeModelId = (modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
+
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        userId,
+        sessionId: cleanSessionId,
+        title: safeTitle,
+        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+        modelId: safeModelId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        title: safeTitle,
+        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+        modelId: safeModelId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function saveSessionMessageToFirestore(params: {
+  user: FirebaseUser;
+  sessionId: string | number;
+  sessionTitle: string;
+  messageId: string;
+  role: 'user' | 'ai';
+  text: string;
+  modelId: string;
+  systemVersion: 'v1' | 'v2';
+}): Promise<void> {
+  if (!params.user?.uid || !params.user.emailVerified) return;
+  const cleanText = String(params.text || '').trim().slice(0, 32_000);
+  if (!cleanText) return;
+
+  const { db } = getFirebaseServices();
+  await ensureFirestoreSessionDoc(
+    params.user,
+    params.sessionId,
+    params.sessionTitle,
+    params.systemVersion,
+    params.modelId
+  );
+
+  const userId = sanitizeDocId(params.user.uid);
+  const cleanSessionId = sanitizeDocId(`sess_${params.sessionId}`);
+  const cleanMsgId = sanitizeDocId(params.messageId);
+  const path = `users/${userId}/sessions/${cleanSessionId}/messages/${cleanMsgId}`;
+  const ref = doc(
+    db,
+    'users',
+    userId,
+    'sessions',
+    cleanSessionId,
+    'messages',
+    cleanMsgId
+  );
+
+  try {
+    const existingSnap = await getDoc(ref);
+    if (!existingSnap.exists()) {
+      await setDoc(ref, {
+        userId,
+        sessionId: cleanSessionId,
+        messageId: cleanMsgId,
+        role: params.role === 'user' ? 'user' : 'ai',
+        text: cleanText,
+        modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      await updateDoc(ref, {
+        text: cleanText,
+        modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
       });
     }
   } catch (error) {
@@ -277,6 +377,7 @@ export async function syncConversationToFirestore(
     role: m.role,
     text: String(m.text || '').slice(0, 12_000),
     thinking: m.thinking ? String(m.thinking).slice(0, 4_000) : undefined,
+    v2ModelId: m.v2ModelId,
     ts: m.ts,
   }));
   const messagesPayload = JSON.stringify(compactMsgs).slice(0, 240_000);
@@ -336,9 +437,10 @@ export function subscribeToFirestoreConversations(
               String(data.conversationId || '').replace(/^conv_/, '')
             );
             loaded.push({
-              id: Number.isFinite(rawNumericId) && rawNumericId > 0
-                ? rawNumericId
-                : Date.now(),
+              id:
+                Number.isFinite(rawNumericId) && rawNumericId > 0
+                  ? rawNumericId
+                  : Date.now(),
               title: String(data.title || 'Conversation'),
               msgs: parsedMsgs,
             });
@@ -389,7 +491,8 @@ export async function saveMemoryFactToFirestore(
   const path = `users/${userId}/memories/${memoryId}`;
   const ref = doc(db, 'users', userId, 'memories', memoryId);
   const safeTopic = (topic || 'general').trim().slice(0, 80) || 'general';
-  const safeModel = (sourceModel || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
+  const safeModel =
+    (sourceModel || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
 
   try {
     const snap = await getDoc(ref);
@@ -429,11 +532,17 @@ export function subscribeToFirestoreMemories(
   return onSnapshot(
     q,
     (snapshot) => {
+      const seen = new Set<string>();
       const facts: string[] = [];
       snapshot.forEach((docSnap) => {
         const d = docSnap.data();
         if (typeof d.fact === 'string' && d.fact.trim()) {
-          facts.push(d.fact.trim());
+          const norm = d.fact.trim();
+          const key = norm.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            facts.push(norm);
+          }
         }
       });
       onMemories(facts);
@@ -446,6 +555,63 @@ export function subscribeToFirestoreMemories(
       }
     }
   );
+}
+
+/**
+ * Selects only the most relevant bounded memories for a query without blindly
+ * dumping every stored fact into the model context.
+ */
+export function selectRelevantFirestoreMemories(
+  queryText: string,
+  allFacts: string[],
+  maxCount = 8
+): string[] {
+  if (!allFacts.length) return [];
+  const STOP_WORDS = new Set([
+    'me',
+    'my',
+    'is',
+    'am',
+    'are',
+    'in',
+    'on',
+    'to',
+    'for',
+    'of',
+    'the',
+    'and',
+    'or',
+    'it',
+    'this',
+    'that',
+    'help',
+    'app',
+  ]);
+  const tokenize = (text: string): string[] =>
+    String(text || '')
+      .toLowerCase()
+      .split(/[\s,.;:!?()[\]{}"'`]+/)
+      .filter((w) => w.length >= 2 && !STOP_WORDS.has(w));
+
+  const words = new Set(tokenize(queryText));
+  const scored = allFacts.map((fact, idx) => {
+    const factTokens = new Set(tokenize(fact));
+    const low = fact.toLowerCase();
+    let score = 0;
+    for (const w of words) {
+      if (factTokens.has(w) || (w.length >= 4 && low.includes(w))) {
+        score += 3;
+      }
+    }
+    if (/name|language|prefer|আমার নাম|পছন্দ/i.test(fact)) {
+      score += 1;
+    }
+    return { fact, score, idx };
+  });
+  scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+  const relevant = scored.filter((s) => s.score > 0).slice(0, maxCount);
+  if (relevant.length > 0) return relevant.map((r) => r.fact);
+  return allFacts.slice(0, Math.min(4, maxCount));
 }
 
 export async function clearAllFirestoreMemories(
@@ -470,6 +636,10 @@ export interface FirestoreUsageSnapshot {
   testingUsedByModel: Record<V2ModelId, number>;
 }
 
+/**
+ * Read-only real-time listener on `/users/{userId}/usage`.
+ * Normal clients can only observe their quota; writes are write-locked by Security Rules.
+ */
 export function subscribeToFirestoreV2Usage(
   user: FirebaseUser,
   onUsageUpdate: (snapshot: FirestoreUsageSnapshot) => void
@@ -515,70 +685,32 @@ export function subscribeToFirestoreV2Usage(
 }
 
 /**
- * Records a V2 request in Cloud Firestore `/users/{userId}/usage/{dateRiyadh}_{modelId}`,
- * enforcing daily limits and separating admin/testing requests from normal user quotas.
+ * Formats conversation history strictly for Firebase AI Logic (`contents`):
+ * skips empty text entries, starts on a user turn, and merges adjacent same-role turns.
  */
-export async function recordFirestoreV2Usage(
-  user: FirebaseUser,
-  modelId: V2ModelId,
-  isTestingBypass = false
-): Promise<{ used: number; testingUsed: number }> {
-  const { db } = getFirebaseServices();
-  await ensureFirestoreUserProfile(user, user.displayName || 'SMFTA User', db);
-
-  const userId = sanitizeDocId(user.uid);
-  const dateRiyadh = getRiyadhDateKey();
-  const usageKey = buildFirestoreUsageDocId(dateRiyadh, modelId);
-  const path = `users/${userId}/usage/${usageKey}`;
-  const ref = doc(db, 'users', userId, 'usage', usageKey);
-  const defaultLimit = DEFAULT_V2_LIMITS[modelId];
-
-  try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      const initialCount = isTestingBypass ? 0 : 1;
-      const initialTesting = isTestingBypass ? 1 : 0;
-      await setDoc(ref, {
-        userId,
-        usageKey,
-        dateRiyadh,
-        modelId,
-        count: initialCount,
-        dailyLimit: defaultLimit,
-        testingCount: initialTesting,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      return { used: initialCount, testingUsed: initialTesting };
+export function formatFirebaseAiContents(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>
+): Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> {
+  const turns: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> =
+    [];
+  for (const m of history) {
+    const text = String(m.content || '').trim();
+    if (!text) continue;
+    const role: 'user' | 'model' = m.role === 'user' ? 'user' : 'model';
+    if (turns.length === 0 && role !== 'user') continue;
+    const prev = turns[turns.length - 1];
+    if (prev && prev.role === role) {
+      prev.parts.push({ text });
     } else {
-      const data = snap.data();
-      const prevCount = Math.max(0, Number(data.count) || 0);
-      const prevTesting = Math.max(0, Number(data.testingCount) || 0);
-      const nextCount = isTestingBypass ? prevCount : prevCount + 1;
-      const nextTesting = isTestingBypass ? prevTesting + 1 : prevTesting;
-
-      if (isTestingBypass) {
-        await updateDoc(ref, {
-          testingCount: nextTesting,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await updateDoc(ref, {
-          count: nextCount,
-          updatedAt: serverTimestamp(),
-        });
-      }
-      return { used: nextCount, testingUsed: nextTesting };
+      turns.push({ role, parts: [{ text }] });
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
   }
+  return turns;
 }
 
 /**
- * Streams a V2 model response directly via Firebase AI Logic (`firebase/ai`) when
- * enabled in the Firebase project, returning false if the backend should handle
- * the stream via `@google/genai`.
+ * Direct single-pass V2 Firebase AI Logic (`firebase/ai`) streaming call.
+ * Zero retry loops and zero V1 mixing.
  */
 export async function tryStreamViaFirebaseAiLogic(params: {
   modelId: V2ModelId;
@@ -590,20 +722,18 @@ export async function tryStreamViaFirebaseAiLogic(params: {
   const { ai } = getFirebaseServices();
   if (!ai) return false;
   const spec = getV2ModelSpec(params.modelId);
+  const contents = formatFirebaseAiContents(params.history);
+  if (contents.length === 0) return false;
 
   try {
     const genModel = getGenerativeModel(ai, {
       model: spec.firebaseAiModel,
       systemInstruction: params.systemInstruction,
       generationConfig: {
+        temperature: spec.temperature,
         maxOutputTokens: spec.maxOutputTokens,
       },
     });
-
-    const contents = params.history.map((m) => ({
-      role: m.role === 'user' ? ('user' as const) : ('model' as const),
-      parts: [{ text: m.content }],
-    }));
 
     const streamRes = await genModel.generateContentStream(
       { contents },

@@ -18,6 +18,35 @@
 export const MEMORY_MAX = 200;
 export const MEMORY_PROMPT_LIMIT = 120;
 
+export const MASTER_PROFILE_NAME = 'SAYMON HASAN';
+export const MASTER_PROFILE_FACTS: string[] = [
+  'নাম: SAYMON HASAN',
+  'পরিচয়: Full-Stack Web & Android Developer from Saudi Arabia',
+  'ব্র্যান্ড: MSFTASHOP',
+  'নিয়ম: Always reply in simple, direct Bengali unless asked otherwise, avoid unnecessary explanations, never output code unless explicitly asked for code, and never break existing systems.',
+];
+
+export const MASTER_PROFILE_PROMPT_BASELINE = [
+  'PERMANENT MASTER USER PROFILE & CORE RULES (ALWAYS REMEMBER & FOLLOW):',
+  '- User Name: SAYMON HASAN',
+  '- Identity & Location: Full-Stack Web & Android Developer from Saudi Arabia (Brand: MSFTASHOP)',
+  '- Reply Rule: Always reply in simple, direct Bengali (সহজ ও সরাসরি বাংলা) unless asked otherwise. Avoid unnecessary explanations or filler.',
+  '- Code Rule: NEVER generate or output any code or code blocks unless the user explicitly asks for code.',
+  '- Safety Rule: Never break existing systems or features.',
+].join('\n');
+
+/**
+ * Ensures SAYMON HASAN's permanent master profile facts are pinned in the memory list
+ * without duplicating existing entries.
+ */
+export function ensureMasterProfileMemory(raw: unknown): string[] {
+  const migrated = migrateMemory(raw).facts;
+  const { facts: merged } = addFacts(migrated, MASTER_PROFILE_FACTS, {
+    source: 'user',
+  });
+  return factsToText(merged, MEMORY_MAX);
+}
+
 export interface MemoryFact {
   text: string;
   createdAt: number;
@@ -366,7 +395,14 @@ export function recallFromMemory(
 /** Extra auto-detection patterns (name, job, city, likes, goals, birthday). */
 export function extractMemoryCandidates(text: string): string[] {
   const clean = (text || '').trim();
-  if (!clean) return [];
+  // Skip large pasted notes/documents so auto-memory never freezes or extracts noise.
+  if (
+    !clean ||
+    clean.length > 450 ||
+    (clean.includes('\n') && clean.split('\n').length > 6 && clean.length > 260)
+  ) {
+    return [];
+  }
   const out: string[] = [];
   const push = (key: string, value?: string) => {
     const v = (value || '').trim().replace(/[।.,!?]+$/, '');

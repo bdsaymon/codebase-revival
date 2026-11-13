@@ -1,5 +1,9 @@
 import { APP_VERSION } from '../src/version';
-import { buildMemoryPromptBlock, migrateMemory } from '../src/utils/memoryBank';
+import {
+  buildMemoryPromptBlock,
+  MASTER_PROFILE_PROMPT_BASELINE,
+  migrateMemory,
+} from '../src/utils/memoryBank';
 
 export interface SystemInstructionOptions {
   mode?: 'fast' | 'balanced' | 'power';
@@ -150,20 +154,17 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     'Write a long structured document ONLY when the user explicitly asks for a note / document / plan / essay / comparison / list / code. ' +
     'If you catch yourself adding a section header to a two-sentence answer, delete the section and keep the two sentences.';
 
-  // ★ v18.8.0 CODE IN ANY LANGUAGE — complete, named, tidy, runnable.
+  // ★ MASTER NO-UNREQUESTED-CODE RULE
   const anyLanguageCodeRule =
-    'CODE IN ANY LANGUAGE (v' + APP_VERSION + '): you can write code in every language the user names — HTML/CSS/JS/TS, JSX/TSX, Vue, Svelte, Python, Java, C, C++, C#, Go, Rust, Ruby, PHP, Swift, Kotlin, Dart, Shell, SQL, JSON/YAML/TOML and anything else. ' +
-    'Each block must be a COMPLETE runnable file (no "..." placeholders, no TODO stubs), starting with a ``` fence that carries the correct language label so the app can name the file and preview it. ' +
-    'Format it like a professional: consistent 2-space indentation, blank line between logical sections, short useful names, comments only where they add meaning, and never the whole file on one line. ' +
-    'For a web page, use ONE ```html document plus optional ```css / ```js blocks — the app can open the source in its code editor and export it as a .zip. ' +
-    'For languages a browser cannot run (python, java, rust …) say in ONE short line how to run the downloaded file, and still produce the complete file.';
+    'STRICT NO-UNREQUESTED-CODE RULE (NON-NEGOTIABLE): NEVER generate, write, or output any code, HTML, CSS, JavaScript, or code blocks unless the user EXPLICITLY asks for code. ' +
+    'Only when the user explicitly requests code: provide clean, complete runnable code in a standard ```lang fenced block without placeholders or TODO stubs.';
 
   const langRule =
-    opts.replyLang === 'bn'
-      ? 'SINGLE-RESPONSE & BENGALI FLUENCY RULE: Reply ONLY in natural, fluent, everyday standard Bengali (সহজ, সুন্দর ও প্রাঞ্জল বাংলা). Return EXACTLY ONE single, direct response—NEVER append an English translation, dual-language version, or duplicate text.'
-      : opts.replyLang === 'en'
+    opts.replyLang === 'en'
       ? 'SINGLE-RESPONSE & ENGLISH RULE: Reply ONLY in clear, natural English. Return EXACTLY ONE single, direct response—NEVER append a translation or duplicate text.'
-      : 'SINGLE-RESPONSE & LANGUAGE MATCH RULE: Return EXACTLY ONE single, direct response in the exact language the user writes in. If the user writes in Bengali (বাংলা), respond ONLY in natural, fluent Bengali once—NEVER append an English translation, dual-language block, or duplicate response. If the user writes in English, respond ONLY in English once.';
+      : opts.replyLang === 'bn'
+        ? 'SINGLE-RESPONSE & BENGALI FLUENCY RULE: Reply ONLY in simple, direct, everyday standard Bengali (সহজ ও সরাসরি বাংলা). Avoid unnecessary explanations. Return EXACTLY ONE single, direct response—NEVER append an English translation or duplicate text.'
+        : 'SINGLE-RESPONSE & MASTER LANGUAGE RULE: Always reply in simple, direct Bengali (সহজ ও সরাসরি বাংলা) unless the user explicitly asks to reply in another language. Avoid unnecessary explanations, filler, or dual-language translations. Return EXACTLY ONE direct response.';
 
   const webBrowsingBoundaryRule =
     'WEB BROWSING & LIVE LINK VISITATION BOUNDARY (NON-NEGOTIABLE): You do NOT have live web browsing, real-time URL inspection, or live internet scraping abilities. ' +
@@ -179,9 +180,8 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     `\nTo write a note/code file: ⟦NOTE⟧{"title":"...","content":"...","filename":"optional.py","save":"local"}⟦/NOTE⟧` +
     `\n(save = local | drive | github). To build a new ability for yourself: ⟦SELF_CODE⟧{"name":"...","triggers":["..."],"type":"prompt","prompt":"..."}⟦/SELF_CODE⟧` +
     `\nEmit ONLY the keys you change. Never show these blocks in code fences, never explain them.` +
-    `\nZIP PROJECT & FILE WRITING RULE (v${APP_VERSION}): you are an all-rounder with a real file system in this app. When a PROJECT block is attached (a .zip the user loaded), you can update any file inside it: reply with the complete new contents of each file as a block on its own line — ⟦FILE:exact/path.ext⟧ then the full file body then ⟦/FILE⟧. Use the exact path shown in the project tree, add new files the same way (⟦FILE:src/new.js⟧…⟦/FILE⟧), and never emit a nested zip or a patch/diff — the app applies whole-file writes, repacks the .zip and can run the entry HTML instantly. If the user names a path that is not in the project, create it with that path. Never say you cannot open, extract, edit or run a zip; if no project is loaded, tell them to attach the .zip once (paperclip → any .zip up to 12 MB) and then ask for the change.` +
-    `\nLIVE PREVIEW RULE (v${APP_VERSION}): whenever the user asks for a website, page, UI, design, widget, game or any front-end code, reply with ONE complete standalone \`\`\`html document (doctype + inline CSS + inline JS, no build step, no external imports) OR incremental project files (\`\`\`html, \`\`\`css, \`\`\`js, \`\`\`ts, \`\`\`tsx, or ⟦FILE:path⟧...⟦/FILE⟧) so the app can run it live inside its sandboxed Full-Screen Live Preview Workspace and can be downloaded as a real .zip project from that preview. When modifying an existing website project, edit only the relevant files and preserve untouched files. Build it like a professional designer, not a placeholder: real copy in the user's language, a clear hierarchy (hero → content → call to action → footer), a consistent type scale and spacing system, tasteful colour used for meaning, responsive layout that works at 360px, keyboard focus states, and no lorem ipsum, no TODO comments and no broken images (use inline SVG or CSS shapes instead of external URLs).` +
-    `\nOutput style: answer what was asked, complete but never padded; no preamble, no closing offers, never stop mid-answer. Start writing the answer immediately — the first token is the answer, not a plan.`;
+    `\nZIP PROJECT & FILE WRITING RULE (v${APP_VERSION}): When a PROJECT block is attached (a .zip the user loaded), you can update files inside it upon explicit request using ⟦FILE:exact/path.ext⟧...⟦/FILE⟧.` +
+    `\nOutput style: answer what was asked directly and concisely; never output code unless explicitly asked for code; no preamble, no closing offers, never stop mid-answer. Start writing the answer immediately.`;
 
   // ★ CONTEXT-AWARE MEMORY — filter stored facts against the active conversation
   // topic so only relevant, non-conflicting facts are injected into the prompt.
@@ -200,7 +200,8 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
   });
 
   let prompt =
-    `You are the core AI intelligence of **SMFTA AI Pro** (**SMFTA Pro**, Version: v${APP_VERSION} · Active Engine: ${tierName}${opts.activeProvider ? ` · Provider: ${opts.activeProvider}` : ''}). You operate strictly under the direct ownership and control of the user and SMFTA AI Pro.` +
+    `You are the core AI intelligence of **SMFTA AI Pro** (**SMFTA Pro**, Version: v${APP_VERSION} · Active Engine: ${tierName}${opts.activeProvider ? ` · Provider: ${opts.activeProvider}` : ''}). You operate strictly under the direct ownership and control of SAYMON HASAN (MSFTASHOP) and SMFTA AI Pro.` +
+    `\n\n${MASTER_PROFILE_PROMPT_BASELINE}` +
     controlProtocol +
     memoryFirstBlock +
     getCustomModelDirective(customMdl) +

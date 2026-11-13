@@ -45,6 +45,10 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/users/$(userId));
     }
 
+    function sessionExists(userId, sessionId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/sessions/$(sessionId));
+    }
+
     // 3. Entity Validation Blueprints
     function isValidAdminRecord(data, adminUid) {
       return data.keys().hasAll(['uid', 'role', 'createdAt']) &&
@@ -101,6 +105,67 @@ service cloud.firestore {
         data.messageCount is int && data.messageCount >= 0 && data.messageCount <= 5000 &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
+    }
+
+    function isValidSession(data, userId, sessionId) {
+      return data.keys().hasAll([
+          'userId',
+          'sessionId',
+          'title',
+          'systemVersion',
+          'modelId',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'sessionId',
+          'title',
+          'systemVersion',
+          'modelId',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == userId &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.sessionId == sessionId &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.systemVersion is string && (data.systemVersion == 'v1' || data.systemVersion == 'v2') &&
+        data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 64 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSessionMessage(data, userId, sessionId, messageId) {
+      return data.keys().hasAll([
+          'userId',
+          'sessionId',
+          'messageId',
+          'role',
+          'text',
+          'modelId',
+          'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'userId',
+          'sessionId',
+          'messageId',
+          'role',
+          'text',
+          'modelId',
+          'createdAt'
+        ]) &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+        data.userId == userId &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+        data.sessionId == sessionId &&
+        data.messageId is string && data.messageId.size() >= 1 && data.messageId.size() <= 128 &&
+        data.messageId == messageId &&
+        data.role is string && (data.role == 'user' || data.role == 'ai') &&
+        data.text is string && data.text.size() >= 1 && data.text.size() <= 32000 &&
+        data.modelId is string && data.modelId.size() >= 1 && data.modelId.size() <= 64 &&
+        data.createdAt is timestamp;
     }
 
     function isValidMemory(data, userId, memoryId) {
@@ -259,6 +324,71 @@ service cloud.firestore {
         allow delete: if isSignedIn() && isValidId(userId) && isValidId(conversationId) && (isOwner(userId) || isAdmin()) && userExists(userId);
       }
 
+      match /sessions/{sessionId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && (isOwner(userId) || isAdmin()) && userExists(userId);
+        allow list: if isSignedIn() && existing().userId == request.auth.uid;
+        allow create: if isSignedIn() &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          isValidSession(incoming(), userId, sessionId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isOwner(userId) &&
+          userExists(userId);
+        allow update: if isSignedIn() &&
+          isValidId(userId) &&
+          isValidId(sessionId) &&
+          isValidSession(incoming(), userId, sessionId) &&
+          incoming().userId == existing().userId &&
+          incoming().sessionId == existing().sessionId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            (isOwner(userId) &&
+              userExists(userId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'title',
+                'systemVersion',
+                'modelId',
+                'updatedAt'
+              ])) ||
+            isAdmin()
+          );
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && (isOwner(userId) || isAdmin()) && userExists(userId);
+
+        match /messages/{messageId} {
+          allow get: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) && (isOwner(userId) || isAdmin()) && userExists(userId) && sessionExists(userId, sessionId);
+          allow list: if isSignedIn() && existing().userId == request.auth.uid;
+          allow create: if isSignedIn() &&
+            isValidId(userId) &&
+            isValidId(sessionId) &&
+            isValidId(messageId) &&
+            isValidSessionMessage(incoming(), userId, sessionId, messageId) &&
+            incoming().createdAt == request.time &&
+            isOwner(userId) &&
+            userExists(userId) &&
+            sessionExists(userId, sessionId);
+          allow update: if isSignedIn() &&
+            isValidId(userId) &&
+            isValidId(sessionId) &&
+            isValidId(messageId) &&
+            isValidSessionMessage(incoming(), userId, sessionId, messageId) &&
+            incoming().userId == existing().userId &&
+            incoming().sessionId == existing().sessionId &&
+            incoming().messageId == existing().messageId &&
+            incoming().role == existing().role &&
+            incoming().createdAt == existing().createdAt &&
+            (
+              (isOwner(userId) &&
+                userExists(userId) &&
+                sessionExists(userId, sessionId) &&
+                incoming().diff(existing()).affectedKeys().hasOnly(['text', 'modelId'])) ||
+              isAdmin()
+            );
+          allow delete: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && isValidId(messageId) && (isOwner(userId) || isAdmin()) && userExists(userId) && sessionExists(userId, sessionId);
+        }
+      }
+
       match /memories/{memoryId} {
         allow get: if isSignedIn() && isValidId(userId) && isValidId(memoryId) && (isOwner(userId) || isAdmin()) && userExists(userId);
         allow list: if isSignedIn() && existing().userId == request.auth.uid;
@@ -290,25 +420,15 @@ service cloud.firestore {
       match /usage/{usageKey} {
         allow get: if isSignedIn() && isValidId(userId) && isValidId(usageKey) && (isOwner(userId) || isAdmin()) && userExists(userId);
         allow list: if isSignedIn() && existing().userId == request.auth.uid;
-        allow create: if isSignedIn() &&
+        // Normal clients can NEVER write or tamper with their own quota counters.
+        allow create: if isAdmin() &&
           isValidId(userId) &&
           isValidId(usageKey) &&
           isValidDailyUsage(incoming(), userId, usageKey) &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
-          (
-            (isOwner(userId) &&
-              userExists(userId) &&
-              incoming().count == 1 &&
-              incoming().testingCount == 0 &&
-              (
-                (incoming().modelId == 'smfta-v5' && incoming().dailyLimit == 100) ||
-                (incoming().modelId == 'smfta-v2-pro' && incoming().dailyLimit == 40) ||
-                (incoming().modelId == 'smfta-max' && incoming().dailyLimit == 15)
-              )) ||
-            isAdmin()
-          );
-        allow update: if isSignedIn() &&
+          userExists(userId);
+        allow update: if isAdmin() &&
           isValidId(userId) &&
           isValidId(usageKey) &&
           isValidDailyUsage(incoming(), userId, usageKey) &&
@@ -318,19 +438,7 @@ service cloud.firestore {
           incoming().modelId == existing().modelId &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          (
-            // Action: Standard monotonic quota increment by 1 within dailyLimit
-            (isOwner(userId) &&
-              userExists(userId) &&
-              incoming().dailyLimit == existing().dailyLimit &&
-              incoming().testingCount == existing().testingCount &&
-              incoming().count == existing().count + 1 &&
-              incoming().count <= existing().dailyLimit &&
-              incoming().diff(existing()).affectedKeys().hasOnly(['count', 'updatedAt'])) ||
-            // Action: Admin / Testing bypass or limit adjustment
-            (isAdmin() &&
-              incoming().diff(existing()).affectedKeys().hasOnly(['count', 'dailyLimit', 'testingCount', 'updatedAt']))
-          );
+          incoming().diff(existing()).affectedKeys().hasOnly(['count', 'dailyLimit', 'testingCount', 'updatedAt']);
         allow delete: if isAdmin() && isValidId(userId) && isValidId(usageKey);
       }
     }

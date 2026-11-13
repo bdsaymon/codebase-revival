@@ -2289,7 +2289,7 @@ body,
   .composer-bar { padding: 2px 4px 6px 6px; gap: 2px; }
   .composer-icon { width: 34px; height: 34px; }
   .composer-send { width: 38px; height: 38px; }
-  .composer-model { max-width: 108px; }
+  .composer-model { max-width: 150px; }
   .composer-hint { display: none; }
   .content-scroll { padding-left: 10px; padding-right: 10px; }
   .msg-user-bubble { font-size: 15px; }
@@ -2302,7 +2302,7 @@ body,
 
 @media (max-width: 400px) {
   .app-header .chip-btn { max-width: 104px; }
-  .composer-model { max-width: 88px; }
+  .composer-model { max-width: 132px; }
   .app-header-actions .icon-btn { padding: 0 4px; min-width: 28px; }
 }
 
@@ -5664,4 +5664,65 @@ html[data-theme='dark'] .cs-account-avatar { color: var(--ink); }
 .cs-nav-hint { display: none; }
 .cs-nav-head { padding-bottom: 12px; }
 .codews-body.editor-only { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 640px) { .empty-title { font-size: 28px !important; } }
+@media (max-width: 640px) {
+  .app-shell,
+  .v2-main {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .app-header {
+    padding: 0 12px !important;
+    height: 52px;
+  }
+  .v2-main {
+    grid-template-rows: 52px 1fr auto;
+  }
+  .empty-state {
+    padding: 12px 14px !important;
+  }
+  .welcome-orb {
+    width: 48px !important;
+    height: 48px !important;
+    margin-bottom: 10px !important;
+  }
+  .empty-title {
+    font-size: 24px !important;
+    line-height: 1.2 !important;
+  }
+  .empty-sub {
+    font-size: 13px !important;
+    margin-top: 6px !important;
+    max-width: 92vw;
+  }
+  .composer-wrap {
+    padding: 0 10px 10px !important;
+  }
+  .composer {
+    border-radius: 16px !important;
+  }
+  .composer-bar {
+    flex-wrap: wrap;
+    gap: 6px !important;
+    padding: 6px 8px 8px !important;
+  }
+  .composer-bar > div {
+    max-width: 100%;
+  }
+  .composer-pill {
+    padding: 5px 8px !important;
+    font-size: 11px !important;
+  }
+  .composer-pill-label {
+    display: none;
+  }
+  .composer-model {
+    max-width: 145px;
+    padding: 5px 8px !important;
+    font-size: 11.5px !important;
+  }
+  .msg-row,
+  .msg-user-bubble,
+  .chat-code-block {
+    max-width: 100% !important;
+  }
+}
