@@ -11,8 +11,11 @@ import {
 import {
   buildV2GenAiRequestConfig,
   checkAndConsumeServerV2Quota,
+  extractCleanV2ErrorMessage,
   formatGeminiContents,
+  getV2ServerFallbackModels,
   isServerAuthorizedTester,
+  isTransientV2UpstreamError,
   setServerV2UsageCountForTesting,
   streamV2FirebaseModel,
   stripPrivateChainOfThought,
@@ -246,4 +249,47 @@ test('stripPrivateChainOfThought & bilingual voice segment detection handle mixe
   assert.equal(resolveRecognitionLanguage('en-US', 'bn'), 'en-US');
   assert.equal(resolveRecognitionLanguage('auto', 'en'), 'en-US');
   assert.equal(resolveRecognitionLanguage('auto', 'bn'), 'bn-BD');
+});
+
+test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays bounded to V2 models', () => {
+  const nested503 = new Error(
+    JSON.stringify({
+      error: {
+        message: JSON.stringify({
+          error: {
+            code: 503,
+            message:
+              'This model is currently experiencing high demand. Spikes in demand are usually temporary.',
+            status: 'UNAVAILABLE',
+          },
+        }),
+      },
+    })
+  );
+
+  const parsed = extractCleanV2ErrorMessage(nested503);
+  assert.equal(parsed.httpStatus, 503);
+  assert.equal(parsed.isTransient503, true);
+  assert.equal(parsed.isRateLimit, false);
+  assert.equal(parsed.message.includes('{"error"'), false);
+  assert.match(parsed.message, /high demand/i);
+
+  assert.equal(isTransientV2UpstreamError(nested503), true);
+  assert.equal(
+    isTransientV2UpstreamError(new Error('429 RESOURCE_EXHAUSTED')),
+    false
+  );
+  assert.equal(
+    isTransientV2UpstreamError(Object.assign(new Error('Unauthorized'), { status: 401 })),
+    false
+  );
+
+  assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
+    'gemini-3.1-flash-lite',
+    'gemini-4-hydrogen',
+  ]);
+  assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+  ]);
 });

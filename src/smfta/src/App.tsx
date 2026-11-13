@@ -3551,7 +3551,50 @@ export default function App() {
 
       if (response && response.ok && response.body) {
         setGenPhase((cur) => nextGenPhase(cur, { type: 'response' }));
-        await pipeSSE(response);
+        try {
+          await pipeSSE(response);
+        } catch (streamErr: unknown) {
+          const streamCode = (streamErr as { code?: string })?.code;
+          if (
+            isV2Request &&
+            streamCode === 'V2_AI_UNAVAILABLE' &&
+            !accumulated.trim() &&
+            !abortCtrl.signal.aborted
+          ) {
+            const v2Spec = getV2ModelSpec(effectiveExternalModel);
+            const fbOk = await tryStreamViaFirebaseAiLogic({
+              modelId: effectiveExternalModel as V2ModelId,
+              systemInstruction: v2Spec.systemDirective,
+              history: contextSlice.map((m) => ({
+                role: m.role === 'user' ? 'user' : 'assistant',
+                content: m.text,
+              })),
+              signal: abortCtrl.signal,
+              onDelta: (deltaTxt) => {
+                if (!deltaTxt) return;
+                if (firstTokenPerf === null) {
+                  firstTokenPerf =
+                    typeof performance !== 'undefined'
+                      ? performance.now()
+                      : Date.now();
+                  firstTokenIso = new Date().toISOString();
+                  setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
+                }
+                accumulated += deltaTxt;
+                if (!bubbleCreated) {
+                  flushStreamText();
+                } else {
+                  scheduleFlush();
+                }
+              },
+            });
+            if (!fbOk) {
+              throw streamErr;
+            }
+          } else {
+            throw streamErr;
+          }
+        }
       } else if (response && !response.ok) {
         const errPayload = await response.json().catch(() => null);
         const extractedError =
@@ -4172,11 +4215,14 @@ export default function App() {
           });
         } else {
           const v2Display = getV2ModelLabel(effectiveExternalModel);
+          const cleanBannerMsg = cleanErr.startsWith(v2Display)
+            ? cleanErr.slice(0, 240)
+            : `${v2Display}: ${cleanErr.slice(0, 240)}`;
           setProviderLimitBanner({
             profileName: v2Display,
             message: isRateLimited
-              ? `${v2Display} reached a temporary rate limit (429). Please wait a moment and try again.`
-              : `${v2Display} error [${errCode}]: ${cleanErr.slice(0, 280)}`,
+              ? `${v2Display} সাময়িকভাবে রেট লিমিটে পৌঁছেছে (429)। অনুগ্রহ করে একটু পর আবার চেষ্টা করুন।`
+              : cleanBannerMsg,
           });
         }
 

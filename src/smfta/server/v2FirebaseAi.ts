@@ -390,27 +390,127 @@ export function formatGeminiContents(
   return turns;
 }
 
-function isRateLimitError(err: unknown): boolean {
-  if (!err) return false;
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  const status = Number(
+export interface ParsedV2Error {
+  message: string;
+  httpStatus?: number;
+  isTransient503: boolean;
+  isRateLimit: boolean;
+}
+
+/**
+ * Recursively unwraps nested JSON error payloads emitted by @google/genai
+ * so users never see raw escaped JSON dumps in the chat UI.
+ */
+export function extractCleanV2ErrorMessage(err: unknown): ParsedV2Error {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+  let httpStatus = Number(
     (err as { status?: number; httpStatus?: number; code?: number })?.status ||
       (err as { status?: number; httpStatus?: number; code?: number })
         ?.httpStatus ||
       0
   );
-  return (
-    status === 429 ||
-    msg.includes('429') ||
-    msg.includes('resource_exhausted') ||
-    msg.includes('too many requests') ||
-    msg.includes('rate limit')
-  );
+
+  let current = raw.trim();
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current.startsWith('{') && !current.startsWith('[')) break;
+    try {
+      const parsed = JSON.parse(current) as Record<string, unknown>;
+      const nestedErr =
+        parsed && typeof parsed.error === 'object' && parsed.error !== null
+          ? (parsed.error as Record<string, unknown>)
+          : parsed;
+      const code = Number(nestedErr?.code || nestedErr?.statusCode || 0);
+      if (code > 0 && !httpStatus) httpStatus = code;
+      if (typeof nestedErr?.message === 'string' && nestedErr.message.trim()) {
+        current = nestedErr.message.trim();
+        continue;
+      }
+      if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+        current = parsed.message.trim();
+        continue;
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+
+  // Extract inline JSON message if string starts with prefix + JSON or truncated JSON
+  const inlineCodeMatch = raw.match(/"code"\s*:\s*(\d{3})/);
+  if (!httpStatus && inlineCodeMatch) {
+    httpStatus = Number(inlineCodeMatch[1]);
+  }
+  const inlineMsgMatch = current.match(/"message"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)/);
+  if (
+    (current.startsWith('{') || current.includes('{\\n') || current.includes('"error":')) &&
+    inlineMsgMatch?.[1]
+  ) {
+    current = inlineMsgMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"').trim();
+  }
+
+  const lower = `${raw} ${current}`.toLowerCase();
+  const isRateLimit =
+    httpStatus === 429 ||
+    lower.includes('429') ||
+    lower.includes('resource_exhausted') ||
+    lower.includes('too many requests') ||
+    lower.includes('rate limit');
+
+  const isTransient503 =
+    !isRateLimit &&
+    (httpStatus === 503 ||
+      httpStatus === 502 ||
+      httpStatus === 504 ||
+      httpStatus === 500 ||
+      lower.includes('503') ||
+      lower.includes('unavailable') ||
+      lower.includes('high demand') ||
+      lower.includes('overloaded') ||
+      lower.includes('temporarily'));
+
+  const cleanText = current
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 220);
+
+  return {
+    message: cleanText || 'Service temporarily unavailable.',
+    httpStatus: httpStatus || undefined,
+    isTransient503,
+    isRateLimit,
+  };
+}
+
+export function isTransientV2UpstreamError(err: unknown): boolean {
+  const parsed = extractCleanV2ErrorMessage(err);
+  if (parsed.isRateLimit) return false;
+  if (parsed.httpStatus === 401 || parsed.httpStatus === 403 || parsed.httpStatus === 400) {
+    return false;
+  }
+  if (parsed.isTransient503) return true;
+  if (parsed.httpStatus === 404) return true;
+  const lower = parsed.message.toLowerCase();
+  return lower.includes('not found') || lower.includes('not supported');
 }
 
 /**
- * Simple, direct single-pass V2 Firebase AI / Gemini streaming handler.
- * Zero retry loops and zero V1 mixing so rate limits are never amplified.
+ * Returns the bounded V2-only server model sequence (primary + at most 1 fallback).
+ * Never retries across V1 providers or loops.
+ */
+export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
+  const spec = getV2ModelSpec(modelId);
+  const primary = spec.serverGeminiModel;
+  const secondary =
+    primary === 'gemini-3.1-flash-lite'
+      ? 'gemini-4-hydrogen'
+      : 'gemini-3.1-flash-lite';
+  return primary === secondary ? [primary] : [primary, secondary];
+}
+
+/**
+ * Simple, direct V2 Firebase AI / Gemini streaming handler with a single bounded
+ * V2-only fallback on transient 503 high-demand errors. Zero retry loops and zero V1 mixing.
  */
 export async function streamV2FirebaseModel(params: {
   modelId: V2ModelId;
@@ -455,66 +555,10 @@ export async function streamV2FirebaseModel(params: {
 
   const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nTarget maximum length guidance: keep answer balanced within roughly ${spec.maxOutputTokens} tokens.\nIMPORTANT: Never output code or code blocks unless the user explicitly asks for code. Always reply in simple, direct Bengali unless asked otherwise. Never output raw <think> tags or expose internal chain-of-thought. Provide only the clean, final answer.`;
 
-  const config = buildV2GenAiRequestConfig({
-    modelName: spec.serverGeminiModel,
-    spec,
-    fullSystemInstruction,
-  });
+  const candidates = getV2ServerFallbackModels(params.modelId);
+  let lastError: unknown = null;
 
-  try {
-    const responseStream = await ai.models.generateContentStream({
-      model: spec.serverGeminiModel,
-      contents,
-      config,
-    });
-
-    let emittedAny = false;
-    const collectedSources: Array<{ title: string; uri: string }> = [];
-    const seenUris = new Set<string>();
-
-    for await (const chunk of responseStream) {
-      if (params.signal.aborted) break;
-      const c = chunk as GenerateContentResponse;
-      const groundingChunks =
-        c.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (Array.isArray(groundingChunks)) {
-        for (const gc of groundingChunks) {
-          const web = gc?.web;
-          if (web?.uri && !seenUris.has(web.uri)) {
-            seenUris.add(web.uri);
-            collectedSources.push({
-              title: web.title || web.uri,
-              uri: web.uri,
-            });
-          }
-        }
-      }
-
-      const rawText = c.text || '';
-      const cleaned = sanitizeProprietaryOutput(
-        stripPrivateChainOfThought(rawText)
-      );
-      if (cleaned) {
-        emittedAny = true;
-        params.emitDelta(cleaned);
-      }
-    }
-
-    if (!emittedAny && !params.signal.aborted) {
-      return {
-        ok: false,
-        modelLabel: spec.label,
-        errorCode: 'V2_AI_UNAVAILABLE',
-        error: `${spec.label} returned an empty response. Please try again.`,
-      };
-    }
-
-    return {
-      ok: true,
-      modelLabel: spec.label,
-      sources: collectedSources.length > 0 ? collectedSources : undefined,
-    };
-  } catch (err) {
+  for (let i = 0; i < candidates.length; i += 1) {
     if (params.signal.aborted) {
       return {
         ok: false,
@@ -523,22 +567,109 @@ export async function streamV2FirebaseModel(params: {
       };
     }
 
-    if (isRateLimitError(err)) {
-      return {
-        ok: false,
-        modelLabel: spec.label,
-        httpStatus: 429,
-        errorCode: 'V2_RATE_LIMITED',
-        error: `${spec.label} rate limit reached temporarily (429 Too Many Requests). Please wait a moment and try again.`,
-      };
-    }
+    const candidateModel = candidates[i]!;
+    const config = buildV2GenAiRequestConfig({
+      modelName: candidateModel,
+      spec,
+      fullSystemInstruction,
+    });
 
-    const rawMsg = err instanceof Error ? err.message : String(err);
+    let emittedAny = false;
+    try {
+      const responseStream = await ai.models.generateContentStream({
+        model: candidateModel,
+        contents,
+        config,
+      });
+
+      const collectedSources: Array<{ title: string; uri: string }> = [];
+      const seenUris = new Set<string>();
+
+      for await (const chunk of responseStream) {
+        if (params.signal.aborted) break;
+        const c = chunk as GenerateContentResponse;
+        const groundingChunks =
+          c.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (Array.isArray(groundingChunks)) {
+          for (const gc of groundingChunks) {
+            const web = gc?.web;
+            if (web?.uri && !seenUris.has(web.uri)) {
+              seenUris.add(web.uri);
+              collectedSources.push({
+                title: web.title || web.uri,
+                uri: web.uri,
+              });
+            }
+          }
+        }
+
+        const rawText = c.text || '';
+        const cleaned = sanitizeProprietaryOutput(
+          stripPrivateChainOfThought(rawText)
+        );
+        if (cleaned) {
+          emittedAny = true;
+          params.emitDelta(cleaned);
+        }
+      }
+
+      if (emittedAny || params.signal.aborted) {
+        return {
+          ok: true,
+          modelLabel: spec.label,
+          sources: collectedSources.length > 0 ? collectedSources : undefined,
+        };
+      }
+
+      lastError = new Error(`${spec.label} returned an empty response.`);
+      if (i < candidates.length - 1) continue;
+    } catch (err) {
+      if (params.signal.aborted) {
+        return {
+          ok: false,
+          modelLabel: spec.label,
+          error: 'Request cancelled.',
+        };
+      }
+
+      lastError = err;
+      if (
+        !emittedAny &&
+        i < candidates.length - 1 &&
+        isTransientV2UpstreamError(err)
+      ) {
+        continue;
+      }
+      break;
+    }
+  }
+
+  const parsed = extractCleanV2ErrorMessage(lastError);
+  if (parsed.isRateLimit) {
     return {
       ok: false,
       modelLabel: spec.label,
-      errorCode: 'V2_AI_UNAVAILABLE',
-      error: `${spec.label} request failed: ${rawMsg.slice(0, 180)}`,
+      httpStatus: 429,
+      errorCode: 'V2_RATE_LIMITED',
+      error: `${spec.label} এই মুহূর্তে রেট লিমিটে পৌঁছেছে (429)। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।`,
     };
   }
+
+  if (parsed.isTransient503) {
+    return {
+      ok: false,
+      modelLabel: spec.label,
+      httpStatus: parsed.httpStatus || 503,
+      errorCode: 'V2_AI_UNAVAILABLE',
+      error: `${spec.label} এই মুহূর্তে অতিরিক্ত চাপের কারণে সাময়িকভাবে সাড়া দিতে পারছে না (${parsed.httpStatus || 503})। অনুগ্রহ করে কয়েক সেকেন্ড পর Retry করুন।`,
+    };
+  }
+
+  return {
+    ok: false,
+    modelLabel: spec.label,
+    httpStatus: parsed.httpStatus,
+    errorCode: 'V2_AI_UNAVAILABLE',
+    error: `${spec.label} অনুরোধ সম্পন্ন করতে পারেনি: ${parsed.message}`,
+  };
 }
