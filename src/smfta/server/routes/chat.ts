@@ -755,7 +755,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   );
 
   const activeCustomModelName = String(externalModel || '').trim();
-  const RECENT_HISTORY_WINDOW = 24;
+  const RECENT_HISTORY_WINDOW = 40;
   const normalizedHistory: Array<{
     role: string;
     content: string;
@@ -777,13 +777,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     const olderSlice = messages.slice(0, messages.length - RECENT_HISTORY_WINDOW);
     const firstUserTurn = olderSlice.find((m) => m.role === 'user');
     const olderBullets = olderSlice
-      .slice(-14)
+      .slice(-30)
       .map((m) => {
         const speaker = m.role === 'user' ? 'User' : 'AI';
         const snippet = String(m.text || '')
           .replace(/\s+/g, ' ')
           .trim()
-          .slice(0, 180);
+          .slice(0, 400);
         return snippet ? `- ${speaker}: ${snippet}` : '';
       })
       .filter(Boolean);
@@ -1048,7 +1048,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     typeof maxOutputTokens === 'number' && Number.isFinite(maxOutputTokens)
       ? Math.min(32_768, Math.max(64, Math.round(maxOutputTokens)))
       : algoDecision.maxOutputTokens;
-  const effectiveMaxOutputTokens = Math.min(32_768, requestedMaxTokens);
+  // Long code/writing requests get at least 16k tokens so big files are not cut off
+  const longTaskFloor = isLongCodeOrWritingRequest(lastUserText) ? 16_384 : 0;
+  const effectiveMaxOutputTokens = Math.min(32_768, Math.max(requestedMaxTokens, longTaskFloor));
 
   const parsedDiscoveredModels = Array.isArray(discoveredModels)
     ? discoveredModels
@@ -1271,16 +1273,20 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   // 6. Auto-continuation if a long code fence was left unclosed
   const isLongTask = isLongCodeOrWritingRequest(lastUserText);
-  if (
+  // Continue up to 4 times while a long code block is still unclosed
+  for (
+    let contRound = 0;
+    contRound < 4 &&
     streamSucceeded &&
     !clientClosed &&
     isLongTask &&
-    hasUnclosedCodeFence(fullReplyAccumulator)
+    hasUnclosedCodeFence(fullReplyAccumulator);
+    contRound++
   ) {
-    const tailSnippet = fullReplyAccumulator.slice(-500);
-    const contPrompt = `Your previous response was cut off inside an unclosed code block. Continue writing from the exact line where it stopped without repeating the beginning, and close the code block properly.\n\nStopped right after:\n"""\n${tailSnippet}\n"""`;
+    const tailSnippet = fullReplyAccumulator.slice(-800);
+    const contPrompt = `Your previous response was cut off inside an unclosed code block. Continue writing from the exact line where it stopped without repeating the beginning, and close the code block properly.\n\nStopped right after:\n\"\"\"\n${tailSnippet}\n\"\"\"`;
     const contRes = await callBackendEngine(contPrompt, sysInstruction, {
-      maxTokens: Math.min(8192, effectiveMaxOutputTokens),
+      maxTokens: Math.min(16384, effectiveMaxOutputTokens),
       preferredProvider: effectiveProvider,
       preferredModel: activeCustomModelName,
       externalKeys: parsedKeys,
@@ -1288,12 +1294,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       temperature: algoDecision.temperature,
       topP: algoDecision.topP,
     });
-    if (contRes.ok && contRes.text) {
-      const mergedCont = mergeContinuationText(fullReplyAccumulator, contRes.text);
-      if (mergedCont.deltaToAppend) {
-        emitDelta(mergedCont.deltaToAppend);
-      }
-    }
+    if (!contRes.ok || !contRes.text) break;
+    const mergedCont = mergeContinuationText(fullReplyAccumulator, contRes.text);
+    if (!mergedCont.deltaToAppend) break;
+    emitDelta(mergedCont.deltaToAppend);
   }
 
   // 7. Store successful single-turn reply in user-scoped sha256 response cache
