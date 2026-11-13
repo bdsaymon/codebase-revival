@@ -4,7 +4,6 @@ import {
   Plus,
   Search,
   Pin,
-  Brain,
   Edit2,
   Trash2,
   Settings,
@@ -21,14 +20,11 @@ import {
   MoreVertical,
   ChevronDown,
   Check,
-  Cpu,
   AlertTriangle,
   Zap,
   User,
   MessageSquare,
   Send,
-  Moon,
-  Sun,
   ArrowUp,
   ChevronRight,
   CircleHelp,
@@ -49,7 +45,6 @@ import {
   Server,
   Sparkles,
   Volume2,
-  Wand2,
 } from 'lucide-react';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -147,7 +142,6 @@ import {
   BattleArenaModal,
   CodeLabModal,
   ImageStudioModal,
-  PromptBankModal,
   StatsAndWhatsNewModal,
   VoiceCallOverlay,
 } from './components/ToolModals';
@@ -595,7 +589,6 @@ export default function App() {
 
   // Modals state
   const [studioOpen, setStudioOpen] = useState(false);
-  const [promptBankOpen, setPromptBankOpen] = useState(false);
   const [codeLabOpen, setCodeLabOpen] = useState(false);
   const [codeLabInit, setCodeLabInit] = useState('');
   const [battleOpen, setBattleOpen] = useState(false);
@@ -4905,7 +4898,7 @@ export default function App() {
                     />
                     <div
                       data-testid="header-menu-popover"
-                      className="absolute right-0 top-full mt-2 w-60 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
+                      className="absolute right-0 top-full mt-2 w-44 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
                     >
                       <button
                         type="button"
@@ -4933,112 +4926,6 @@ export default function App() {
                         <Settings className="w-3.5 h-3.5 text-[var(--primary)]" />
                         <span>Settings</span>
                       </button>
-
-                      <button
-                        type="button"
-                        data-testid="header-menu-providers"
-                        onClick={() => {
-                          setSettingsTab('providers');
-                          setSettingsOpen(true);
-                          setHeaderMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
-                      >
-                        <Cpu className="w-3.5 h-3.5 text-[var(--primary)]" />
-                        <span>Providers & Models</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        data-testid="header-menu-memory"
-                        onClick={() => {
-                          setSettingsTab('privacy');
-                          setSettingsOpen(true);
-                          setHeaderMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
-                      >
-                        <Brain className="w-3.5 h-3.5 text-[var(--primary)]" />
-                        <span>Memory & Privacy</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSettings((prev) => {
-                            const nextTheme = prev.theme === 'dark' ? 'light' : 'dark';
-                            return sanitizeSettings({
-                              ...prev,
-                              themeMode: nextTheme,
-                              theme: nextTheme,
-                            });
-                          });
-                          setHeaderMenuOpen(false);
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
-                      >
-                        {settings.theme === 'dark' ? (
-                          <Sun className="w-3.5 h-3.5 text-[var(--primary)]" />
-                        ) : (
-                          <Moon className="w-3.5 h-3.5 text-[var(--primary)]" />
-                        )}
-                        <span>
-                          Switch to {settings.theme === 'dark' ? 'Light' : 'Dark'} mode
-                        </span>
-                      </button>
-
-                      <button
-                        type="button"
-                        data-testid="header-menu-diagnostics"
-                        onClick={() => {
-                          setHeaderMenuOpen(false);
-                          void runSystemDiagnostics().then((res) => {
-                            if (res.success && res.report) {
-                              showToast(
-                                `System ${res.report.status} · Firestore: ${res.report.firestoreMemory}`,
-                                3600
-                              );
-                            }
-                          });
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
-                      >
-                        <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>System Health</span>
-                      </button>
-
-                      {chats.some((c) => c.msgs.length > 0) && (
-                        <div className="pt-1 mt-1 border-t border-[var(--border)]">
-                          <div className="px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-[var(--ink-dim)]">
-                            Saved Chats
-                          </div>
-                          <div className="max-h-36 overflow-y-auto space-y-0.5">
-                            {chats
-                              .filter((c) => c.msgs.length > 0)
-                              .slice(0, 6)
-                              .map((c) => (
-                                <button
-                                  key={c.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveId(c.id);
-                                    setHeaderMenuOpen(false);
-                                  }}
-                                  className={`w-full text-left px-3 py-1.5 rounded-xl flex items-center justify-between gap-2 cursor-pointer transition-colors ${
-                                    c.id === activeId
-                                      ? 'bg-[var(--primary-soft)] text-[var(--primary)] font-semibold'
-                                      : 'text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]'
-                                  }`}
-                                >
-                                  <span className="truncate">{c.title || 'Chat'}</span>
-                                  <span className="text-[10px] shrink-0">
-                                    {c.msgs.length}
-                                  </span>
-                                </button>
-                              ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </>
                 )}
@@ -6003,15 +5890,6 @@ export default function App() {
                       >
                         <Globe className="w-4 h-4" />
                       </button>
-
-                      <button
-                        type="button"
-                        className="composer-icon hidden sm:inline-flex"
-                        onClick={() => setPromptBankOpen(true)}
-                        title="Open tool and prompt library"
-                      >
-                        <Wand2 className="w-4 h-4" />
-                      </button>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -6375,22 +6253,6 @@ export default function App() {
         onGenerate={(prompt, style, size) =>
           handleRunImageGen(prompt, style, size)
         }
-      />
-
-      <PromptBankModal
-        isOpen={promptBankOpen}
-        onClose={() => setPromptBankOpen(false)}
-        onSelectPrompt={(p) => handleSend(p)}
-        onUsePrompt={(p) => {
-          setInputText(p);
-          requestAnimationFrame(() => {
-            composerRef.current?.focus();
-            const len = p.length;
-            composerRef.current?.setSelectionRange(len, len);
-          });
-          showToast('Prompt added to composer — edit or send');
-        }}
-        notify={showToast}
       />
 
       <CodeLabModal

@@ -1768,8 +1768,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const renderGeneral = () => (
     <>
       <Card
-        title="Appearance & Theme"
-        description="Switch between Dark and Light mode."
+        title="Appearance"
         icon={
           draft.theme === 'dark' ? (
             <Moon className="w-4 h-4" />
@@ -1782,9 +1781,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="min-w-0">
             <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
               Theme / থিম
-            </div>
-            <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-              
             </div>
           </div>
           <div className="cs-seg" data-testid="theme-selector">
@@ -1812,7 +1808,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       <Card
         title="Language & Profile"
-        description="Configure your display language and profile name."
         icon={<Globe className="w-4 h-4" />}
       >
         <div className="space-y-4">
@@ -1820,9 +1815,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="min-w-0">
               <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
                 App Language / অ্যাপের ভাষা
-              </div>
-              <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-                Select Bengali (বাংলা) or English interface & reply preference.
               </div>
             </div>
             <div className="cs-seg" data-testid="language-selector">
@@ -1853,9 +1845,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="min-w-0">
               <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
                 Your Name / আপনার নাম
-              </div>
-              <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-                How the AI assistant addresses you.
               </div>
             </div>
             <input
@@ -1899,7 +1888,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </Card>
       <Card
         title="Custom instructions"
-        description="Define custom instructions or persona rules that guide the AI across all conversations."
         icon={<Sparkles className="w-4 h-4" />}
       >
         <div className="space-y-2">
@@ -1911,7 +1899,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             data-testid="custom-system-instruction-textarea"
             value={draft.customInst || ''}
             maxLength={4000}
-            placeholder="e.g. Always answer concisely in fluent Bengali and provide complete TypeScript code examples..."
+            placeholder="Custom instructions..."
             onChange={(e) => patch({ customInst: e.target.value })}
             className="cs-textarea w-full text-xs"
           />
@@ -1926,13 +1914,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const renderPrivacy = () => (
     <>
       <Card
-        title="Memory Controls & Privacy"
-        description="Manage how the AI remembers facts from your conversations."
+        title="Memory & Privacy"
         icon={<Shield className="w-4 h-4" />}
       >
         <ToggleRow
           label="Auto-Memory / অটো-মেমোরি"
-          description="Automatically save important personal facts shared during conversation."
           checked={draft.autoMemory !== false}
           onChange={(v) => patch({ autoMemory: v })}
           testId="auto-memory-toggle"
@@ -1941,10 +1927,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="pt-3 mt-3 border-t border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold text-[var(--settings-danger)]">
-              Complete Memory Wipe / সম্পূর্ণ মেমোরি রিসেট
-            </div>
-            <div className="text-[11px] text-[var(--text-3)] mt-0.5">
-              Deletes saved facts from this device.
+              Clear Memory / সম্পূর্ণ মেমোরি রিসেট
             </div>
           </div>
 
@@ -2108,38 +2091,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const renderGroupedOverview = () => (
     <div className="space-y-2.5 pb-6">
-      {/* Top Account & Plan Pill Card */}
+      {/* Top Account & Status Pill Card */}
       <div className="rounded-[18px] bg-[var(--surface)] border border-[var(--border)] px-4 py-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[14.5px] font-medium text-[var(--ink)] truncate">
             {profileName || 'SAYMON HASAN'}
           </div>
           <div className="text-[12px] text-[var(--ink-dim)] truncate">
-            {activeProfile.name} · {activeProfile.externalModel || 'SMFTA Pro'}
+            {activeProfile.externalModel || 'SMFTA Pro'}
           </div>
         </div>
         <span className="ref-settings-plan-pill">
           {activeProfile.provider === 'xrahat' ? 'Active' : 'Custom'}
         </span>
-      </div>
-
-      {/* Engine / Providers Callout Card */}
-      <div className="rounded-[18px] bg-[var(--surface)] border border-[var(--border)] px-4 py-3.5">
-        <div className="text-[15px] font-semibold text-[var(--ink)]">
-          Need custom models or limits?
-        </div>
-        <div className="text-[13px] text-[var(--ink-muted)] mt-0.5 leading-snug">
-          Configure Mercury, Gemini, OpenAI, Anthropic, or custom API endpoints.
-        </div>
-        <div className="mt-2.5">
-          <button
-            type="button"
-            onClick={() => openSection('providers')}
-            className="ref-settings-cta-btn"
-          >
-            Manage Providers
-          </button>
-        </div>
       </div>
 
       {/* Group 1: Profile & Providers */}
