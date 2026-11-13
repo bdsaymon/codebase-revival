@@ -1,24 +1,25 @@
 # Codebase Revival
 
-/skill:migrate-external-project Source: code archive. Migrate the attached project into Lovable.
+SMFTA AI workspace built with TypeScript, TanStack Start, Supabase/Lovable Cloud and multiple AI provider integrations.
 
-This project was built with [Lovable](https://lovable.dev).
+## AI platform upgrade
 
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/e1cc4e53-466e-44fa-b085-742f609b7a3c).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+The `feature/ai-platform-upgrade` branch introduces resilient AI orchestration utilities for context management, retries, timeouts, structured output parsing and deterministic usage estimation. Provider-specific routing remains in `src/smfta/server/providers.ts`; shared server-side helpers live in `src/smfta/server/aiPlatform.ts`.
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+```sh
+bun install
+bun run dev
+```
+
+## Validation
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+bun run lint
+bun run typecheck
+bun run test
+bun run build
 ```
+
+Never commit `.env` or provider credentials. Configure secrets in the deployment environment and use `.env.example` only as a variable-name template.
