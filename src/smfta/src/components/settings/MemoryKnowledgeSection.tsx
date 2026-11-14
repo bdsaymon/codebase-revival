@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
-  Brain,
   Check,
   Edit3,
-  EyeOff,
   PauseCircle,
   Pin,
   PlayCircle,
@@ -47,7 +45,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
   const [memorySearchQuery, setMemorySearchQuery] = useState('');
   const [editingFact, setEditingFact] = useState<string | null>(null);
   const [editingFactValue, setEditingFactValue] = useState('');
-  // 2-step confirmation for Reset Memory (0 = idle, 1 = step 1, 2 = step 2 final)
   const [resetConfirmStep, setResetConfirmStep] = useState<0 | 1 | 2>(0);
 
   const isMemoryPaused = draft.memoryPaused === true;
@@ -89,30 +86,39 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
     onUpdateMemory?.([]);
     onClearMemory();
     setResetConfirmStep(0);
-    notify?.('সব মেমোরি স্থায়ীভাবে রিসেট করা হয়েছে');
+    notify?.('সব মেমোরি মুছে ফেলা হয়েছে');
   };
 
   return (
-    <div className="space-y-4" data-testid="settings-section-memory">
-      {/* ১. মেমোরি সেটিংস ও Pause / Reset কন্ট্রোল */}
-      <SettingsCard
-        title="Memory সেটিংস"
-        description="চ্যাট থেকে দরকারি তথ্য মনে রাখা, পুরনো চ্যাট খোঁজা, সাময়িক বিরতি (Pause) এবং রিসেট নিয়ন্ত্রণ করুন।"
-        icon={<Brain className="w-4 h-4" />}
-        rightSlot={
+    <div className="space-y-3" data-testid="settings-section-memory">
+      <SettingsCard>
+        <SettingToggle
+          label="Auto Memory"
+          checked={draft.autoMemory !== false}
+          onChange={(v) => patch({ autoMemory: v })}
+          testId="auto-memory-toggle"
+        />
+
+        <SettingToggle
+          label="Search Past Chats"
+          checked={draft.memorySearchChats !== false}
+          onChange={(v) =>
+            patch({ memorySearchChats: v, includeHistory: v })
+          }
+          testId="memory-search-chats-toggle"
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5">
+          <span className="text-[13.5px] font-medium text-[var(--ink)]">
+            Memory Status
+          </span>
           <div className="flex flex-wrap items-center gap-2">
-            {/* Pause বাটন */}
             <button
               type="button"
               data-testid="memory-pause-btn"
               onClick={() => {
                 const nextPaused = !isMemoryPaused;
                 patch({ memoryPaused: nextPaused });
-                notify?.(
-                  nextPaused
-                    ? 'মেমোরি সাময়িকভাবে Pause করা হয়েছে'
-                    : 'মেমোরি আবার চালু করা হয়েছে'
-                );
               }}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border inline-flex items-center gap-1.5 cursor-pointer ${
                 isMemoryPaused
@@ -123,7 +129,7 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
               {isMemoryPaused ? (
                 <>
                   <PlayCircle className="w-3.5 h-3.5" />
-                  Resume (চালু করুন)
+                  Resume
                 </>
               ) : (
                 <>
@@ -133,7 +139,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
               )}
             </button>
 
-            {/* Reset বাটন — দুই ধাপে কনফার্মেশন */}
             {resetConfirmStep === 0 && (
               <button
                 type="button"
@@ -154,7 +159,7 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                   onClick={() => setResetConfirmStep(2)}
                   className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 cursor-pointer"
                 >
-                  ধাপ ১: নিশ্চিত? (পরবর্তী ধাপ)
+                  নিশ্চিত?
                 </button>
                 <button
                   type="button"
@@ -174,7 +179,7 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                   onClick={handleFinalResetMemory}
                   className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[var(--settings-danger)] text-[var(--settings-on-accent)] cursor-pointer"
                 >
-                  চূড়ান্ত নিশ্চিতকরণ: সব মুছুন ({memory.length})
+                  সব মুছুন ({memory.length})
                 </button>
                 <button
                   type="button"
@@ -186,49 +191,11 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
               </div>
             )}
           </div>
-        }
-      >
-        {isMemoryPaused && (
-          <div
-            data-testid="memory-paused-banner"
-            className="mb-3 px-3 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300 font-medium"
-          >
-            ⏸️ মেমোরি বর্তমানে Pause অবস্থায় আছে — নতুন কোনো মেমোরি তৈরি বা প্রম্পটে যুক্ত হচ্ছে না।
-          </div>
-        )}
-
-        <SettingToggle
-          label="চ্যাট থেকে মেমোরি তৈরি করো"
-          description="কথোপকথন থেকে আপনার নাম, পছন্দ ও কাজের তথ্য স্বয়ংক্রিয়ভাবে মনে রাখবে (পাসওয়ার্ড বা গোপন তথ্য কখনো সেভ হবে না)।"
-          checked={draft.autoMemory !== false}
-          onChange={(v) => patch({ autoMemory: v })}
-          testId="auto-memory-toggle"
-        />
-
-        <SettingToggle
-          label="পুরনো চ্যাটে খুঁজে দেখার অনুমতি"
-          description="প্রয়োজন হলে আগের কথোপকথনের সারাংশ থেকে প্রাসঙ্গিক তথ্য খুঁজে উত্তর দেবে।"
-          checked={draft.memorySearchChats !== false}
-          onChange={(v) =>
-            patch({ memorySearchChats: v, includeHistory: v })
-          }
-          testId="memory-search-chats-toggle"
-        />
-
-        <div className="mt-2 pt-2 border-t border-[var(--border)] flex items-center gap-2 text-xs text-[var(--text-3)]">
-          <EyeOff className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
-          <span>
-            চ্যাটের উপরের বার থেকে <strong>&ldquo;Incognito চ্যাট&rdquo;</strong> চালু করলে ওই চ্যাটে আগের কোনো মেমোরি পড়া হবে না এবং নতুন কোনো মেমোরি সেভও হবে না।
-          </span>
         </div>
       </SettingsCard>
 
-      {/* ২. মেমোরি লিস্ট: দেখা, খোঁজা, এডিট করা, মুছে ফেলা */}
-      <SettingsCard
-        title={`মেমোরি লিস্ট (${memory.length})`}
-        description="সংরক্ষিত মেমোরি দেখুন, খুঁজুন, এডিট করুন অথবা মুছে ফেলুন। একই বিষয়ে নতুন তথ্য এলে ডুপ্লিকেট না করে আগেরটি আপডেট হয়।"
-      >
-        <div className="space-y-3">
+      <SettingsCard title={`Saved Memories (${memory.length})`}>
+        <div className="space-y-2.5 pt-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="flex items-center gap-2">
               <input
@@ -242,17 +209,17 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                     handleAddMemoryItem();
                   }
                 }}
-                placeholder="নতুন মেমোরি যোগ করুন (যেমন: পেশা: সফটওয়্যার ইঞ্জিনিয়ার)"
-                className="cs-input flex-1 text-xs"
+                placeholder="নতুন মেমোরি লিখুন…"
+                className="cs-input flex-1 text-xs py-1.5"
               />
               <button
                 type="button"
                 data-testid="add-memory-fact-btn"
                 onClick={handleAddMemoryItem}
-                className="px-3 py-2 rounded-lg bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--settings-on-accent)] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
               >
                 <Plus className="w-3.5 h-3.5" />
-                যোগ করুন
+                Add
               </button>
             </div>
 
@@ -263,8 +230,8 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                 data-testid="search-memory-input"
                 value={memorySearchQuery}
                 onChange={(e) => setMemorySearchQuery(e.target.value)}
-                placeholder="মেমোরি খুঁজুন…"
-                className="cs-input w-full text-xs pl-8"
+                placeholder="Search…"
+                className="cs-input w-full text-xs pl-8 py-1.5"
               />
             </div>
           </div>
@@ -272,14 +239,14 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
           {memory.length === 0 ? (
             <div
               data-testid="memory-empty-state"
-              className="py-6 text-center text-xs text-[var(--text-3)] rounded-lg border border-dashed border-[var(--border)]"
+              className="py-4 text-center text-xs text-[var(--text-3)]"
             >
-              কোনো মেমোরি সংরক্ষিত নেই।
+              কোনো মেমোরি নেই
             </div>
           ) : (
             <div
               data-testid="memory-facts-list"
-              className="max-h-80 overflow-y-auto space-y-1.5 pr-1"
+              className="max-h-72 overflow-y-auto space-y-1.5 pr-1"
             >
               {filteredMemory.map((fact, idx) => {
                 const isPinned = fact.startsWith('📌 ');
@@ -300,14 +267,13 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                             if (e.key === 'Enter') handleSaveEditedFact(fact);
                             if (e.key === 'Escape') setEditingFact(null);
                           }}
-                          className="cs-input flex-1 text-xs"
+                          className="cs-input flex-1 text-xs py-1"
                           autoFocus
                         />
                         <button
                           type="button"
                           onClick={() => handleSaveEditedFact(fact)}
                           className="p-1.5 rounded bg-[var(--primary)] text-[var(--settings-on-accent)] cursor-pointer"
-                          title="Save"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -315,7 +281,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                           type="button"
                           onClick={() => setEditingFact(null)}
                           className="p-1.5 rounded border border-[var(--border)] cursor-pointer"
-                          title="Cancel"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -334,7 +299,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                                 ? 'text-[var(--primary)] bg-[var(--primary-soft)]'
                                 : 'text-[var(--text-3)] hover:text-[var(--text)]'
                             }`}
-                            title={isPinned ? 'Unpin' : 'Pin fact'}
                           >
                             <Pin className="w-3.5 h-3.5" />
                           </button>
@@ -346,7 +310,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                               setEditingFactValue(fact);
                             }}
                             className="p-1.5 rounded text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer"
-                            title="Edit fact"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
@@ -355,7 +318,6 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
                             data-testid={`delete-memory-item-${idx}`}
                             onClick={() => handleDeleteSingleMemory(fact)}
                             className="p-1.5 rounded text-[var(--text-3)] hover:text-[var(--settings-danger)] cursor-pointer"
-                            title="Delete memory item"
                             aria-label={`Delete memory fact ${fact}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />

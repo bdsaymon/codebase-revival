@@ -13,16 +13,20 @@ import { buildSystemInstruction } from '../systemPrompt';
 import {
   buildAdHocProviderConfig,
   callBackendEngine,
+  normalizeGeminiModelName,
   sanitizeErrorMsg,
 } from '../aiClient';
 import {
   classifyPromptComplexity,
+  hasUnclosedArtifactTag,
   hasUnclosedCodeFence,
+  hasUnclosedHtmlDocument,
   interceptIdentityQuery,
   isLongCodeOrWritingRequest,
   matchTrainedWeights,
   retrainModelWeights,
 } from '../intentRules';
+import { resolveActiveSystemLabel } from '../../src/utils/creatorIdentity';
 import {
   getCachedResponse,
   setCachedResponse,
@@ -38,7 +42,7 @@ import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from '../engine/defaults';
 import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
 import { supportsNativeThinking } from '../engine/thinking';
-import { mergeContinuationText } from '../../src/utils/streamGuard';
+import { looksTruncated, mergeContinuationText } from '../../src/utils/streamGuard';
 import { parseExtractedMemoriesJson, isSensitiveFact } from '../../src/utils/memoryBank';
 import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
 import {
@@ -697,6 +701,22 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     );
   };
 
+  const emitChunkedDelta = async (fullText: string) => {
+    if (!fullText || clientClosed || res.writableEnded) return;
+    if (fullText.length <= 60) {
+      emitDelta(fullText);
+      return;
+    }
+    const step = 28;
+    for (let i = 0; i < fullText.length; i += step) {
+      if (clientClosed || res.writableEnded || upstreamAbortController.signal.aborted) {
+        break;
+      }
+      emitDelta(fullText.slice(i, i + step));
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+
   const emitReset = () => {
     if (clientClosed || res.writableEnded) return;
     fullReplyAccumulator = '';
@@ -822,7 +842,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     });
   }
 
-  const parsedKeys = String(externalKeys || '')
+  const rawKeysInput =
+    typeof externalKeys === 'string'
+      ? externalKeys
+      : Array.isArray(externalKeys)
+      ? externalKeys.map((k) => String(k || '')).join('\n')
+      : '';
+  const parsedKeys = rawKeysInput
     .split(/[\n,;]+/)
     .map((k: string) => k.trim())
     .filter(Boolean);
@@ -846,7 +872,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   const emitThinking = (thinkingChunk: string) => {
     if (
       !thinkingChunk ||
-      effectiveThinkingMode === 'off' ||
+      requestedThinkingMode === 'off' ||
       clientClosed ||
       res.writableEnded
     ) {
@@ -930,6 +956,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     requestedModel: activeCustomModelName || 'default',
   });
 
+  try {
+
   // ============================================================================
   // INDEPENDENT V2 – SPECIAL (FIREBASE AI SYSTEM) BRANCH
   // Strictly isolated from V1 – Natural. Never routes to or falls back to V1.
@@ -1006,6 +1034,33 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       (typeof projectContext === 'string' && projectContext.trim().length > 0)
     ) {
       emitStatus('ফাইল পড়ছি', 'file_read', 'Reading attached files & context');
+    }
+
+    const activeV2SystemLabel = resolveActiveSystemLabel({
+      customModelName: v2ModelId,
+      mode,
+    });
+    if (lastUserImgs.length === 0) {
+      const identityReply = interceptIdentityQuery(
+        lastUserText,
+        replyLang,
+        activeV2SystemLabel
+      );
+      if (identityReply) {
+        await emitChunkedDelta(identityReply);
+        finishStream({
+          type: 'done',
+          ok: true,
+          requestId,
+          requestedProvider: 'firebase_v2',
+          requestedModel: v2ModelId,
+          providerUsed: 'firebase_v2',
+          modelUsed: v2ModelId,
+          attemptCount: 1,
+          latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+        });
+        return;
+      }
     }
 
     const v2SystemInstruction = buildSystemInstruction({
@@ -1118,11 +1173,20 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     return;
   }
 
-  // 0. Identity / creator / privacy interception (only for built-in default engine)
-  if (lastUserImgs.length === 0 && !isCustomProviderActive) {
-    const identityReply = interceptIdentityQuery(lastUserText, replyLang);
+  const activeSystemLabel = resolveActiveSystemLabel({
+    customModelName: activeCustomModelName,
+    mode,
+  });
+
+  // 0. Identity / creator / security / privacy interception across active systems
+  if (lastUserImgs.length === 0) {
+    const identityReply = interceptIdentityQuery(
+      lastUserText,
+      replyLang,
+      activeSystemLabel
+    );
     if (identityReply) {
-      emitDelta(identityReply);
+      await emitChunkedDelta(identityReply);
       finishStream({
         type: 'done',
         ok: true,
@@ -1139,7 +1203,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   // 1. Custom trained Q&A weight match (scoped per user - P0-03)
   const trainedMatch = matchTrainedWeights(lastUserText, scopedUserId);
   if (trainedMatch.exactReply && lastUserImgs.length === 0 && !isCustomProviderActive) {
-    emitDelta(trainedMatch.exactReply);
+    await emitChunkedDelta(trainedMatch.exactReply);
     finishStream({
       type: 'done',
       ok: true,
@@ -1332,8 +1396,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           .join('\n\n')
       : '';
 
-  const conciseRule = "\n\nRESPONSE STYLE (highest priority): Answer only what the user asked. Be short, direct and relevant — no filler, no greetings, no repeating the question, no unrelated suggestions. Use the user's language. When the user asks for code, give complete, working code without truncation.";
-  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}${conciseRule}`;
+  const isLongTaskReq = isLongCodeOrWritingRequest(lastUserText);
+  const wantConciseOnly =
+    style === 'concise' && responseLength !== 'detailed' && !isLongTaskReq;
+  const outputGuidanceRule = wantConciseOnly
+    ? "\n\nRESPONSE STYLE: Keep the answer concise, direct, and focused in the user's language, while still giving complete code if code is requested."
+    : "\n\nRESPONSE STYLE (highest priority): Use the user's language. When the user asks for large writing, in-depth information, creating/building apps, large UI/web designs, or code updates, ALWAYS provide the FULL, complete, richly detailed implementation and information without shortening, skipping parts, or leaving placeholders like '// ... existing code'.";
+  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}${outputGuidanceRule}`;
   const cacheModelKey = `${effectiveProvider}:${activeCustomModelName || 'default'}`;
 
   // 3. Response Cache Lookup (user-scoped sha256 - P0-03; only for standalone single-turn requests without active conversation/project context)
@@ -1354,7 +1423,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       scopedUserId
     );
     if (cachedHit) {
-      emitDelta(cachedHit);
+      await emitChunkedDelta(cachedHit);
       finishStream({
         type: 'done',
         ok: true,
@@ -1396,8 +1465,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     typeof maxOutputTokens === 'number' && Number.isFinite(maxOutputTokens)
       ? Math.min(32_768, Math.max(64, Math.round(maxOutputTokens)))
       : algoDecision.maxOutputTokens;
-  // Long code/writing requests get at least 16k tokens so big files are not cut off
-  const longTaskFloor = isLongCodeOrWritingRequest(lastUserText) ? 16_384 : 0;
+  // Long code, design, update, or detailed writing requests get at least 24k tokens so big files & designs are never cut off
+  const longTaskFloor = isLongTaskReq ? 24_576 : 0;
   const effectiveMaxOutputTokens = Math.min(32_768, Math.max(requestedMaxTokens, longTaskFloor));
 
   const parsedDiscoveredModels = Array.isArray(discoveredModels)
@@ -1448,6 +1517,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       effectiveProvider === 'ollama' ||
       effectiveProvider === 'lmstudio';
 
+    const preferredModelForEngine =
+      effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai'
+        ? activeCustomModelName
+          ? normalizeGeminiModelName(activeCustomModelName)
+          : 'gemini-3-flash-preview'
+        : activeCustomModelName || undefined;
+
     // 4a. Use SSE streaming when supportsStreaming !== false
     if (supportsStreaming !== false) {
       const streamRes = await engine.stream(
@@ -1455,8 +1531,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           userId: scopedUserId,
           conversationId: String(sessionId || 'default-session').slice(0, 64),
           messages: canonicalMessages,
-          preferredProviderId: built.adHocProviders[0]?.provider.provider_id,
-          preferredModelId: activeCustomModelName || undefined,
+          preferredProviderId:
+            built.adHocProviders[0]?.provider.provider_id ||
+            (effectiveProvider === 'gemini_custom' ||
+            effectiveProvider === 'gemini_openai'
+              ? effectiveProvider
+              : undefined),
+          preferredModelId: preferredModelForEngine,
           maxOutputTokens: effectiveMaxOutputTokens,
           maxUserMessageChars: 120_000,
           temperature:
@@ -1533,7 +1614,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     if (
       !streamSucceeded &&
       !clientClosed &&
-      built.adHocProviders.length > 0 &&
+      (built.adHocProviders.length > 0 ||
+        effectiveProvider === 'gemini_custom' ||
+        effectiveProvider === 'gemini_openai') &&
       (supportsStreaming === false || !isTerminalAuthOrModelFailure)
     ) {
       engine.resetEphemeralKeyPool();
@@ -1541,8 +1624,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         userId: scopedUserId,
         conversationId: String(sessionId || 'default-session').slice(0, 64),
         messages: canonicalMessages,
-        preferredProviderId: built.adHocProviders[0]?.provider.provider_id,
-        preferredModelId: activeCustomModelName || undefined,
+        preferredProviderId:
+          built.adHocProviders[0]?.provider.provider_id ||
+          (effectiveProvider === 'gemini_custom' ||
+          effectiveProvider === 'gemini_openai'
+            ? effectiveProvider
+            : undefined),
+        preferredModelId: preferredModelForEngine,
         maxOutputTokens: effectiveMaxOutputTokens,
         maxUserMessageChars: 120_000,
         temperature:
@@ -1568,7 +1656,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         if (fullReplyAccumulator.length > 0) {
           emitReset();
         }
-        emitDelta(nonStreamRes.text);
+        if (nonStreamRes.thinking) {
+          emitThinking(nonStreamRes.thinking);
+        }
+        await emitChunkedDelta(nonStreamRes.text);
         streamSucceeded = true;
         actualProviderUsed = nonStreamRes.providerId || effectiveProvider;
         actualModelUsed = nonStreamRes.modelId || activeCustomModelName || 'default';
@@ -1633,22 +1724,33 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     }
   }
 
-  // 6. Auto-continuation if a long code fence was left unclosed
+  // 6. Auto-continuation if a long code fence, <smfta_artifact>, HTML document, or long answer was cut off
   const isLongTask = isLongCodeOrWritingRequest(lastUserText);
-  // Continue up to 4 times while a long code block is still unclosed
+  const needsContinuation = (acc: string) =>
+    hasUnclosedCodeFence(acc) ||
+    hasUnclosedArtifactTag(acc) ||
+    hasUnclosedHtmlDocument(acc) ||
+    (isLongTask && acc.length > 400 && looksTruncated(acc));
+
   for (
     let contRound = 0;
     contRound < 4 &&
     streamSucceeded &&
     !clientClosed &&
-    isLongTask &&
-    hasUnclosedCodeFence(fullReplyAccumulator);
+    needsContinuation(fullReplyAccumulator);
     contRound++
   ) {
-    const tailSnippet = fullReplyAccumulator.slice(-800);
-    const contPrompt = `Your previous response was cut off inside an unclosed code block. Continue writing from the exact line where it stopped without repeating the beginning, and close the code block properly.\n\nStopped right after:\n\"\"\"\n${tailSnippet}\n\"\"\"`;
+    const tailSnippet = fullReplyAccumulator.slice(-900);
+    const reasonHint = hasUnclosedArtifactTag(fullReplyAccumulator)
+      ? 'inside an unclosed <smfta_artifact> block. Continue directly and close </smfta_artifact> properly.'
+      : hasUnclosedHtmlDocument(fullReplyAccumulator)
+      ? 'inside an incomplete HTML document. Continue directly and finish through </html>.'
+      : hasUnclosedCodeFence(fullReplyAccumulator)
+      ? 'inside an unclosed code block. Continue writing from the exact line where it stopped and close the code block properly.'
+      : 'before finishing the full response. Continue writing seamlessly from the exact point where it stopped until complete.';
+    const contPrompt = `Your previous response was cut off ${reasonHint} Do NOT repeat the beginning.\n\nStopped right after:\n\"\"\"\n${tailSnippet}\n\"\"\"`;
     const contRes = await callBackendEngine(contPrompt, sysInstruction, {
-      maxTokens: Math.min(16384, effectiveMaxOutputTokens),
+      maxTokens: Math.min(32_768, Math.max(16_384, effectiveMaxOutputTokens)),
       preferredProvider: effectiveProvider,
       preferredModel: activeCustomModelName,
       externalKeys: parsedKeys,
@@ -1801,7 +1903,14 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     actualProviderUsed !== effectiveProvider &&
     !(
       (effectiveProvider === 'smfta_cloud' || effectiveProvider === 'xrahat') &&
-      (actualProviderUsed === 'xrahat' || actualProviderUsed === 'server_gemini' || actualProviderUsed === 'smfta_cloud')
+      (actualProviderUsed === 'xrahat' ||
+        actualProviderUsed === 'server_gemini' ||
+        actualProviderUsed === 'gemini_server' ||
+        actualProviderUsed === 'smfta_cloud')
+    ) &&
+    !(
+      (effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai') &&
+      actualProviderUsed === 'gemini'
     );
   const modelSwitched = Boolean(
     activeCustomModelName &&
@@ -1834,6 +1943,24 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     latencyMs: Math.max(1, Math.round(nowPerf - streamStartPerf)),
     sources: groundedSources.length > 0 ? groundedSources : undefined,
   });
+  } catch (unhandledErr: unknown) {
+    const safeMsg = sanitizeErrorMsg(unhandledErr, parsedKeys);
+    console.error('[chat/stream] unhandled error:', unhandledErr);
+    if (!clientClosed && !res.writableEnded) {
+      const formatted = `⚠️ AI প্রোভাইডার ত্রুটি: ${safeMsg}`;
+      emitEvent({
+        type: 'error',
+        ok: false,
+        code: 'STREAM_EXCEPTION',
+        retryable: true,
+        requestId,
+        message: formatted,
+        text: formatted,
+        delta: formatted,
+      });
+      finishStream();
+    }
+  }
 });
 
 // ============================================================================

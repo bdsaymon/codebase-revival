@@ -7,6 +7,9 @@
  * for V2 – Special (SMFTA V5, SMFTA Pro, SMFTA Max).
  */
 
+import { FILE_ARTIFACT_SYSTEM_DIRECTIVE } from './fileArtifacts';
+import { buildCreatorAndSecurityDirective } from './creatorIdentity';
+
 export type V2ModelId = 'smfta-v5' | 'smfta-v2-pro' | 'smfta-max';
 
 export interface V2ModelSpec {
@@ -36,11 +39,11 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     badge: 'Fast · Everyday · Voice',
     desc: 'Fast everyday Q&A, smart chat & bilingual voice',
     defaultDailyLimit: 100,
-    serverGeminiModel: 'gemini-3.1-flash-lite',
+    serverGeminiModel: 'gemini-3.5-flash-lite',
     firebaseAiModel: 'gemini-2.5-flash-lite',
     temperature: 0.7,
     thinkingLevel: 'MINIMAL',
-    maxOutputTokens: 1024,
+    maxOutputTokens: 8192,
     contextWindow: 256_000,
     useSearchGrounding: false,
     capabilities: [
@@ -50,7 +53,7 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
       'Real-Time Streaming',
     ],
     systemDirective:
-      'You are operating as SMFTA V5 (V2 Special Fast Engine). Prioritize fast, clear, natural answers for everyday questions and bilingual voice conversations. Keep responses crisp, accurate, and conversational unless more detail is requested.',
+      `You are operating as SMFTA V5 (V2 Special Fast Engine). Provide clear, helpful, complete answers in the user's language. When asked for detailed information, long writing, UI/web design, or code updates, provide complete, full-length results without truncating.\n\n${buildCreatorAndSecurityDirective('SMFTA V5')}\n\n${FILE_ARTIFACT_SYSTEM_DIRECTIVE}`,
   },
   {
     id: 'smfta-v2-pro',
@@ -58,11 +61,11 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     badge: 'Coding · Structured',
     desc: 'Coding, architecture & structured problem-solving',
     defaultDailyLimit: 40,
-    serverGeminiModel: 'gemini-3.1-flash-lite',
-    firebaseAiModel: 'gemini-2.5-flash-lite',
+    serverGeminiModel: 'gemini-3-flash-preview',
+    firebaseAiModel: 'gemini-2.5-flash',
     temperature: 0.4,
     thinkingLevel: 'LOW',
-    maxOutputTokens: 2048,
+    maxOutputTokens: 16384,
     contextWindow: 512_000,
     useSearchGrounding: false,
     capabilities: [
@@ -72,7 +75,7 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
       'Firestore Memory Sync',
     ],
     systemDirective:
-      'You are operating as SMFTA Pro (V2 Special Technical Engine). Focus on programming accuracy, structured step-by-step explanations, edge-case awareness, and clean production-ready code with clear reasoning.',
+      `You are operating as SMFTA Pro (V2 Special Technical Engine). Focus on programming accuracy, full UI/web design, complete code updates without placeholders, structured explanations, and clean production-ready implementations.\n\n${buildCreatorAndSecurityDirective('SMFTA Pro')}\n\n${FILE_ARTIFACT_SYSTEM_DIRECTIVE}`,
   },
   {
     id: 'smfta-max',
@@ -80,11 +83,11 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     badge: 'Deep Analysis · Search',
     desc: 'Deep multi-step analysis & search-grounded answers',
     defaultDailyLimit: 15,
-    serverGeminiModel: 'gemini-4-hydrogen',
+    serverGeminiModel: 'gemini-3.8-flash',
     firebaseAiModel: 'gemini-2.5-flash',
     temperature: 0.2,
     thinkingLevel: 'HIGH',
-    maxOutputTokens: 4096,
+    maxOutputTokens: 32768,
     contextWindow: 1_000_000,
     useSearchGrounding: true,
     capabilities: [
@@ -94,7 +97,7 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
       'Firestore Memory Sync',
     ],
     systemDirective:
-      'You are operating as SMFTA Max (V2 Special Deep-Analysis Engine). Prioritize thorough analytical verification, multi-factor synthesis, grounded factual accuracy, and well-structured depth for demanding tasks.',
+      `You are operating as SMFTA Max (V2 Special Deep-Analysis Engine). Prioritize comprehensive analytical depth, complete large-scale designs and code implementations, extensive writing, grounded factual accuracy, and well-structured detail for demanding tasks.\n\n${buildCreatorAndSecurityDirective('SMFTA Max')}\n\n${FILE_ARTIFACT_SYSTEM_DIRECTIVE}`,
   },
 ];
 

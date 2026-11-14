@@ -3,11 +3,10 @@ import {
   Brain,
   ChevronLeft,
   ChevronRight,
+  Cpu,
   FileText,
   FolderKanban,
-  KeyRound,
   Plug,
-  Search,
   Shield,
   Sliders,
   Sparkles,
@@ -68,9 +67,11 @@ import { ProjectsSection } from './settings/ProjectsSection';
 import { ModelsSection } from './settings/ModelsSection';
 import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
 import { ConnectionsSection } from './settings/ConnectionsSection';
+import { ProvidersApiSection } from './settings/ProvidersApiSection';
 
 export type SettingsTabId =
   | 'general'
+  | 'providers'
   | 'instructions'
   | 'memory'
   | 'projects'
@@ -78,7 +79,6 @@ export type SettingsTabId =
   | 'data'
   | 'connections'
   // Legacy aliases preserved for backward compatibility
-  | 'providers'
   | 'mcp'
   | 'database'
   | 'tools'
@@ -104,83 +104,70 @@ export type SettingsTabId =
 
 export type SectionId =
   | 'general'
+  | 'providers'
+  | 'models'
   | 'instructions'
   | 'memory'
   | 'projects'
-  | 'models'
-  | 'data'
-  | 'connections';
+  | 'connections'
+  | 'data';
 
 interface CategoryDescriptor {
   id: SectionId;
-  code: string;
   label: string;
-  hint: string;
-  keywords: string[];
   icon: React.ComponentType<{ className?: string }>;
 }
 
 const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
   {
     id: 'general',
-    code: 'ক',
-    label: 'সাধারণ (General)',
-    hint: 'থিম (Light/Dark/System), ভাষা, লেখার আকার, Enter চাপলে মেসেজ',
-    keywords: ['general', 'theme', 'dark', 'light', 'system', 'language', 'font', 'enter', 'সাধারণ', 'থিম', 'ভাষা'],
+    label: 'General',
     icon: Sliders,
   },
   {
+    id: 'providers',
+    label: 'Custom Providers',
+    icon: Cpu,
+  },
+  {
+    id: 'models',
+    label: 'AI & Thinking',
+    icon: Sparkles,
+  },
+  {
     id: 'instructions',
-    code: 'খ',
     label: 'Instructions',
-    hint: 'আপনাকে কী নামে ডাকব, Global instructions ও Style সিলেক্টর',
-    keywords: ['instructions', 'nickname', 'global', 'style', 'concise', 'explanatory', 'formal', 'custom', 'নির্দেশনা'],
     icon: FileText,
   },
   {
     id: 'memory',
-    code: 'গ',
     label: 'Memory',
-    hint: 'চ্যাট থেকে মেমোরি তৈরি, দেখা, খোঁজা, এডিট, Pause ও Reset',
-    keywords: ['memory', 'facts', 'pause', 'reset', 'incognito', 'search', 'মেমোরি'],
     icon: Brain,
   },
   {
     id: 'projects',
-    code: 'ঘ',
     label: 'Projects',
-    hint: 'নতুন প্রজেক্ট তৈরি, প্রজেক্টের নির্দেশনা, এডিট ও ডিলিট',
-    keywords: ['projects', 'project', 'workspace', 'প্রজেক্ট'],
     icon: FolderKanban,
   },
   {
-    id: 'models',
-    code: 'ঙ',
-    label: 'মডেল ও থিংকিং',
-    hint: 'বর্তমান মডেল, Thinking চালু, পরিমাণ (Low/Medium/High), লাইভ থিংকিং ও দৈর্ঘ্য',
-    keywords: ['models', 'thinking', 'live', 'effort', 'low', 'medium', 'high', 'length', 'মডেল', 'থিংকিং'],
-    icon: Sparkles,
+    id: 'connections',
+    label: 'Connections',
+    icon: Plug,
   },
   {
     id: 'data',
-    code: 'চ',
-    label: 'ডেটা ও প্রাইভেসি',
-    hint: 'সব ডেটা এক্সপোর্ট (JSON), চ্যাট হিস্ট্রি মুছে ফেলা ও সব ডেটা মুছে ফেলা',
-    keywords: ['data', 'privacy', 'security', 'export', 'json', 'delete', 'clear', 'history', 'ডেটা', 'প্রাইভেসি'],
+    label: 'Data',
     icon: Shield,
-  },
-  {
-    id: 'connections',
-    code: 'ছ',
-    label: 'কানেকশন (Connections)',
-    hint: 'GitHub, Supabase, Vercel সরাসরি কানেকশন এবং Advanced প্রোভাইডার ও API কী',
-    keywords: ['connections', 'oauth', 'github', 'supabase', 'vercel', 'providers', 'api', 'key', 'advanced', 'কানেকশন'],
-    icon: Plug,
   },
 ];
 
 function normalizeTab(t?: SettingsTabId): SectionId {
   switch (t) {
+    case 'providers':
+    case 'engine':
+    case 'weights':
+    case 'upgrade':
+      return 'providers';
     case 'instructions':
     case 'personalization':
     case 'profile':
@@ -201,13 +188,9 @@ function normalizeTab(t?: SettingsTabId): SectionId {
     case 'database':
       return 'data';
     case 'connections':
-    case 'providers':
     case 'mcp':
     case 'connectors':
     case 'integrations':
-    case 'engine':
-    case 'weights':
-    case 'upgrade':
     case 'self':
       return 'connections';
     case 'general':
@@ -497,21 +480,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const filteredCategories = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return SETTINGS_CATEGORIES;
-    return SETTINGS_CATEGORIES.filter((cat) => {
-      if (cat.label.toLowerCase().includes(q)) return true;
-      if (cat.hint.toLowerCase().includes(q)) return true;
-      if (cat.code.includes(q)) return true;
-      return cat.keywords.some((kw) => kw.includes(q));
-    });
+    return SETTINGS_CATEGORIES.filter((cat) =>
+      cat.label.toLowerCase().includes(q)
+    );
   }, [searchQuery]);
-
-  // If current search hides active tab on desktop, auto-select the first match
-  useEffect(() => {
-    if (!searchQuery.trim()) return;
-    if (filteredCategories.length > 0 && !filteredCategories.some((c) => c.id === tab)) {
-      setTab(filteredCategories[0].id);
-    }
-  }, [filteredCategories, searchQuery, tab]);
 
   if (!isOpen && !isInline) return null;
 
@@ -1298,18 +1270,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             cloudUserEmail={cloudUserEmail}
           />
         );
-      case 'connections':
+      case 'providers':
         return (
-          <ConnectionsSection
-            connections={connections}
-            onUpdateConnections={onUpdateConnections}
-            notify={notify}
-            defaultOpenAdvanced={
-              initialTab === 'providers' ||
-              initialTab === 'engine' ||
-              initialTab === 'weights' ||
-              initialTab === 'upgrade'
-            }
+          <ProvidersApiSection
             draft={draft}
             patch={patch}
             localProfiles={localProfiles}
@@ -1382,92 +1345,57 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             usageToday={usageToday}
           />
         );
+      case 'connections':
+        return (
+          <ConnectionsSection
+            connections={connections}
+            onUpdateConnections={onUpdateConnections}
+            notify={notify}
+          />
+        );
     }
   };
 
-  const renderSearchBar = (testId: string) => (
-    <div className="fs-settings-search">
-      <Search className="w-3.5 h-3.5 text-[var(--text-3)] shrink-0" />
-      <input
-        type="text"
-        data-testid={testId}
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="সেটিংস খুঁজুন (থিম, মেমোরি, থিংকিং, OAuth)..."
-        aria-label="Search settings categories"
-        className="w-full bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-dim)] focus:outline-none"
-      />
-      {searchQuery && (
-        <button
-          type="button"
-          onClick={() => setSearchQuery('')}
-          aria-label="Clear settings search"
-          className="text-[var(--text-3)] hover:text-[var(--text)] cursor-pointer p-0.5"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      )}
-    </div>
-  );
-
   const renderNavContent = (isMobileList: boolean) => {
     return (
-      <div className="space-y-3">
-        {renderSearchBar(isMobileList ? 'settings-search-mobile' : 'settings-search-input')}
-
-        {filteredCategories.length === 0 ? (
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-5 text-center text-xs text-[var(--text-3)]">
-            &ldquo;{searchQuery}&rdquo; দিয়ে কোনো সেটিংস পাওয়া যায়নি।
-          </div>
-        ) : (
-          <div className={isMobileList ? 'ref-settings-group' : 'space-y-1'}>
-            {filteredCategories.map((cat) => {
-              const Icon = cat.icon;
-              const isActive = tab === cat.id;
-              if (isMobileList) {
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    data-testid={`settings-mobile-tab-${cat.id}`}
-                    onClick={() => openSection(cat.id)}
-                    className="ref-settings-row"
-                  >
-                    <span className="flex items-center gap-3 min-w-0">
-                      <span className="ref-settings-row-icon">
-                        <Icon className="w-4 h-4" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-semibold text-[var(--ink)] truncate">
-                          ({cat.code}) {cat.label}
-                        </span>
-                        <span className="block text-xs text-[var(--ink-dim)] truncate">
-                          {cat.hint}
-                        </span>
-                      </span>
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
-                  </button>
-                );
-              }
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  data-testid={`settings-tab-${cat.id}`}
-                  onClick={() => openSection(cat.id)}
-                  className={`fs-settings-nav-item ${isActive ? 'is-active' : ''}`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="font-mono text-[11px] opacity-70 shrink-0">
-                    ({cat.code})
+      <div className={isMobileList ? 'ref-settings-group' : 'space-y-1'}>
+        {filteredCategories.map((cat) => {
+          const Icon = cat.icon;
+          const isActive = tab === cat.id;
+          if (isMobileList) {
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                data-testid={`settings-mobile-tab-${cat.id}`}
+                onClick={() => openSection(cat.id)}
+                className="ref-settings-row"
+              >
+                <span className="flex items-center gap-3 min-w-0">
+                  <span className="ref-settings-row-icon">
+                    <Icon className="w-4 h-4" />
                   </span>
-                  <span className="truncate flex-1 text-left">{cat.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  <span className="text-[14.5px] font-medium text-[var(--ink)] truncate">
+                    {cat.label}
+                  </span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
+              </button>
+            );
+          }
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              data-testid={`settings-tab-${cat.id}`}
+              onClick={() => openSection(cat.id)}
+              className={`fs-settings-nav-item ${isActive ? 'is-active' : ''}`}
+            >
+              <Icon className="w-4 h-4 shrink-0" />
+              <span className="truncate flex-1 text-left">{cat.label}</span>
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -1487,64 +1415,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               data-testid="settings-mobile-back"
               onClick={() => setMobileDetailOpen(false)}
               className="fs-settings-back-btn md:hidden"
-              aria-label="Back to Settings Categories"
+              aria-label="Back to Settings"
             >
               <ChevronLeft className="w-4 h-4" />
-              <span>Categories</span>
+              <span>Back</span>
             </button>
           ) : null}
 
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--ink-dim)]">
-              <span>Settings</span>
-              <span>/</span>
-            </span>
-            <h1 className="text-sm sm:text-base font-bold text-[var(--ink)] truncate">
-              {mobileDetailOpen
-                ? `${currentMeta.code}. ${currentMeta.label}`
-                : 'SMFTA AI Settings'}
-            </h1>
-          </div>
+          <h1 className="text-sm sm:text-[15px] font-semibold text-[var(--ink)] truncate">
+            {mobileDetailOpen ? currentMeta.label : 'Settings'}
+          </h1>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <div
-            className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] text-[11px]"
-            title={`Active profile: ${activeProfile.name} (${activeProfile.externalModel || 'Auto'})`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                activeProfile.verified
-                  ? 'bg-emerald-500'
-                  : activeProfile.verificationStatus === 'failed'
-                  ? 'bg-rose-500'
-                  : 'bg-amber-400'
-              }`}
-            />
-            <span className="font-semibold text-[var(--text)] truncate max-w-[130px]">
-              {activeProfile.name}
-            </span>
-            <span className="font-mono text-[var(--text-3)] truncate max-w-[140px]">
-              {activeProfile.externalModel || 'Auto'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            data-testid="settings-close-btn"
-            className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:border-[var(--primary-border)] cursor-pointer"
-            aria-label="Close settings"
-            title="Close Settings (Esc)"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          data-testid="settings-close-btn"
+          className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:border-[var(--primary-border)] cursor-pointer"
+          aria-label="Close settings"
+          title="Close (Esc)"
+        >
+          <X className="w-4 h-4" />
+        </button>
       </header>
 
       {/* Main Split Workspace */}
       <div className="fs-settings-body">
-        {/* Desktop 260px Left Rail */}
+        {/* Desktop Left Rail */}
         <aside
           aria-label="Settings categories"
           className="fs-settings-rail hidden md:flex"
@@ -1552,16 +1449,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex-1 overflow-y-auto px-3 py-3">
             {renderNavContent(false)}
           </div>
-          <div className="px-3 py-2.5 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--ink-dim)]">
-            <span className="inline-flex items-center gap-1.5 truncate">
-              <KeyRound className="w-3 h-3 shrink-0" />
-              {keystoreEphemeral ? 'Session Keystore' : 'AES-256-GCM'}
-            </span>
+          <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--ink-dim)]">
+            <span className="truncate font-medium">{activeProfile.name}</span>
             <span className="font-mono">v{APP_VERSION}</span>
           </div>
         </aside>
 
-        {/* Mobile Overview List (visible < 860px / < md when not drilled into detail) */}
+        {/* Mobile Overview List */}
         {!mobileDetailOpen && (
           <div className="flex-1 overflow-y-auto px-4 py-4 md:hidden">
             {renderNavContent(true)}
@@ -1575,23 +1469,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }`}
         >
           <div className="fs-settings-content">
-            <div className="mb-4 pb-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[11px] font-mono font-semibold text-[var(--primary)]">
-                  CATEGORY {currentMeta.code}
-                </div>
-                <h2 className="text-base sm:text-lg font-bold text-[var(--ink)]">
-                  {currentMeta.label}
-                </h2>
-                <p className="text-xs text-[var(--ink-dim)] mt-0.5">
-                  {currentMeta.hint}
-                </p>
-              </div>
-              {draft.conversationPrivacyMode && (
-                <span className="px-2 py-1 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-400 text-[11px] font-semibold">
-                  Privacy Mode Active
-                </span>
-              )}
+            <div className="hidden md:flex items-center justify-between mb-3 pb-2 border-b border-[var(--border)]">
+              <h2 className="text-[15px] font-semibold text-[var(--ink)]">
+                {currentMeta.label}
+              </h2>
             </div>
 
             {renderActiveSection()}

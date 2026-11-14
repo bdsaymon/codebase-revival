@@ -15,6 +15,8 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
+  enableNetwork,
   doc,
   getDoc,
   getDocFromServer,
@@ -78,6 +80,48 @@ let authInstance: Auth | null = null;
 let appCheckInstance: AppCheck | null = null;
 let aiInstance: AI | null = null;
 let connectionValidated = false;
+const ensuredProfilePromises = new Map<string, Promise<void>>();
+
+export function isTransientOfflineError(error: unknown): boolean {
+  const msg =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code || '').toLowerCase()
+      : '';
+  if (
+    code === 'permission-denied' ||
+    msg.includes('permission-denied') ||
+    msg.includes('missing or insufficient permissions')
+  ) {
+    return false;
+  }
+  return (
+    code === 'unavailable' ||
+    msg.includes('the client is offline') ||
+    msg.includes('client is offline') ||
+    msg.includes('could not reach cloud firestore backend') ||
+    msg.includes('failed to get document because the client is offline') ||
+    msg.includes('network request failed') ||
+    msg.includes('failed to fetch')
+  );
+}
+
+async function runWithFirestoreReconnect<T>(
+  database: Firestore,
+  fn: () => Promise<T>
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    if (!isTransientOfflineError(error)) {
+      throw error;
+    }
+    await enableNetwork(database).catch(() => {});
+    await new Promise((r) => setTimeout(r, 500));
+    return await fn();
+  }
+}
 
 export function getFirebaseServices(): {
   app: FirebaseApp;
@@ -91,7 +135,20 @@ export function getFirebaseServices(): {
       getApps().length > 0 ? getApps()[0]! : initializeApp(firebaseConfig);
   }
   if (!dbInstance) {
-    dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+    try {
+      // Force HTTPS long-polling so proxied iFrames and restrictive networks
+      // never stall for 10s on WebChannel streaming and drop offline.
+      dbInstance = initializeFirestore(
+        appInstance,
+        { experimentalForceLongPolling: true },
+        firebaseConfig.firestoreDatabaseId
+      );
+    } catch {
+      dbInstance = getFirestore(
+        appInstance,
+        firebaseConfig.firestoreDatabaseId
+      );
+    }
   }
   if (!authInstance) {
     authInstance = getAuth(appInstance);
@@ -140,14 +197,15 @@ export async function validateFirestoreConnection(
 ): Promise<boolean> {
   const targetDb = database || getFirebaseServices().db;
   try {
-    await getDocFromServer(doc(targetDb, 'test', 'connection'));
+    await runWithFirestoreReconnect(targetDb, () =>
+      getDocFromServer(doc(targetDb, 'test', 'connection'))
+    );
     return true;
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes('the client is offline')
-    ) {
-      console.error('Please check your Firebase configuration.');
+    if (isTransientOfflineError(error)) {
+      if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+        console.error('Please check your Firebase configuration.');
+      }
       return false;
     }
     return true;
@@ -232,26 +290,45 @@ export async function ensureFirestoreUserProfile(
   if (!user?.uid || !user.emailVerified) return;
   const db = database || getFirebaseServices().db;
   const userId = sanitizeDocId(user.uid);
+  const existingTask = ensuredProfilePromises.get(userId);
+  if (existingTask) {
+    return existingTask;
+  }
+
   const path = `users/${userId}`;
   const ref = doc(db, 'users', userId);
-  try {
-    const snap = await getDoc(ref);
-    const safeName =
-      (displayName || user.displayName || 'SMFTA User').trim().slice(0, 80) ||
-      'SMFTA User';
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        userId,
-        displayName: safeName,
-        testingBypass: false,
-        testingAllowance: 0,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+  const safeName =
+    (displayName || user.displayName || 'SMFTA User').trim().slice(0, 80) ||
+    'SMFTA User';
+
+  const task = (async () => {
+    try {
+      await runWithFirestoreReconnect(db, async () => {
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          await setDoc(ref, {
+            userId,
+            displayName: safeName,
+            testingBypass: false,
+            testingAllowance: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
       });
+    } catch (error) {
+      ensuredProfilePromises.delete(userId);
+      if (isTransientOfflineError(error)) {
+        // Offline / unreachable network should not crash sign-in or spam fatal errors;
+        // future operations will retry automatically once connectivity returns.
+        return;
+      }
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  })();
+
+  ensuredProfilePromises.set(userId, task);
+  return task;
 }
 
 export async function ensureFirestoreSessionDoc(
@@ -273,26 +350,29 @@ export async function ensureFirestoreSessionDoc(
   const safeModelId = (modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
 
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        userId,
-        sessionId: cleanSessionId,
-        title: safeTitle,
-        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-        modelId: safeModelId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(ref, {
-        title: safeTitle,
-        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-        modelId: safeModelId,
-        updatedAt: serverTimestamp(),
-      });
-    }
+    await runWithFirestoreReconnect(db, async () => {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          userId,
+          sessionId: cleanSessionId,
+          title: safeTitle,
+          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+          modelId: safeModelId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, {
+          title: safeTitle,
+          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+          modelId: safeModelId,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
   } catch (error) {
+    if (isTransientOfflineError(error)) return;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -335,24 +415,27 @@ export async function saveSessionMessageToFirestore(params: {
   );
 
   try {
-    const existingSnap = await getDoc(ref);
-    if (!existingSnap.exists()) {
-      await setDoc(ref, {
-        userId,
-        sessionId: cleanSessionId,
-        messageId: cleanMsgId,
-        role: params.role === 'user' ? 'user' : 'ai',
-        text: cleanText,
-        modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
-        createdAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(ref, {
-        text: cleanText,
-        modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
-      });
-    }
+    await runWithFirestoreReconnect(db, async () => {
+      const existingSnap = await getDoc(ref);
+      if (!existingSnap.exists()) {
+        await setDoc(ref, {
+          userId,
+          sessionId: cleanSessionId,
+          messageId: cleanMsgId,
+          role: params.role === 'user' ? 'user' : 'ai',
+          text: cleanText,
+          modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, {
+          text: cleanText,
+          modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
+        });
+      }
+    });
   } catch (error) {
+    if (isTransientOfflineError(error)) return;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -386,30 +469,33 @@ export async function syncConversationToFirestore(
   const safeModelId = (modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
 
   try {
-    const existingSnap = await getDoc(ref);
-    if (!existingSnap.exists()) {
-      await setDoc(ref, {
-        userId,
-        conversationId,
-        title: safeTitle,
-        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-        modelId: safeModelId,
-        messagesPayload,
-        messageCount: compactMsgs.length,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(ref, {
-        title: safeTitle,
-        systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-        modelId: safeModelId,
-        messagesPayload,
-        messageCount: compactMsgs.length,
-        updatedAt: serverTimestamp(),
-      });
-    }
+    await runWithFirestoreReconnect(db, async () => {
+      const existingSnap = await getDoc(ref);
+      if (!existingSnap.exists()) {
+        await setDoc(ref, {
+          userId,
+          conversationId,
+          title: safeTitle,
+          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+          modelId: safeModelId,
+          messagesPayload,
+          messageCount: compactMsgs.length,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, {
+          title: safeTitle,
+          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
+          modelId: safeModelId,
+          messagesPayload,
+          messageCount: compactMsgs.length,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
   } catch (error) {
+    if (isTransientOfflineError(error)) return;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -452,6 +538,7 @@ export function subscribeToFirestoreConversations(
       onConversations(loaded);
     },
     (error) => {
+      if (isTransientOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch {
@@ -474,9 +561,15 @@ export async function deleteConversationFromFirestore(
   const sessRef = doc(db, 'users', userId, 'sessions', cleanSessionId);
 
   try {
-    await deleteDoc(convRef);
+    await runWithFirestoreReconnect(db, () => deleteDoc(convRef));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `users/${userId}/conversations/${conversationId}`);
+    if (!isTransientOfflineError(error)) {
+      handleFirestoreError(
+        error,
+        OperationType.DELETE,
+        `users/${userId}/conversations/${conversationId}`
+      );
+    }
   }
   try {
     await deleteDoc(sessRef);
@@ -493,11 +586,15 @@ export async function clearAllFirestoreConversations(
   const userId = sanitizeDocId(user.uid);
 
   try {
-    const convCol = collection(db, 'users', userId, 'conversations');
-    const convSnap = await getDocs(query(convCol, where('userId', '==', userId)));
-    await Promise.all(convSnap.docs.map((d) => deleteDoc(d.ref)));
+    await runWithFirestoreReconnect(db, async () => {
+      const convCol = collection(db, 'users', userId, 'conversations');
+      const convSnap = await getDocs(query(convCol, where('userId', '==', userId)));
+      await Promise.all(convSnap.docs.map((d) => deleteDoc(d.ref)));
+    });
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `users/${userId}/conversations`);
+    if (!isTransientOfflineError(error)) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${userId}/conversations`);
+    }
   }
 
   try {
@@ -541,33 +638,36 @@ export async function saveMemoryFactToFirestore(
     (sourceModel || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
 
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        userId,
-        memoryId,
-        fact: cleanFact,
-        topic: safeTopic,
-        sourceModel: safeModel,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(ref, {
-        fact: cleanFact,
-        topic: safeTopic,
-        sourceModel: safeModel,
-        updatedAt: serverTimestamp(),
-      });
-    }
+    await runWithFirestoreReconnect(db, async () => {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          userId,
+          memoryId,
+          fact: cleanFact,
+          topic: safeTopic,
+          sourceModel: safeModel,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(ref, {
+          fact: cleanFact,
+          topic: safeTopic,
+          sourceModel: safeModel,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
   } catch (error) {
+    if (isTransientOfflineError(error)) return;
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
 export function subscribeToFirestoreMemories(
   user: FirebaseUser,
-  onMemories: (facts: string[]) => void
+  onMemories: (facts: string[], meta?: { fromCache: boolean }) => void
 ): Unsubscribe {
   const { db } = getFirebaseServices();
   const userId = sanitizeDocId(user.uid);
@@ -591,9 +691,10 @@ export function subscribeToFirestoreMemories(
           }
         }
       });
-      onMemories(facts);
+      onMemories(facts, { fromCache: snapshot.metadata.fromCache });
     },
     (error) => {
+      if (isTransientOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch {
@@ -668,11 +769,14 @@ export async function clearAllFirestoreMemories(
   const userId = sanitizeDocId(user.uid);
   const path = `users/${userId}/memories`;
   try {
-    const colRef = collection(db, 'users', userId, 'memories');
-    const q = query(colRef, where('userId', '==', userId));
-    const snap = await getDocs(q);
-    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    await runWithFirestoreReconnect(db, async () => {
+      const colRef = collection(db, 'users', userId, 'memories');
+      const q = query(colRef, where('userId', '==', userId));
+      const snap = await getDocs(q);
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    });
   } catch (error) {
+    if (isTransientOfflineError(error)) return;
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
@@ -721,6 +825,7 @@ export function subscribeToFirestoreV2Usage(
       onUsageUpdate({ usedByModel, testingUsedByModel });
     },
     (error) => {
+      if (isTransientOfflineError(error)) return;
       try {
         handleFirestoreError(error, OperationType.LIST, path);
       } catch {

@@ -47,30 +47,30 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(V2_SPECIAL_MODELS.length, 3);
 
   assert.equal(v5.label, 'SMFTA V5');
-  assert.equal(v5.serverGeminiModel, 'gemini-3.1-flash-lite');
+  assert.equal(v5.serverGeminiModel, 'gemini-3.5-flash-lite');
   assert.equal(v5.temperature, 0.7);
-  assert.equal(v5.maxOutputTokens, 1024);
+  assert.equal(v5.maxOutputTokens, 8192);
   assert.equal(v5.defaultDailyLimit, 100);
   assert.equal(v5.thinkingLevel, 'MINIMAL');
   assert.equal(v5.useSearchGrounding, false);
 
   assert.equal(pro.label, 'SMFTA Pro');
-  assert.equal(pro.serverGeminiModel, 'gemini-3.1-flash-lite');
+  assert.equal(pro.serverGeminiModel, 'gemini-3-flash-preview');
   assert.equal(pro.temperature, 0.4);
-  assert.equal(pro.maxOutputTokens, 2048);
+  assert.equal(pro.maxOutputTokens, 16384);
   assert.equal(pro.defaultDailyLimit, 40);
   assert.equal(pro.thinkingLevel, 'LOW');
   assert.equal(pro.useSearchGrounding, false);
 
   assert.equal(max.label, 'SMFTA Max');
-  assert.equal(max.serverGeminiModel, 'gemini-4-hydrogen');
-  assert.equal(max.maxOutputTokens, 4096);
+  assert.equal(max.serverGeminiModel, 'gemini-3.8-flash');
+  assert.equal(max.maxOutputTokens, 32768);
   assert.equal(max.defaultDailyLimit, 15);
   assert.equal(max.thinkingLevel, 'HIGH');
   assert.equal(max.useSearchGrounding, true);
 });
 
-test('gemini-4-hydrogen config omits deprecated sampling params and enables search for SMFTA Max', () => {
+test('gemini-2.5 config sets thinkingBudget and preserves parameter safety', () => {
   const maxSpec = getV2ModelSpec('smfta-max');
   const hydrogenCfg = buildV2GenAiRequestConfig({
     modelName: 'gemini-4-hydrogen',
@@ -82,14 +82,29 @@ test('gemini-4-hydrogen config omits deprecated sampling params and enables sear
   assert.equal('topK' in hydrogenCfg, false);
   assert.ok(Array.isArray(hydrogenCfg.tools));
 
+  const max25Cfg = buildV2GenAiRequestConfig({
+    modelName: 'gemini-2.5-pro',
+    spec: maxSpec,
+    fullSystemInstruction: 'System prompt',
+  });
+  assert.deepEqual(max25Cfg.thinkingConfig, {
+    includeThoughts: true,
+    thinkingBudget: 12288,
+  });
+  assert.ok(Array.isArray(max25Cfg.tools));
+
   const v5Spec = getV2ModelSpec('smfta-v5');
   const liteCfg = buildV2GenAiRequestConfig({
-    modelName: 'gemini-3.1-flash-lite',
+    modelName: 'gemini-2.5-flash-lite',
     spec: v5Spec,
     fullSystemInstruction: 'System prompt',
   });
   assert.equal(liteCfg.temperature, 0.7);
-  assert.equal(liteCfg.maxOutputTokens, 1024);
+  assert.equal(liteCfg.maxOutputTokens, 8192);
+  assert.deepEqual(liteCfg.thinkingConfig, {
+    includeThoughts: true,
+    thinkingBudget: 1024,
+  });
   assert.equal('tools' in liteCfg, false);
 });
 
@@ -285,11 +300,18 @@ test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays b
   );
 
   assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
-    'gemini-3.1-flash-lite',
-    'gemini-4-hydrogen',
+    'gemini-3.5-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-3.8-flash',
+  ]);
+  assert.deepEqual(getV2ServerFallbackModels('smfta-v2-pro'), [
+    'gemini-3-flash-preview',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
-    'gemini-4-hydrogen',
-    'gemini-3.1-flash-lite',
+    'gemini-3.8-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash-lite',
   ]);
 });

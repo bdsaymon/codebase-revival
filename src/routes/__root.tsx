@@ -12,6 +12,10 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import {
+  isDynamicImportError,
+  shouldAttemptChunkReload,
+} from "../lib/dynamicImportRecovery";
 
 function NotFoundComponent() {
   return (
@@ -38,9 +42,19 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
+  const isModuleFetchError = isDynamicImportError(error);
+
   useEffect(() => {
+    if (
+      isModuleFetchError &&
+      typeof window !== "undefined" &&
+      shouldAttemptChunkReload(window.sessionStorage)
+    ) {
+      window.location.reload();
+      return;
+    }
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
+  }, [error, isModuleFetchError]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -49,11 +63,17 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          {isModuleFetchError
+            ? "A module update or temporary network hiccup interrupted loading. Reload to fetch the latest version."
+            : "Something went wrong on our end. You can try refreshing or head back home."}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
+              if (isModuleFetchError && typeof window !== "undefined") {
+                window.location.reload();
+                return;
+              }
               router.invalidate();
               reset();
             }}

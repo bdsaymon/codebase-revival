@@ -7,11 +7,11 @@
 const GATEWAY_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 
 const MODEL_MAP: Record<string, string> = {
-  'smfta-flash': 'google/gemini-3-flash-preview',
-  'smfta-pro': 'google/gemini-3.1-pro-preview',
-  'smfta-ultra': 'google/gemini-4-argon',
+  'smfta-flash': 'google/gemini-2.5-flash-lite',
+  'smfta-pro': 'google/gemini-2.5-flash',
+  'smfta-ultra': 'google/gemini-2.5-pro',
 };
-const DEFAULT_MODEL = 'google/gemini-3-flash-preview';
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 
 export function resolveBuiltinGatewayModel(requested?: string | null): string {
   const key = String(requested || '').trim().toLowerCase();

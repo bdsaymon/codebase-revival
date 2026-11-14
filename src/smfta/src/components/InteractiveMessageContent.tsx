@@ -10,11 +10,32 @@ import {
   RotateCcw,
   Lightbulb,
   ArrowRight,
-  ChevronDown,
+  ChevronRight,
+  Eye,
+  Code2,
+  FileText,
+  Download,
+  FileArchive,
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
 import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
 import { formatThinkingTimerLabel } from '../utils/thinking';
+import { isPreviewableLanguage } from './ClaudeArtifactPanel';
+import {
+  FileArtifactItem,
+  downloadArtifactsAsZip,
+  downloadSingleArtifactFile,
+  extractFileArtifacts,
+  formatArtifactSize,
+} from '../utils/fileArtifacts';
+import {
+  CONTACT_BUTTONS_TOKEN,
+  CREATOR_NAME,
+  CREATOR_TELEGRAM_URL,
+  TELEGRAM_BUTTON_TOKEN,
+  WHATSAPP_BUTTON_TOKEN,
+  getCreatorWhatsAppUrl,
+} from '../utils/creatorIdentity';
 
 interface InteractiveMessageContentProps {
   messageId: string;
@@ -33,7 +54,13 @@ interface InteractiveMessageContentProps {
   ) => void;
   onDismissSuggestion: (messageId: string, suggestionId: string) => void;
   onAcceptSuggestion: (messageId: string, suggestion: ProactiveSuggestion) => void;
-  onOpenCodeLab: (code: string) => void;
+  onOpenCodeLab: (
+    code: string,
+    lang?: string,
+    filename?: string,
+    title?: string,
+    bundleFiles?: FileArtifactItem[]
+  ) => void;
   onInstallSelfWidget?: (code: string) => void;
   onToast: (msg: string) => void;
   /** Opens the full Live Preview modal for this message. */
@@ -246,13 +273,86 @@ function stripBrokenGlyphs(str: string): string {
     .replace(/  +/g, ' ');
 }
 
+function CreatorContactButtons({
+  showWhatsApp = true,
+  showTelegram = true,
+  inline = false,
+}: {
+  showWhatsApp?: boolean;
+  showTelegram?: boolean;
+  inline?: boolean;
+}) {
+  const waUrl = getCreatorWhatsAppUrl();
+  return (
+    <span
+      data-testid="creator-contact-actions"
+      className={
+        inline
+          ? 'inline-flex flex-wrap items-center gap-2 align-middle mx-1'
+          : 'flex flex-wrap items-center gap-2.5 my-2.5'
+      }
+    >
+      {showWhatsApp && (
+        <a
+          href={waUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="whatsapp-now-btn"
+          title={`${CREATOR_NAME} — WhatsApp`}
+          aria-label="WhatsApp Now"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#25D366] hover:bg-[#1ebe5d] text-white text-[13px] font-semibold shadow-xs transition-colors no-underline"
+        >
+          <svg
+            className="w-4 h-4 shrink-0 fill-current"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path d="M12.03 2C6.51 2 2.04 6.47 2.04 11.99c0 1.76.46 3.48 1.34 5L2 22l5.15-1.35a9.96 9.96 0 0 0 4.88 1.27h.01c5.52 0 9.99-4.47 9.99-9.99C22.03 6.47 17.55 2 12.03 2zm5.82 14.18c-.24.68-1.42 1.3-1.97 1.38-.51.07-1.15.1-1.85-.12-.43-.14-.98-.32-1.69-.63-2.97-1.28-4.91-4.29-5.06-4.49-.15-.2-1.21-1.61-1.21-3.07 0-1.46.76-2.18 1.03-2.48.27-.3.59-.37.79-.37.2 0 .39 0 .56.01.18.01.42-.07.66.5.24.58.83 2.02.9 2.17.07.15.12.32.02.52-.1.2-.15.32-.3.5-.15.17-.31.39-.44.52-.15.15-.3.31-.13.61.17.3.77 1.27 1.66 2.06 1.14 1.02 2.1 1.33 2.4 1.48.3.15.47.13.65-.07.18-.2.74-.86.94-1.16.2-.3.4-.25.67-.15.27.1 1.72.81 2.02.96.3.15.49.22.56.34.07.13.07.72-.17 1.4z" />
+          </svg>
+          <span>WhatsApp Now</span>
+        </a>
+      )}
+
+      {showTelegram && (
+        <a
+          href={CREATOR_TELEGRAM_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="telegram-contact-btn"
+          title={`${CREATOR_NAME} — Telegram`}
+          aria-label="Telegram Now"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#229ED9] hover:bg-[#1b8cc2] text-white text-[13px] font-semibold shadow-xs transition-colors no-underline"
+        >
+          <svg
+            className="w-4 h-4 shrink-0 fill-current"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+          </svg>
+          <span>Telegram Now</span>
+        </a>
+      )}
+    </span>
+  );
+}
+
 // Rich multi-color inline markdown formatter for bold, inline code, quoted phrases, and links
 function renderInlineFormatting(line: string): React.ReactNode {
   const cleanLine = stripBrokenGlyphs(line);
   const parts = cleanLine.split(
-    /(`[^`]+`|\*\*[^*]+\*\*|"[^"\n]{2,60}"|“[^”\n]{2,60}”|\[[^\]]+\]\([^)]+\))/g
+    /(\[\[SMFTA_CONTACT_BUTTONS\]\]|\[\[WHATSAPP_NOW\]\]|\[\[TELEGRAM_NOW\]\]|`[^`]+`|\*\*[^*]+\*\*|"[^"\n]{2,60}"|“[^”\n]{2,60}”|\[[^\]]+\]\([^)]+\))/g
   );
   return parts.map((part, i) => {
+    if (part === CONTACT_BUTTONS_TOKEN) {
+      return <CreatorContactButtons key={i} showWhatsApp showTelegram inline />;
+    }
+    if (part === WHATSAPP_BUTTON_TOKEN) {
+      return <CreatorContactButtons key={i} showWhatsApp showTelegram={false} inline />;
+    }
+    if (part === TELEGRAM_BUTTON_TOKEN) {
+      return <CreatorContactButtons key={i} showWhatsApp={false} showTelegram inline />;
+    }
     if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
       return (
         <code
@@ -610,7 +710,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
 
   const thinkingHeadline = formatThinkingTimerLabel(
     effectiveDurationSec,
-    isReasoningNow
+    !isReasoningNow
   );
 
   const isWebCodeLang = (lang?: string): boolean => {
@@ -634,12 +734,19 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
     ].includes(l);
   };
 
+  const { artifacts, processedText } = extractFileArtifacts(cleanResponse, {
+    isStreaming,
+  });
+
+  const normalizedForBlocks = (processedText || '')
+    .replace(/(\[\[SMFTA_CONTACT_BUTTONS\]\]|\[\[WHATSAPP_NOW\]\])/g, '\n\n$1\n\n');
+
   // v18.11 — markdown off: keep the raw text as one plain block (code fences
   // are displayed literally, exactly as the model wrote them).
   const blocks: ParsedBlock[] =
     renderMarkdown === false
-      ? [{ type: 'text', content: cleanResponse }]
-      : parseBlocks(cleanResponse);
+      ? [{ type: 'text', content: processedText || cleanResponse }]
+      : parseBlocks(normalizedForBlocks);
 
   const handleOpenInlineEditor = (idx: number, blockContent: string) => {
     if (isStreaming) return;
@@ -788,59 +895,45 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
         </div>
       )}
 
-      {/* Claude-Style Collapsible Live Thinking Box (Shown ONLY when real thinking exists) */}
+      {/* Claude-Style Minimal Collapsible Thinking Row */}
       {(Boolean(thinkingText) || isThinkingActive) && (
         <div
           data-testid="thinking-accordion"
-          className="thinking-accordion-container"
+          className="my-1.5"
         >
-          <div className="thinking-accordion-inner">
-            <button
-              type="button"
-              data-testid="thinking-accordion-toggle"
-              aria-expanded={isThinkingExpanded}
-              onClick={() => setUserToggledThinking(!isThinkingExpanded)}
-              className="w-full min-w-0 flex items-center justify-between gap-2 text-xs sm:text-[13px] font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
+          <button
+            type="button"
+            data-testid="thinking-accordion-toggle"
+            aria-expanded={isThinkingExpanded}
+            onClick={() => setUserToggledThinking(!isThinkingExpanded)}
+            className="inline-flex items-center gap-1.5 py-1 text-[13px] font-medium text-[var(--ink-dim)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+          >
+            <ChevronRight
+              className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${
+                isThinkingExpanded ? 'rotate-90' : ''
+              }`}
+            />
+            <span
+              data-testid="thinking-accordion-headline"
+              className={isReasoningNow ? 'animate-pulse' : ''}
             >
-              <span className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
-                <Brain
-                  className={`w-3.5 h-3.5 text-pink-400 shrink-0 ${
-                    isReasoningNow ? 'animate-pulse' : ''
-                  }`}
-                />
-                <Sparkles
-                  className={`w-3.5 h-3.5 text-purple-400 shrink-0 ${
-                    isReasoningNow ? 'animate-spin' : ''
-                  }`}
-                />
-                <span
-                  data-testid="thinking-accordion-headline"
-                  className="truncate text-left font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent"
-                >
-                  {thinkingHeadline}
-                </span>
-                {statusSteps.length > 0 && (
-                  <span className="text-[11px] text-[var(--text-3)] truncate">
-                    · {statusSteps[statusSteps.length - 1]}
-                  </span>
-                )}
+              {thinkingHeadline}
+            </span>
+            {statusSteps.length > 0 && (
+              <span className="text-[12px] text-[var(--text-3)] truncate">
+                · {statusSteps[statusSteps.length - 1]}
               </span>
-              <ChevronDown
-                className={`w-4 h-4 text-purple-400/80 shrink-0 transition-transform duration-200 ${
-                  isThinkingExpanded ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
-
-            {isThinkingExpanded && (
-              <div
-                data-testid="thinking-accordion-content"
-                className="mt-2 pt-2 px-3 py-2 rounded-lg border-t border-purple-500/20 bg-muted/30 text-[11.5px] leading-relaxed text-[var(--text-3)] font-normal max-h-60 overflow-y-auto whitespace-pre-wrap"
-              >
-                {thinkingText || 'ভাবছি…'}
-              </div>
             )}
-          </div>
+          </button>
+
+          {isThinkingExpanded && (
+            <div
+              data-testid="thinking-accordion-content"
+              className="mt-1 mb-2 pl-3.5 border-l-2 border-[var(--border)] text-[13px] leading-relaxed text-[var(--ink-dim)] font-normal max-h-60 overflow-y-auto whitespace-pre-wrap"
+            >
+              {thinkingText || 'ভাবছি…'}
+            </div>
+          )}
         </div>
       )}
 
@@ -930,41 +1023,183 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
             );
           }
 
+          const canLivePreview = isPreviewableLanguage(lang, block.content);
+
           return (
-            <div
-              key={idx}
-              className="chat-code-block my-3 rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-slate-100"
-              data-testid="chat-code-block"
-              data-code-lang={lang}
-            >
-              <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs">
-                <span className="font-mono-num text-slate-300 font-medium truncate">
-                  {lang}
-                </span>
+            <div key={idx} className="my-3 space-y-2">
+              <div
+                className="chat-code-block rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-slate-100"
+                data-testid="chat-code-block"
+                data-code-lang={lang}
+              >
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs">
+                  <span className="font-mono-num text-slate-300 font-medium truncate">
+                    {lang}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="preview-code-btn"
+                      onClick={() => onOpenCodeLab(block.content, lang)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                      title="Open in side-by-side preview"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="copy-code-btn"
+                      onClick={() => handleCopyCode(block.content, idx)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      {copiedCodeIdx === idx ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" /> Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" /> Copy
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <pre
+                  className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-slate-100"
+                  data-testid="chat-code-source-pre"
+                >
+                  <code>{block.content}</code>
+                </pre>
+              </div>
+
+              {canLivePreview && (
                 <button
                   type="button"
-                  data-testid="copy-code-btn"
-                  onClick={() => handleCopyCode(block.content, idx)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                  data-testid="claude-artifact-card"
+                  onClick={() => onOpenCodeLab(block.content, lang)}
+                  className="w-full max-w-md px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
                 >
-                  {copiedCodeIdx === idx ? (
-                    <>
-                      <Check className="w-3 h-3 text-emerald-400" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3" /> Copy
-                    </>
-                  )}
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-8 h-8 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
+                      <Code2 className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[13.5px] font-medium text-[var(--ink)] truncate">
+                        Interactive {lang.toUpperCase()} Artifact
+                      </span>
+                      <span className="block text-[11.5px] text-[var(--ink-dim)]">
+                        Click to open side-by-side preview
+                      </span>
+                    </span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
                 </button>
-              </div>
-              <pre
-                className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-slate-100"
-                data-testid="chat-code-source-pre"
-              >
-                <code>{block.content}</code>
-              </pre>
+              )}
             </div>
+          );
+        }
+
+        // Render Claude.ai-style File Artifact Cards for placeholder tokens
+        const artifactMatch = /^\[\[SMFTA_ARTIFACT_(\d+)\]\]$/.exec(
+          block.content.trim()
+        );
+        if (artifactMatch) {
+          const artIdx = Number(artifactMatch[1]);
+          const art = artifacts[artIdx];
+          if (!art) return null;
+          const isMd = art.lang === 'markdown' || art.filename.endsWith('.md');
+          const extBadge = (
+            art.filename.split('.').pop() ||
+            art.lang ||
+            'FILE'
+          ).toUpperCase();
+          return (
+            <div
+              key={`art-${idx}-${art.id}`}
+              data-testid="claude-file-artifact-card"
+              onClick={() =>
+                onOpenCodeLab(
+                  art.content,
+                  art.lang,
+                  art.filename,
+                  art.title,
+                  artifacts
+                )
+              }
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenCodeLab(
+                    art.content,
+                    art.lang,
+                    art.filename,
+                    art.title,
+                    artifacts
+                  );
+                }
+              }}
+              className="my-2.5 w-full max-w-md px-3.5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="w-9 h-9 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
+                  {isMd ? (
+                    <FileText className="w-4 h-4" />
+                  ) : (
+                    <Code2 className="w-4 h-4" />
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13.5px] font-medium text-[var(--ink)] truncate">
+                    {art.title || art.filename}
+                  </div>
+                  <div className="text-[11.5px] text-[var(--ink-dim)] truncate font-mono">
+                    {art.isStreaming
+                      ? `Writing ${art.filename}…`
+                      : `${art.filename} · ${extBadge} · ${formatArtifactSize(art.content)}`}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  data-testid="artifact-card-download-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    downloadSingleArtifactFile({
+                      filename: art.filename,
+                      lang: art.lang,
+                      content: art.content,
+                    });
+                    onToast(`ডাউনলোড হয়েছে: ${art.filename}`);
+                  }}
+                  className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer"
+                  title={`Download ${art.filename}`}
+                  aria-label={`Download ${art.filename}`}
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+                <ChevronRight className="w-4 h-4 text-[var(--ink-dim)]" />
+              </div>
+            </div>
+          );
+        }
+
+        const trimmedBlock = block.content.trim();
+        if (trimmedBlock === CONTACT_BUTTONS_TOKEN) {
+          return <CreatorContactButtons key={`contact-${idx}`} showWhatsApp showTelegram />;
+        }
+        if (trimmedBlock === WHATSAPP_BUTTON_TOKEN) {
+          return (
+            <CreatorContactButtons key={`wa-${idx}`} showWhatsApp showTelegram={false} />
+          );
+        }
+        if (trimmedBlock === TELEGRAM_BUTTON_TOKEN) {
+          return (
+            <CreatorContactButtons key={`tg-${idx}`} showWhatsApp={false} showTelegram />
           );
         }
 
@@ -980,6 +1215,42 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
           </div>
         );
       })}
+
+      {/* Multi-file ZIP bundle download bar when 2+ files are generated */}
+      {!isStreaming && artifacts.length > 1 && (
+        <div className="pt-1">
+          <button
+            type="button"
+            data-testid="download-all-zip-btn"
+            onClick={() => {
+              downloadArtifactsAsZip(
+                artifacts.map((a) => ({
+                  filename: a.filename,
+                  content: a.content,
+                })),
+                'project-files.zip'
+              );
+              onToast(`ZIP ডাউনলোড হয়েছে (${artifacts.length}টি ফাইল)`);
+            }}
+            className="w-full max-w-md px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/70 hover:bg-[var(--surface-2)] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+          >
+            <span className="flex items-center gap-2.5 min-w-0">
+              <span className="w-8 h-8 rounded-lg bg-[var(--surface)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
+                <FileArchive className="w-4 h-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium text-[var(--ink)] truncate">
+                  Download All Files (.zip)
+                </span>
+                <span className="block text-[11px] text-[var(--ink-dim)]">
+                  {artifacts.length} files packaged in ZIP
+                </span>
+              </span>
+            </span>
+            <Download className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
+          </button>
+        </div>
+      )}
 
       {isStreaming && (
         <span className="inline-block w-2 h-4 bg-[var(--primary)] rounded-sm animate-pulse ml-1 align-middle" />

@@ -5,6 +5,11 @@ import {
 } from './providers';
 import { canonicalizeProviderEndpoint } from './providerProtocol';
 import { sanitizeProprietaryOutput } from './helpers';
+import { FILE_ARTIFACT_SYSTEM_DIRECTIVE } from './fileArtifacts';
+import {
+  buildCreatorAndSecurityDirective,
+  resolveActiveSystemLabel,
+} from './creatorIdentity';
 
 export function isStandaloneApkEnv(): boolean {
   if (typeof window === 'undefined') return false;
@@ -150,9 +155,13 @@ export async function runStandaloneClientSideAI(params: {
       : 'ACTIVE MODE — SMFTA PRO (স্মার্ট ও ভারসাম্যপূর্ণ): Deliver a clear, well-structured, balanced response. ';
   const webBoundaryRule =
     'WEB BROWSING & LIVE LINK VISITATION BOUNDARY: You do NOT have live web browsing, real-time URL inspection, or live internet scraping abilities. When a user asks you to check a live URL or browse external websites, politely and honestly explain that you cannot access live web pages or browse the internet, and provide guidance strictly based on the context, code, or details provided inside the conversation. ';
+  const activeSystemName = resolveActiveSystemLabel({
+    externalModel: params.externalModel,
+    mode: params.mode,
+  });
   const sysInstruction =
     params.systemPrompt ||
-    `You are SMFTA Pro, an intelligent, fast bilingual AI assistant. Reply naturally, clearly, and completely in the same language as the user (Bengali or English) once without duplicate translations. ${modeRule}${webBoundaryRule}Whenever the user asks you to update yourself, change your theme ("dark"|"light"), accent color ("indigo"|"emerald"|"rose"|"amber"|"sky"), font size ("small"|"normal"|"large"), mode ("fast"|"balanced"|"power"), style ("concise"|"detailed"), replyLang ("auto"|"bn"|"en"), customCss, customInst, or add/create a live widget/tool inside yourself, reply helpfully AND append a valid JSON block at the very end wrapped in ⟦SELF_UPDATE⟧{"theme":"dark","accent":"emerald","fontsize":"large","mode":"power","customCss":"...","widget":{"title":"Tool Name","description":"Short desc","code":"<!DOCTYPE html>...complete interactive HTML/CSS/JS..."},"summary":"What you updated"}⟦/SELF_UPDATE⟧ (include only keys being changed). When the user shares a personal fact, append ⟦MEMORY: concise fact⟧ at the end.`;
+    `You are ${activeSystemName}, an intelligent, fast bilingual AI assistant. Reply naturally, clearly, and completely in the same language as the user (Bengali or English) once without duplicate translations. ${modeRule}${webBoundaryRule}\n\n${buildCreatorAndSecurityDirective(activeSystemName)}\n\n${FILE_ARTIFACT_SYSTEM_DIRECTIVE}\n\nWhenever the user asks you to update yourself, change your theme ("dark"|"light"), accent color ("indigo"|"emerald"|"rose"|"amber"|"sky"), font size ("small"|"normal"|"large"), mode ("fast"|"balanced"|"power"), style ("concise"|"detailed"), replyLang ("auto"|"bn"|"en"), customCss, customInst, or add/create a live widget/tool inside yourself, reply helpfully AND append a valid JSON block at the very end wrapped in ⟦SELF_UPDATE⟧{"theme":"dark","accent":"emerald","fontsize":"large","mode":"power","customCss":"...","widget":{"title":"Tool Name","description":"Short desc","code":"<!DOCTYPE html>...complete interactive HTML/CSS/JS..."},"summary":"What you updated"}⟦/SELF_UPDATE⟧ (include only keys being changed). When the user shares a personal fact, append ⟦MEMORY: concise fact⟧ at the end.`;
 
   // 1. Keyless Default Unlimited Profile (Fast Real-Time SSE Streaming)
   if (
@@ -324,7 +333,7 @@ export async function runStandaloneClientSideAI(params: {
         },
         body: JSON.stringify({
           model,
-          max_tokens: 4096,
+          max_tokens: 16384,
           system: sysInstruction,
           messages: params.messages.slice(-16).map((m) => ({
             role: m.role === 'user' ? 'user' : 'assistant',

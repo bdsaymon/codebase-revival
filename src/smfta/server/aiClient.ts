@@ -150,7 +150,7 @@ export function buildAdHocProviderConfig(params: {
     effectiveProvider === 'ollama' || effectiveProvider === 'lmstudio';
 
   const adHocProviders: AdHocProviderInput[] = [];
-  const maxOut = Math.min(32_768, Math.max(8, params.maxOutputTokens || 4096));
+  const maxOut = Math.min(32_768, Math.max(8, params.maxOutputTokens || 16_384));
 
   if (
     !isExplicitKeyless &&
@@ -231,13 +231,12 @@ export function buildAdHocProviderConfig(params: {
               new Set([
                 ...(params.externalModel ? [normalizeGeminiModelName(params.externalModel)] : []),
                 ...(params.discoveredModels || []).map((m) => normalizeGeminiModelName(m)),
-                'gemini-flash-latest',
-                'gemini-3.5-flash-lite',
-                'gemini-3.1-flash-lite',
                 'gemini-3-flash-preview',
+                'gemini-3.8-flash',
+                'gemini-3.5-flash-lite',
                 'gemini-2.5-flash',
-                'gemini-2.5-pro',
                 'gemini-2.5-flash-lite',
+                'gemini-2.5-pro',
               ])
             )
         : buildProviderModelCandidates(
@@ -298,27 +297,28 @@ export function buildAdHocProviderConfig(params: {
   // Server Gemini key if available and either smfta_cloud or fallback
   const serverGemKey = getServerGeminiKey();
   if (serverGemKey && isExplicitKeyless) {
-    // Built-in SMFTA tier ids (smfta-flash/pro/ultra) and legacy fabricated
-    // placeholders are client-side labels only — the keyless engine picks its
-    // own vendor model, so never forward them as a real Gemini model name.
-    const requestedModel =
-      isExplicitKeyless &&
-      (!params.externalModel ||
-        /^(smfta-|gpt-|claude-|gemini-2\.[05]-|deepseek-|llama-|qwen-)/i.test(
-          params.externalModel.trim()
-        ))
-        ? ''
-        : params.externalModel;
+    // Map built-in SMFTA tier ids cleanly to real, fast Gemini 2.5 models.
+    const rawExt = (params.externalModel || '').trim().toLowerCase();
+    const mappedTierModel =
+      rawExt === 'smfta-flash'
+        ? 'gemini-3.5-flash-lite'
+        : rawExt === 'smfta-ultra'
+        ? 'gemini-3.8-flash'
+        : rawExt === 'smfta-pro'
+        ? 'gemini-3-flash-preview'
+        : rawExt &&
+          !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt)
+        ? normalizeGeminiModelName(params.externalModel)
+        : '';
     const gemModels = Array.from(
       new Set([
-        ...(requestedModel ? [normalizeGeminiModelName(requestedModel)] : []),
-        'gemini-flash-latest',
-        'gemini-3.5-flash-lite',
-        'gemini-3.1-flash-lite',
+        ...(mappedTierModel ? [mappedTierModel] : []),
         'gemini-3-flash-preview',
+        'gemini-3.8-flash',
+        'gemini-3.5-flash-lite',
         'gemini-2.5-flash',
-        'gemini-2.5-pro',
         'gemini-2.5-flash-lite',
+        'gemini-2.5-pro',
       ])
     ).map((m) => ({
       model_id: m,
@@ -418,7 +418,7 @@ export async function callBackendEngine(
   error?: string;
 }> {
   const engine = options?.engine || getSharedHardenedEngine();
-  const maxOut = options?.maxTokens || 2048;
+  const maxOut = options?.maxTokens || 8192;
 
   const built = buildAdHocProviderConfig({
     provider: options?.preferredProvider || 'xrahat',

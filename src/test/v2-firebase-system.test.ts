@@ -24,8 +24,10 @@ import {
 } from '../smfta/src/utils/voiceEngine';
 import {
   formatFirebaseAiContents,
+  isTransientOfflineError,
   selectRelevantFirestoreMemories,
 } from '../smfta/src/utils/firebaseV2Client';
+import rootFirebaseConfig from '../../firebase-applet-config.json';
 
 describe('V2 Special Firebase AI System', () => {
   it('keeps V1 models completely isolated from V2 routing', () => {
@@ -48,10 +50,10 @@ describe('V2 Special Firebase AI System', () => {
     expect(v5).toMatchObject({
       defaultDailyLimit: 100,
       temperature: 0.7,
-      maxOutputTokens: 1024,
+      maxOutputTokens: 8192,
       thinkingLevel: 'MINIMAL',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.1-flash-lite',
+      serverGeminiModel: 'gemini-3.5-flash-lite',
       firebaseAiModel: 'gemini-2.5-flash-lite',
     });
 
@@ -59,25 +61,25 @@ describe('V2 Special Firebase AI System', () => {
     expect(pro).toMatchObject({
       defaultDailyLimit: 40,
       temperature: 0.4,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 16384,
       thinkingLevel: 'LOW',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.1-flash-lite',
-      firebaseAiModel: 'gemini-2.5-flash-lite',
+      serverGeminiModel: 'gemini-3-flash-preview',
+      firebaseAiModel: 'gemini-2.5-flash',
     });
 
     const max = getV2ModelSpec('smfta-max');
     expect(max).toMatchObject({
       defaultDailyLimit: 15,
-      maxOutputTokens: 4096,
+      maxOutputTokens: 32768,
       thinkingLevel: 'HIGH',
       useSearchGrounding: true,
-      serverGeminiModel: 'gemini-4-hydrogen',
+      serverGeminiModel: 'gemini-3.8-flash',
       firebaseAiModel: 'gemini-2.5-flash',
     });
   });
 
-  it('enforces model-specific Gemini SDK parameter safety for gemini-4-hydrogen and flash-lite', () => {
+  it('enforces model-specific Gemini SDK parameter safety for Gemini 2.5 thinkingBudget and search grounding', () => {
     const hydrogenCfg = buildV2GenAiRequestConfig({
       modelName: 'gemini-4-hydrogen',
       spec: getV2ModelSpec('smfta-max'),
@@ -88,14 +90,29 @@ describe('V2 Special Firebase AI System', () => {
     expect('topK' in hydrogenCfg).toBe(false);
     expect(Array.isArray(hydrogenCfg.tools)).toBe(true);
 
-    const flashLiteCfg = buildV2GenAiRequestConfig({
-      modelName: 'gemini-3.1-flash-lite',
+    const max25Cfg = buildV2GenAiRequestConfig({
+      modelName: 'gemini-2.5-pro',
+      spec: getV2ModelSpec('smfta-max'),
+      fullSystemInstruction: 'Analyze carefully',
+    });
+    expect(max25Cfg.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingBudget: 12288,
+    });
+    expect(Array.isArray(max25Cfg.tools)).toBe(true);
+
+    const flash25Cfg = buildV2GenAiRequestConfig({
+      modelName: 'gemini-2.5-flash',
       spec: getV2ModelSpec('smfta-v2-pro'),
       fullSystemInstruction: 'Write clean TypeScript',
     });
-    expect(flashLiteCfg.temperature).toBe(0.4);
-    expect(flashLiteCfg.maxOutputTokens).toBe(2048);
-    expect('tools' in flashLiteCfg).toBe(false);
+    expect(flash25Cfg.temperature).toBe(0.4);
+    expect(flash25Cfg.maxOutputTokens).toBe(16384);
+    expect(flash25Cfg.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingBudget: 4096,
+    });
+    expect('tools' in flash25Cfg).toBe(false);
   });
 
   it('sanitizes server & Firebase AI contents without empty turns or messages[1] failures', () => {
@@ -246,5 +263,15 @@ describe('V2 Special Firebase AI System', () => {
       expect(check.status.isBlocked).toBe(false);
       expect(check.status.isUnlimited).toBe(true);
     }
+  });
+
+  it('classifies transient Firestore offline errors without masking permission-denied errors and uses root config databaseId', () => {
+    expect(isTransientOfflineError(new Error('Failed to get document because the client is offline.'))).toBe(true);
+    expect(isTransientOfflineError({ code: 'unavailable', message: 'The operation could not be completed' })).toBe(true);
+    expect(isTransientOfflineError(new Error('Could not reach Cloud Firestore backend.'))).toBe(true);
+
+    expect(isTransientOfflineError({ code: 'permission-denied', message: 'Missing or insufficient permissions.' })).toBe(false);
+    expect(isTransientOfflineError(new Error('7 PERMISSION_DENIED: Missing or insufficient permissions.'))).toBe(false);
+    expect(rootFirebaseConfig.firestoreDatabaseId).toBeTruthy();
   });
 });

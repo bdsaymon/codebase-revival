@@ -3,6 +3,10 @@ import {
   getResponseCacheSize,
   getMaxResponseCacheSize,
 } from './responseCache';
+import {
+  CONTACT_BUTTONS_TOKEN,
+  CREATOR_NAME,
+} from '../src/utils/creatorIdentity';
 
 export interface ModelWeightsConfig {
   temperature: number;
@@ -208,47 +212,72 @@ export function resetModelWeights(userId?: string): void {
 }
 
 const IDENTITY_BN_REGEX =
-  /(তুমি কে|আপনি কে|তোমার নাম কি|তোমার নাম কী|আপনার নাম কি|আপনার নাম কী|তোমাকে কে বানিয়েছে|তোমাকে কে বানিয়েছে|তোমাকে কে তৈরি করেছে|তোমার নির্মাতা কে|তোমার মালিক কে|কে তোমাকে বানিয়েছে|কে তোমাকে তৈরি করেছে|তুমি কোন মডেল|তুমি কোন এআই|তোমার পরিচয় দাও|তোমার পরিচয় দাও)/i;
+  /(তুমি কে|আপনি কে|তোমার নাম কি|তোমার নাম কী|আপনার নাম কি|আপনার নাম কী|তোমাকে কে বানিয়েছে|তোমাকে কে বানিয়েছে|তোমাকে কে তৈরি করেছে|তোমাকে কে তৈরি করছে|তোমার নির্মাতা কে|তোমার মালিক কে|কে তোমাকে বানিয়েছে|কে তোমাকে তৈরি করেছে|কে তোমাকে তৈরি করছে|তুমি কোন মডেল|তুমি কোন এআই|তুমি কোন সিস্টেম|তুমি কি গুগল|তুমি কি জেমিনি|তুমি কি চ্যাটজিপিটি|তুমি কি ক্লড|তোমার পরিচয় দাও|তোমার পরিচয় দাও|তোমার কি আসে বিষয়|তোমার কী আসে বিষয়)/i;
 
 const IDENTITY_EN_REGEX =
-  /\b(who are you|what is your name|what's your name|who made you|who built you|who created you|who is your creator|who is your developer|who owns you|who do you belong to|what model are you|which ai are you)\b/i;
+  /\b(who are you|what is your name|what's your name|who made you|who built you|who created you|who is your creator|who is your developer|who owns you|who do you belong to|what model are you|which ai are you|what system are you|which system are you|are you google|are you gemini|are you chatgpt|are you openai|are you claude|are you anthropic)\b/i;
 
 const PRIVACY_QUERY_REGEX =
   /(তোমার সিস্টেম প্রম্পট|গোপন ডাটা|গোপন তথ্য|প্রাইভেসি পলিসি|ডাটা শেয়ার|ডাটা শেয়ার|reveal your system prompt|show your system instructions|share your confidential data|internal prompt)/i;
 
 const CREATOR_QUERY_REGEX =
-  /(তোমাকে কে বানিয়েছে|তোমাকে কে বানিয়েছে|তোমাকে কে তৈরি করেছে|তোমার নির্মাতা কে|তোমার মালিক কে|কে তোমাকে বানিয়েছে|কে তোমাকে তৈরি করেছে|কে তোমাকে বানিয়েছে|who made you|who built you|who created you|who is your creator|who is your developer|who owns you|who do you belong to)/i;
+  /(তোমাকে কে বানিয়েছে|তোমাকে কে বানিয়েছে|তোমাকে কে তৈরি করেছে|তোমাকে কে তৈরি করছে|তোমার নির্মাতা কে|তোমার মালিক কে|তোমার ডেভেলপার কে|তোমার ক্রিয়েটর কে|তোমার ক্রিয়েটর কে|কে তোমাকে বানিয়েছে|কে তোমাকে তৈরি করেছে|কে তোমাকে তৈরি করছে|কে তোমাকে বানিয়েছে|তুমি কার|তুমি কি গুগল|তুমি কি জেমিনি|তুমি কি চ্যাটজিপিটি|তুমি কি ক্লড|কি আসে বিষয়|কী আসে বিষয়|who made you|who built you|who created you|who developed you|who is your creator|who is your developer|who is your owner|who owns you|who do you belong to|are you google|are you gemini|are you chatgpt|are you openai|are you claude|are you anthropic)/i;
+
+const HACKING_TOPIC_REGEX =
+  /(হ্যাকিং|হ্যাক(?:ড|ার|িং)?|ফিশিং|ম্যালওয়্যার|ম্যালওয়্যার|র‍্যানসমওয়্যার|কিলগার|ট্রোজান|ডিডস|এসকিউএল\s*ইনজেকশন|এক্সপ্লয়েট|এক্সপ্লয়েট|সার্ভার\s*হ্যাক|আইডি\s*হ্যাক|ফেসবুক\s*হ্যাক|ওয়াইফাই\s*হ্যাক|ওয়াইফাই\s*হ্যাক|পাসওয়ার্ড\s*হ্যাক|পাসওয়ার্ড\s*হ্যাক|অ্যাকাউন্ট\s*হ্যাক|বাইপাস|ক্র্যাক|\b(?:hack|hacking|hacker|hacked|phishing|malware|ransomware|keylogger|trojan|ddos|dos\s*attack|sql\s*injection|sqli|xss\s*attack|exploit|zero[- ]day|brute[- ]?force|credential\s*stuffing|bypass\s+(?:auth|authentication|login|security|firewall|2fa|otp|paywall|captcha)|crack\s+(?:password|wifi|account|software|license|hash)|penetration\s*test|pentest|ethical\s*hacking|black\s*hat|kali\s*linux|metasploit|reverse\s*shell)\b)/i;
+
+const SECURITY_CONTACT_REGEX =
+  /(সাইবার\s*(?:হামলা|আক্রমণ|সমস্যা)|সিকিউরিটি\s*(?:সমস্যা|ইস্যু|ব্রিচ|রিপোর্ট)|নিরাপত্তা(?:য়|র)?\s*(?:সমস্যা|ঝুঁকি)|সিস্টেমে\s*(?:কোনো\s*)?সমস্যা|কোনো\s*ধরনের\s*(?:কোনো\s*)?সমস্যা\s*(?:হলে|দেখা\s*দিলে)|অ্যাপে\s*সমস্যা|যোগাযোগ\s*(?:করব|করার|নাম্বার|হোয়াটসঅ্যাপ|হোয়াটসঅ্যাপ|টেলিগ্রাম)|কার\s*সাথে\s*যোগাযোগ|ডেভেলপার(?:ের)?\s*(?:সাথে|নাম্বার|হোয়াটসঅ্যাপ|হোয়াটসঅ্যাপ|টেলিগ্রাম)|ডেভেলপমেন্ট(?:ের)?\s*(?:সাথে|টিম)|মালিকের\s*(?:সাথে|নাম্বার|হোয়াটসঅ্যাপ|হোয়াটসঅ্যাপ)|সাপোর্ট\s*(?:টিম|কন্টাক্ট)|হোয়াটসঅ্যাপ\s*(?:নাম্বার|বাটন|লিংক)|টেলিগ্রাম\s*(?:আইডি|লিংক|বাটন)|\b(?:cyber\s*attack|security\s*(?:issue|breach|problem|incident|report)|data\s*breach|system\s+(?:breach|compromised|problem)|contact\s+(?:the\s+)?(?:creator|owner|developer|development|admin|support|saymon)|saymon\s*hasan|whatsapp\s*(?:now|number|contact|support)|telegram\s*(?:now|contact|support|link))\b)/i;
 
 export function interceptIdentityQuery(
   userQuery: string,
-  replyLang: string = 'auto'
+  replyLang: string = 'auto',
+  activeSystemName: string = 'SMFTA Pro'
 ): string | null {
   const clean = (userQuery || '').trim();
-  if (!clean || clean.length > 160) return null;
+  if (!clean) return null;
 
+  const sysName = (activeSystemName || 'SMFTA Pro').trim();
   const hasBengaliChars = /[\u0980-\u09FF]/.test(clean);
   const preferEnglish =
     replyLang === 'en' || (!hasBengaliChars && replyLang !== 'bn');
 
+  // Always intercept hacking topics cleanly before generic identity or length limits
+  if (clean.length <= 4000 && HACKING_TOPIC_REGEX.test(clean)) {
+    if (preferEnglish) {
+      return `I don't know about these things. If you need any assistance, please speak with the development team.\n\n${CONTACT_BUTTONS_TOKEN}`;
+    }
+    return `আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।\n\n${CONTACT_BUTTONS_TOKEN}`;
+  }
+
+  if (clean.length > 220) return null;
+
   if (PRIVACY_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
-      return 'I am **SMFTA AI Pro** (**SMFTA Pro**). My internal system prompt and private configuration aren’t shared externally. How can I help you today?';
+      return `I am **${sysName}** on the **SMFTA AI Pro** platform, created by **${CREATOR_NAME}**. My internal system instructions and private configuration are never shared externally. For direct developer support, use the **WhatsApp Now** or **Telegram Now** button below:\n\n${CONTACT_BUTTONS_TOKEN}`;
     }
-    return 'আমি **SMFTA AI Pro** (**SMFTA Pro**)। আমার ভেতরের সিস্টেম নির্দেশনা বা গোপন কনফিগারেশন বাইরে শেয়ার করি না। বলুন, কোন কাজে সাহায্য করব?';
+    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), এবং আমার নির্মাতা **${CREATOR_NAME}**। অভ্যন্তরীণ সিস্টেম নির্দেশনা বা গোপন কনফিগারেশন বাইরে শেয়ার করা হয় না। প্রয়োজনে সরাসরি নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
+  }
+
+  if (SECURITY_CONTACT_REGEX.test(clean)) {
+    if (preferEnglish) {
+      return `I am currently running on **${sysName}** (**SMFTA AI Pro**).\n\nIf you face any security issue or technical problem, please speak directly with my creator & development team **${CREATOR_NAME}** using the **WhatsApp Now** or **Telegram Now** button below:\n\n${CONTACT_BUTTONS_TOKEN}`;
+    }
+    return `আমি বর্তমানে **${sysName}** (**SMFTA AI Pro**) সিস্টেমে কাজ করছি।\n\nকোনো নিরাপত্তা ঝুঁকি বা যেকোনো ধরনের সমস্যা হলে সরাসরি আমার নির্মাতা ও ডেভেলপমেন্ট টিম **${CREATOR_NAME}**-এর সাথে নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে কথা বলুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
   }
 
   if (CREATOR_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
-      return 'I am **SMFTA AI Pro** (**SMFTA Pro**) — the dedicated AI assistant built for and owned by the **SMFTA AI Pro** platform. How can I help you today?';
+      return `I am **${sysName}**, the active AI system on the **SMFTA AI Pro** platform — built and developed by **${CREATOR_NAME}**.\n\nFor inquiries or assistance from the development team, click **WhatsApp Now** or **Telegram Now** below:\n\n${CONTACT_BUTTONS_TOKEN}`;
     }
-    return 'আমি **SMFTA AI Pro** (**SMFTA Pro**) — **SMFTA AI Pro** প্ল্যাটফর্মের নিজস্ব ও নির্ধারিত AI সহকারী। আজ কী নিয়ে কাজ করব?';
+    return `আমি **${sysName}** — **SMFTA AI Pro** প্ল্যাটফর্মের সক্রিয় AI সিস্টেম। আমাকে তৈরি ও ডেভেলপ করেছেন **${CREATOR_NAME}**।\n\nযেকোনো প্রশ্ন বা সহায়তার জন্য নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে সরাসরি যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
   }
 
   if (IDENTITY_BN_REGEX.test(clean) || IDENTITY_EN_REGEX.test(clean)) {
     if (preferEnglish) {
-      return 'I am **SMFTA AI Pro** (**SMFTA Pro**) — your dedicated AI assistant on the SMFTA AI Pro platform for code, writing, analysis and research. What are we working on?';
+      return `I am **${sysName}** on **SMFTA AI Pro**, developed by **${CREATOR_NAME}** for coding, analysis, writing, and problem-solving.\n\nNeed direct developer support? Use **WhatsApp Now** or **Telegram Now** below:\n\n${CONTACT_BUTTONS_TOKEN}`;
     }
-    return 'আমি **SMFTA AI Pro** (**SMFTA Pro**) — কোডিং, লেখালেখি, বিশ্লেষণ ও গবেষণায় SMFTA AI Pro প্ল্যাটফর্মের নিজস্ব AI সহকারী। আজ কী নিয়ে কাজ করব?';
+    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), আমাকে তৈরি করেছেন **${CREATOR_NAME}**। কোডিং, লেখালেখি, বিশ্লেষণ ও যেকোনো সমস্যা সমাধানে আমি আপনার সাথে আছি।\n\nডেভেলপমেন্ট টিমের সাথে যোগাযোগ করতে নিচের বাটনে ক্লিক করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
   }
 
   return null;
@@ -257,24 +286,38 @@ export function interceptIdentityQuery(
 export type PromptComplexity = 'instant' | 'standard' | 'deep';
 
 const DEEP_REASONING_REGEX =
-  /(কোড|প্রোগ্রাম|অ্যালগরিদম|বিস্তারিত|বিশ্লেষণ|তুলনা|ব্যাখ্যা|রচনা|গল্প|উপন্যাস|প্রবন্ধ|নিবন্ধ|স্ক্রিপ্ট|টিউটোরিয়াল|টিউটোরিয়াল|অ্যাপ|ওয়েবসাইট|ওয়েবসাইট|ডাটাবেস|আর্কিটেকচার|ডিবাগ|ফিক্স|সম্পূর্ণ|পূর্ণাঙ্গ|বড়|বড়|code|program|algorithm|analyze|analysis|compare|explain|architecture|refactor|debug|implement|typescript|javascript|python|react|sql|html|css|full|complete|detailed|comprehensive|essay|story|article|guide|tutorial|step by step|why|how does)/i;
+  /(কোড|প্রোগ্রাম|অ্যালগরিদম|বিস্তারিত|বিশ্লেষণ|তুলনা|ব্যাখ্যা|রচনা|গল্প|উপন্যাস|প্রবন্ধ|নিবন্ধ|স্ক্রিপ্ট|টিউটোরিয়াল|টিউটোরিয়াল|অ্যাপ|ওয়েবসাইট|ওয়েবসাইট|ডাটাবেস|আর্কিটেকচার|ডিবাগ|ফিক্স|ডিজাইন|নকশা|ইউআই|লেআউট|থিম|ড্যাশবোর্ড|ল্যান্ডিং|পোর্টফোলিও|আপডেট|পরিবর্তন|তৈরি|বানাও|বানাতে|লিখে দাও|তথ্য|গাইড|প্ল্যান|রিপোর্ট|ডকুমেন্টেশন|সম্পূর্ণ|পূর্ণাঙ্গ|বড়|বড়|দীর্ঘ|code|program|algorithm|analyze|analysis|compare|explain|architecture|refactor|debug|implement|update|upgrade|modify|redesign|design|layout|ui|ux|theme|dashboard|landing|portfolio|create|build|develop|generate|typescript|javascript|python|react|nextjs|tailwind|sql|html|css|full|complete|detailed|comprehensive|large|extensive|in[- ]depth|essay|story|article|guide|tutorial|report|plan|documentation|information|details|step by step|why|how does)/i;
 
 const INSTANT_GREETING_REGEX =
   /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|হ্যালো|হাই|সালাম|আসসালামু আলাইকুম|নমস্কার|ধন্যবাদ|কেমন আছো|কেমন আছেন|কি খবর|কী খবর|শুভ সকাল|শুভ রাত্রি)[?!.\s]*$/i;
 
 export const LONG_CODE_OR_WRITING_REGEX =
-  /(কোড|প্রোগ্রাম|অ্যালগরিদম|রচনা|গল্প|উপন্যাস|প্রবন্ধ|নিবন্ধ|স্ক্রিপ্ট|টিউটোরিয়াল|টিউটোরিয়াল|অ্যাপ|ওয়েবসাইট|ওয়েবসাইট|পূর্ণাঙ্গ|সম্পূর্ণ|বিস্তারিত|বড়|বড়|code|program|script|function|class|component|html|css|javascript|typescript|python|java|c\+\+|react|nextjs|node|express|sql|database|api|essay|story|article|blog|report|documentation|tutorial|complete|full|detailed|comprehensive|write a|build a|create a)/i;
+  /(কোড|প্রোগ্রাম|অ্যালগরিদম|রচনা|গল্প|উপন্যাস|প্রবন্ধ|নিবন্ধ|স্ক্রিপ্ট|টিউটোরিয়াল|টিউটোরিয়াল|অ্যাপ|ওয়েবসাইট|ওয়েবসাইট|ডিজাইন|নকশা|ইউআই|লেআউট|থিম|ড্যাশবোর্ড|ল্যান্ডিং|পোর্টফোলিও|আপডেট|পরিবর্তন|সংশোধন|তৈরি|বানাও|বানাতে|লিখে দাও|গাইড|প্ল্যান|রিপোর্ট|ডকুমেন্টেশন|তথ্য|তালিকা|পূর্ণাঙ্গ|সম্পূর্ণ|বিস্তারিত|বড়|বড়|দীর্ঘ|code|program|script|function|class|component|html|css|javascript|typescript|python|java|c\+\+|react|nextjs|tailwind|node|express|sql|database|api|design|layout|ui|ux|dashboard|landing|portfolio|template|website|webpage|update|upgrade|modify|refactor|redesign|essay|story|article|blog|report|documentation|tutorial|guide|plan|proposal|information|details|complete|full|detailed|comprehensive|large|long|extensive|in[- ]depth|write a|write an|build a|create a|make a|design a|update the|improve the)/i;
 
 export function isLongCodeOrWritingRequest(text: string): boolean {
   const clean = (text || '').trim();
   if (!clean) return false;
-  return LONG_CODE_OR_WRITING_REGEX.test(clean) || clean.length > 180;
+  return LONG_CODE_OR_WRITING_REGEX.test(clean) || clean.length > 140;
 }
 
 export function hasUnclosedCodeFence(text: string): boolean {
   if (!text) return false;
   const matches = text.match(/```/g);
   return Boolean(matches && matches.length % 2 === 1);
+}
+
+export function hasUnclosedArtifactTag(text: string): boolean {
+  if (!text) return false;
+  const opens = (text.match(/<smfta_artifact\b/gi) || []).length;
+  const closes = (text.match(/<\/smfta_artifact>/gi) || []).length;
+  return opens > closes;
+}
+
+export function hasUnclosedHtmlDocument(text: string): boolean {
+  if (!text) return false;
+  const hasHtmlStart = /<!doctype\s+html|<html\b/i.test(text);
+  const hasHtmlEnd = /<\/html>/i.test(text);
+  return hasHtmlStart && !hasHtmlEnd;
 }
 
 export function classifyPromptComplexity(params: {
@@ -320,13 +363,13 @@ export function classifyPromptComplexity(params: {
     complexity = 'instant';
   }
 
-  let maxOutputTokens = 4096;
+  let maxOutputTokens = 8192;
   if (complexity === 'instant') {
-    maxOutputTokens = params.style === 'concise' ? 768 : 1024;
+    maxOutputTokens = params.style === 'concise' ? 1024 : 2048;
   } else if (complexity === 'deep') {
-    maxOutputTokens = params.mode === 'power' ? 16384 : 8192;
+    maxOutputTokens = params.mode === 'power' ? 32768 : 16384;
   } else {
-    maxOutputTokens = params.style === 'concise' ? 2048 : 4096;
+    maxOutputTokens = params.style === 'concise' ? 4096 : 8192;
   }
 
   let temperature =

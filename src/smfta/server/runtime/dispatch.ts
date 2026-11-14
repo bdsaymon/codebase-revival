@@ -319,18 +319,34 @@ export async function dispatchToLegacyApp(request: Request): Promise<Response> {
       res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Not found' });
       return;
     }
+    console.error('[smfta-api-final]', err instanceof Error ? err.stack || err.message : err);
     const isTooLarge =
       !!err && typeof err === 'object' && (err as { type?: string }).type === 'entity.too.large';
     const explicit = (err as { status?: number } | null)?.status;
     const raw = err instanceof Error ? err.message : 'Internal server error';
+    const safeMsg = app ? app.redactSecrets(raw) : 'Internal server error';
     if (!headersSent) {
       res.status(isTooLarge ? 413 : explicit && explicit < 500 ? explicit : 500).json({
         ok: false,
         code: isTooLarge ? 'PAYLOAD_TOO_LARGE' : 'SERVER_ERROR',
-        error: app ? app.redactSecrets(raw) : 'Internal server error',
+        error: safeMsg,
         requestId: req.requestId,
       });
     } else {
+      const ct = resHeaders.get('content-type') || '';
+      if (ct.includes('text/event-stream')) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: 'error',
+            ok: false,
+            code: 'SERVER_ERROR',
+            message: safeMsg,
+            text: safeMsg,
+            delta: safeMsg,
+          })}\n\n`
+        );
+        res.write('data: [DONE]\n\n');
+      }
       res.end();
     }
   };

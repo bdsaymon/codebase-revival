@@ -107,6 +107,7 @@ import {
   setClientCachedReply,
   tryLocalMath,
 } from './utils/helpers';
+import { stripContactTokensForText } from './utils/creatorIdentity';
 import {
   BUILTIN_TIERS,
   DEFAULT_BUILTIN_PROFILE,
@@ -140,6 +141,11 @@ import {
   InteractiveMessageContent,
   extractThinkingAndResponse,
 } from './components/InteractiveMessageContent';
+import {
+  ClaudeArtifactPanel,
+  ArtifactPayload,
+} from './components/ClaudeArtifactPanel';
+import { VoiceWaveformBar } from './components/VoiceWaveformBar';
 import {
   Project,
   buildProjectPreview,
@@ -543,6 +549,9 @@ export default function App() {
     blocks: CodeBlockInfo[];
     title: string;
   } | null>(null);
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactPayload | null>(
+    null
+  );
   const [skills, setSkills] = useState<SelfSkill[]>(() => loadSkills());
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => loadAutonomy());
   const [activeWidgetModal, setActiveWidgetModal] =
@@ -697,7 +706,8 @@ export default function App() {
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<'idle' | 'speaking' | 'paused'>('idle');
   const [voiceLangMode, setVoiceLangMode] = useState<VoiceLangMode>('auto');
-  const [voiceReviewPending, setVoiceReviewPending] = useState(false);
+  const [voiceLiveText, setVoiceLiveText] = useState('');
+  const [voiceActivityAt, setVoiceActivityAt] = useState(0);
 
   // V2 – Special (Firebase AI) Auth, Firestore Memory Sync & Quota State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -719,6 +729,9 @@ export default function App() {
   const [feedbackReasonInput, setFeedbackReasonInput] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
+  const voiceDraftRef = useRef<string>('');
+  const voiceCancelledRef = useRef<boolean>(false);
+  const voiceCommittedRef = useRef<boolean>(false);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef<boolean>(false);
   const touchStartYRef = useRef<number | null>(null);
@@ -863,13 +876,13 @@ export default function App() {
           });
         });
 
-        unsubMems = subscribeToFirestoreMemories(user, (remoteFacts) => {
+        unsubMems = subscribeToFirestoreMemories(user, (remoteFacts, meta) => {
           setMemory((prev) => {
             const merged = ensureMasterProfileMemory([...prev, ...remoteFacts]);
             memoryRef.current = merged;
             return merged;
           });
-          if (masterSeededUidRef.current !== user.uid) {
+          if (!meta?.fromCache && masterSeededUidRef.current !== user.uid) {
             masterSeededUidRef.current = user.uid;
             for (const fact of MASTER_PROFILE_FACTS) {
               if (!remoteFacts.some((rf) => rf.includes(fact))) {
@@ -2616,18 +2629,49 @@ export default function App() {
     });
   };
 
-  // Bilingual Voice Recognition (Mic: bn-BD / en-US / Banglish)
+  // Bilingual Voice Recognition (ChatGPT / Lovable-style Waveform Dictation)
+  const cancelVoiceDictation = () => {
+    voiceCancelledRef.current = true;
+    voiceCommittedRef.current = false;
+    voiceDraftRef.current = '';
+    setVoiceLiveText('');
+    try {
+      recogRef.current?.abort?.();
+      recogRef.current?.stop?.();
+    } catch {
+      // Ignore abort errors
+    }
+    setIsListening(false);
+  };
+
+  const confirmVoiceDictation = () => {
+    voiceCancelledRef.current = false;
+    voiceCommittedRef.current = true;
+    const captured = voiceDraftRef.current.trim();
+    voiceDraftRef.current = '';
+    setVoiceLiveText('');
+    try {
+      recogRef.current?.stop?.();
+    } catch {
+      // Ignore stop errors
+    }
+    setIsListening(false);
+    if (captured) {
+      setInputText((prev) => {
+        const cleanPrev = prev.trim();
+        return cleanPrev ? `${cleanPrev} ${captured}` : captured;
+      });
+    }
+    setTimeout(() => composerRef.current?.focus(), 40);
+  };
+
   const toggleMic = () => {
     if (!isSpeechRecognitionSupported()) {
-      showToast(
-        'Voice input is unavailable in this browser — type or edit your message in the box below.',
-        4000
-      );
+      showToast('এই ব্রাউজারে ভয়েস ইনপুট সমর্থিত নয়');
       return;
     }
-    if (isListening && recogRef.current) {
-      recogRef.current.stop();
-      setIsListening(false);
+    if (isListening) {
+      confirmVoiceDictation();
       return;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2635,48 +2679,100 @@ export default function App() {
     const r = new SR();
     r.lang = resolveRecognitionLanguage(voiceLangMode, settings.appLanguage);
     r.interimResults = true;
-    r.continuous = false;
-    let finalTranscript = '';
+    r.continuous = true;
+    voiceDraftRef.current = '';
+    voiceCancelledRef.current = false;
+    voiceCommittedRef.current = false;
+    setVoiceLiveText('');
+    setVoiceActivityAt(Date.now());
+
+    const bumpActivity = () => {
+      setVoiceActivityAt(Date.now());
+    };
+    r.onaudiostart = bumpActivity;
+    r.onsoundstart = bumpActivity;
+    r.onspeechstart = bumpActivity;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     r.onresult = (e: any) => {
-      let t = '';
-      for (const res of e.results) {
-        t += res[0].transcript;
+      let acc = '';
+      const results = e?.results || [];
+      for (let i = 0; i < results.length; i++) {
+        const seg = String(results[i]?.[0]?.transcript || '').trim();
+        if (!seg) continue;
+        if (acc && seg.toLowerCase().startsWith(acc.toLowerCase())) {
+          acc = seg;
+        } else {
+          acc = acc ? `${acc} ${seg}` : seg;
+        }
       }
-      setInputText(t);
-      if (e.results[e.results.length - 1].isFinal) {
-        finalTranscript = t;
-      }
+      const clean = acc.replace(/\s+/g, ' ').trim();
+      voiceDraftRef.current = clean;
+      setVoiceLiveText(clean);
+      setVoiceActivityAt(Date.now());
     };
+
     r.onend = () => {
       setIsListening(false);
-      const captured = finalTranscript.trim();
+      if (voiceCancelledRef.current) {
+        voiceDraftRef.current = '';
+        voiceCancelledRef.current = false;
+        voiceCommittedRef.current = false;
+        setVoiceLiveText('');
+        return;
+      }
+      if (voiceCommittedRef.current) {
+        voiceCommittedRef.current = false;
+        setVoiceLiveText('');
+        return;
+      }
+      const captured = voiceDraftRef.current.trim();
+      voiceDraftRef.current = '';
+      setVoiceLiveText('');
       if ((talkMode || voiceCallOpen) && captured) {
-        setVoiceReviewPending(false);
         handleSend(captured);
       } else if (captured) {
-        setVoiceReviewPending(true);
-        composerRef.current?.focus();
+        setInputText((prev) => {
+          const cleanPrev = prev.trim();
+          return cleanPrev ? `${cleanPrev} ${captured}` : captured;
+        });
+        setTimeout(() => composerRef.current?.focus(), 40);
       }
     };
-    r.onerror = () => {
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    r.onerror = (ev: any) => {
+      const code = String(ev?.error || '');
+      if (code === 'aborted' && (voiceCancelledRef.current || voiceCommittedRef.current)) {
+        return;
+      }
+      if (code === 'no-speech') {
+        if (!voiceDraftRef.current.trim()) {
+          showToast('কোনো কথা শোনা যায়নি — আবার চেষ্টা করুন');
+        }
+        return;
+      }
       setIsListening(false);
-      showToast('Voice capture interrupted — you can edit text or try again.');
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        showToast('মাইক্রোফোন পারমিশন চালু করুন');
+      } else if (code === 'audio-capture') {
+        showToast('মাইক্রোফোন পাওয়া যায়নি');
+      } else if (code === 'network') {
+        showToast('নেটওয়ার্ক সমস্যার কারণে ভয়েস শনাক্ত করা যায়নি');
+      }
     };
+
     recogRef.current = r;
     try {
       r.start();
       setIsListening(true);
-      setVoiceReviewPending(false);
-      showToast(
-        `Listening (${r.lang === 'bn-BD' ? 'বাংলা / Banglish' : 'English'}) — speak now`
-      );
     } catch (err: unknown) {
       console.warn(
         '[App.toggleMic]',
         err instanceof Error ? err.message : 'SpeechRecognition start failed'
       );
       setIsListening(false);
+      showToast('ভয়েস চালু করা যায়নি — মাইক্রোফোন পরীক্ষা করুন');
     }
   };
 
@@ -2704,7 +2800,6 @@ export default function App() {
       );
       return;
     }
-    setVoiceReviewPending(false);
 
     // v18.11 — real daily cap, enforced before any state change or request.
     const dailyCap = settings.dailyMessageLimit ?? 0;
@@ -2903,15 +2998,72 @@ export default function App() {
     ) => {
       setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
       setGenStepDetail(null);
+      const localMsgId = 'ai-' + Date.now();
+      const shouldAnimate =
+        settings.streamingReveal !== false && replyText.length > 24;
+
+      if (!shouldAnimate) {
+        appendMessageToChat(targetChatId, {
+          id: localMsgId,
+          role: 'ai',
+          text: replyText,
+          thinking: undefined,
+          ts: Date.now(),
+          ...extraFields,
+        });
+        scrollToBottom(false);
+        return;
+      }
+
       appendMessageToChat(targetChatId, {
-        id: 'ai-' + Date.now(),
+        id: localMsgId,
         role: 'ai',
-        text: replyText,
+        text: ' ',
         thinking: undefined,
+        status: 'streaming',
         ts: Date.now(),
         ...extraFields,
       });
-      scrollToBottom(false);
+      setStreamingMsgId(localMsgId);
+
+      await new Promise<void>((resolve) => {
+        let shown = 0;
+        let lastTs = 0;
+        const step = (now: number) => {
+          const dt = lastTs ? now - lastTs : 16;
+          lastTs = now;
+          const remaining = replyText.length - shown;
+          if (remaining > 0) {
+            shown += revealChars(remaining, dt, true);
+            const slice = safeSlice(replyText, shown);
+            updateMessageInChat(targetChatId, localMsgId, (m) => ({
+              ...m,
+              text: slice || ' ',
+            }));
+            scrollToBottom(false);
+          }
+          if (shown < replyText.length) {
+            if (typeof window.requestAnimationFrame === 'function') {
+              window.requestAnimationFrame(step);
+            } else {
+              window.setTimeout(() => step(Date.now()), 16);
+            }
+          } else {
+            updateMessageInChat(targetChatId, localMsgId, (m) => ({
+              ...m,
+              text: replyText,
+              status: 'complete',
+            }));
+            setStreamingMsgId((cur) => (cur === localMsgId ? null : cur));
+            resolve();
+          }
+        };
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(step);
+        } else {
+          window.setTimeout(() => step(Date.now()), 16);
+        }
+      });
     };
 
     // 3. Check Instant Local Math (ONLY in Default Profile so Custom API Keys are always invoked)
@@ -3609,16 +3761,21 @@ export default function App() {
         revealRaf = scheduleReveal();
       };
 
-      const drainReveal = (timeoutMs = 1500) =>
+      const drainReveal = (timeoutMs?: number) =>
         new Promise<void>((resolve) => {
           if (revealShown >= revealTarget.length) return resolve();
+          const remaining = Math.max(0, revealTarget.length - revealShown);
+          const budgetMs =
+            typeof timeoutMs === 'number'
+              ? timeoutMs
+              : Math.min(12_000, Math.max(2000, Math.ceil((remaining / 130) * 1000) + 600));
           revealFinishing = true;
           revealDoneCb = resolve;
           kickReveal();
           window.setTimeout(() => {
             if (revealDoneCb === resolve) revealDoneCb = null;
             resolve();
-          }, timeoutMs);
+          }, budgetMs);
         });
 
       const flushStreamText = (flushNow = false) => {
@@ -3628,6 +3785,9 @@ export default function App() {
           : accumulated;
         const parsedTags = parseAIControlTags(liveAnswer || accumulated);
         if (parsedTags.thinking) {
+          if (thinkingStartMs === null) {
+            thinkingStartMs = Date.now();
+          }
           liveThinking = parsedTags.thinking;
         }
         const displayTxt = parsedTags.cleanText;
@@ -3692,6 +3852,9 @@ export default function App() {
                   | 'reset'
                   | 'sources'
                   | 'progress'
+                  | 'status'
+                  | 'thinking'
+                  | 'text'
                   | 'v2_quota';
                 ok?: boolean;
                 code?: string;
@@ -3748,12 +3911,27 @@ export default function App() {
                 continue;
               }
 
+              if (parsed.type === 'status' && typeof parsed.status === 'string' && parsed.status.trim()) {
+                const st = parsed.status.trim();
+                if (!liveStatusSteps.includes(st)) {
+                  liveStatusSteps = [...liveStatusSteps, st];
+                  if (!bubbleCreated) {
+                    flushStreamText();
+                  } else {
+                    scheduleFlush();
+                  }
+                }
+                continue;
+              }
+
               if (parsed.type === 'progress') {
-                // Bypass simulated progress/thinking steps for keyless & custom APIs
                 continue;
               }
 
               if (typeof parsed.thinking === 'string' && parsed.thinking) {
+                if (thinkingStartMs === null) {
+                  thinkingStartMs = Date.now();
+                }
                 liveThinking += parsed.thinking;
                 if (!bubbleCreated) {
                   flushStreamText();
@@ -5300,31 +5478,10 @@ export default function App() {
               )}
             </div>
 
-            <div className="pt-2 border-t border-[var(--border)] space-y-1">
+            <div className="pt-2 border-t border-[var(--border)]">
               <button
                 type="button"
-                onClick={() => {
-                  setNotebookOpen(true);
-                  setSidebarOpen(false);
-                }}
-                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
-              >
-                <FolderOpen className="w-4 h-4" />
-                <span>Notebook</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setConnectionsOpen(true);
-                  setSidebarOpen(false);
-                }}
-                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
-              >
-                <LayoutGrid className="w-4 h-4" />
-                <span>Connectors</span>
-              </button>
-              <button
-                type="button"
+                data-testid="sidebar-settings-btn"
                 onClick={() => {
                   setSettingsTab('general');
                   setSettingsOpen(true);
@@ -5347,16 +5504,19 @@ export default function App() {
         </div>
       )}
 
-      {/* MAIN WORKSPACE COLUMN */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      {/* MAIN WORKSPACE COLUMN + SIDE-BY-SIDE ARTIFACT PREVIEW */}
+      <div className="flex-1 flex flex-row min-w-0 h-full overflow-hidden">
         {currentView === 'workspace' ? (
-          <CodeWorkspacePage
-            initialPayload={workspacePayload}
-            onBackToChat={handleBackFromWorkspace}
-            codeFontSize={settings.codeFontSize}
-          />
+          <div className="flex-1 flex flex-col min-w-0 h-full">
+            <CodeWorkspacePage
+              initialPayload={workspacePayload}
+              onBackToChat={handleBackFromWorkspace}
+              codeFontSize={settings.codeFontSize}
+            />
+          </div>
         ) : (
-          <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
+          <>
+          <main className={`v2-main flex-1 min-w-0${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
             {/* HEADER — Screenshot 1 & 4: Staggered Menu Left, Quiet Brand, Pill Group [New Chat | •••] Right */}
             <header className="app-header">
               <div className="flex items-center gap-2 min-w-0">
@@ -5699,13 +5859,6 @@ export default function App() {
                         </>
                       ) : (
                         <div className="w-full min-w-0">
-                          <div className="msg-ai-head">
-                            <span className="msg-ai-model">
-                              {m.v2ModelId
-                                ? getV2ModelSpec(m.v2ModelId).label
-                                : activeModelLabel}
-                            </span>
-                          </div>
                           <InteractiveMessageContent
                             messageId={m.id}
                             text={m.text}
@@ -5784,9 +5937,15 @@ export default function App() {
                                 }
                               );
                             }}
-                            onOpenCodeLab={(code) => {
-                              setCodeLabInit(code);
-                              setCodeLabOpen(true);
+                            onOpenCodeLab={(code, lang, filename, title, bundleFiles) => {
+                              const cleanLang = (lang || 'html').trim().toLowerCase();
+                              setActiveArtifact({
+                                title: title || filename || `${cleanLang.toUpperCase()} Artifact`,
+                                filename,
+                                lang: cleanLang,
+                                code,
+                                bundleFiles,
+                              });
                             }}
                             onInstallSelfWidget={(code) => {
                               const res = applySelfUpdatePayload({
@@ -5955,27 +6114,14 @@ export default function App() {
                           <div className="flex flex-col gap-1.5 mt-1">
                             <div
                               data-testid={`msg-actions-${m.role}`}
-                              className={`msg-actions flex flex-wrap items-center gap-1 ${
-                                isLatestAiMsg
-                                  ? 'opacity-100'
-                                  : 'opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity'
+                              className={`msg-actions flex items-center gap-0.5 ${
+                                m.role === 'ai'
+                                  ? isLatestAiMsg
+                                    ? 'opacity-100 -ml-1.5'
+                                    : 'opacity-85 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity -ml-1.5'
+                                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity'
                               }`}
                             >
-                              <span className="font-mono-num whitespace-nowrap mr-1">
-                                {settings.showTimestamps !== false
-                                  ? formatTime(m.ts)
-                                  : ''}
-                                {settings.showTokenUsage === true && m.latencySec
-                                  ? `${
-                                      settings.showTimestamps !== false ? ' · ' : ''
-                                    }${m.latencySec}${
-                                      m.timing?.ttftMs
-                                        ? ` · TTFT ${m.timing.ttftMs}ms`
-                                        : ''
-                                    }`
-                                  : ''}
-                              </span>
-
                               {m.role === 'ai' ? (
                                 <>
                                   <button
@@ -5988,36 +6134,39 @@ export default function App() {
                                           m.thinking
                                         );
                                       navigator.clipboard?.writeText(
-                                        cleanResponse || m.text
+                                        stripContactTokensForText(
+                                          cleanResponse || m.text
+                                        )
                                       );
-                                      showToast('উত্তর কপি করা হয়েছে');
+                                      showToast('কপি করা হয়েছে');
                                     }}
-                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
-                                    title="শুধু মূল উত্তর কপি করুন (থিংকিং ছাড়া)"
+                                    className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                    title="Copy"
+                                    aria-label="Copy response"
                                   >
-                                    <Copy className="w-3.5 h-3.5" />
-                                    <span>Copy</span>
+                                    <Copy className="w-4 h-4" />
                                   </button>
 
                                   <button
                                     type="button"
                                     data-testid="msg-feedback-up-btn"
                                     onClick={() => void submitFeedback('up')}
-                                    className={`msg-action min-h-[36px] sm:min-h-[30px] px-2 ${
+                                    className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-[var(--surface-2)] transition-colors cursor-pointer ${
                                       m.feedback?.rating === 'up'
-                                        ? 'text-emerald-400 font-semibold'
-                                        : ''
+                                        ? 'text-[var(--ink)] bg-[var(--surface-2)]'
+                                        : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
                                     }`}
-                                    title="ভালো উত্তর"
+                                    title="Like"
+                                    aria-label="Good response"
                                   >
-                                    <ThumbsUp className="w-3.5 h-3.5" />
-                                    <span>ভালো উত্তর</span>
+                                    <ThumbsUp className="w-4 h-4" />
                                   </button>
 
                                   <button
                                     type="button"
                                     data-testid="msg-feedback-down-btn"
                                     onClick={() => {
+                                      void submitFeedback('down');
                                       if (feedbackReasonMsgId === m.id) {
                                         setFeedbackReasonMsgId(null);
                                       } else {
@@ -6027,15 +6176,15 @@ export default function App() {
                                         );
                                       }
                                     }}
-                                    className={`msg-action min-h-[36px] sm:min-h-[30px] px-2 ${
+                                    className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-[var(--surface-2)] transition-colors cursor-pointer ${
                                       m.feedback?.rating === 'down'
-                                        ? 'text-amber-400 font-semibold'
-                                        : ''
+                                        ? 'text-[var(--ink)] bg-[var(--surface-2)]'
+                                        : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
                                     }`}
-                                    title="খারাপ উত্তর"
+                                    title="Dislike"
+                                    aria-label="Bad response"
                                   >
-                                    <ThumbsDown className="w-3.5 h-3.5" />
-                                    <span>খারাপ উত্তর</span>
+                                    <ThumbsDown className="w-4 h-4" />
                                   </button>
 
                                   <button
@@ -6064,155 +6213,29 @@ export default function App() {
                                         );
                                       }
                                     }}
-                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
-                                    title="আবার উত্তর তৈরি করুন (Retry)"
+                                    className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                    title="Retry"
+                                    aria-label="Retry response"
                                   >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    <span>Retry</span>
+                                    <RotateCcw className="w-4 h-4" />
                                   </button>
-
-                                  {(m.status === 'stopped' ||
-                                    (!m.isError && looksTruncated(m.text))) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (isGenerating) return;
-                                        const idx = activeChat.msgs.findIndex(
-                                          (x) => x.id === m.id
-                                        );
-                                        if (idx > 0) {
-                                          const priorMsgs = activeChat.msgs.slice(
-                                            0,
-                                            idx
-                                          );
-                                          streamAIResponse(
-                                            activeChat.id,
-                                            priorMsgs,
-                                            undefined,
-                                            undefined,
-                                            { id: m.id, prefixText: m.text }
-                                          );
-                                        }
-                                      }}
-                                      className="msg-action text-[var(--primary)] font-medium min-h-[36px] sm:min-h-[30px] px-2"
-                                      title="Continue generating remainder of this answer"
-                                    >
-                                      <Play className="w-3.5 h-3.5" />
-                                      <span>Continue</span>
-                                    </button>
-                                  )}
-
-                                  {/* Bilingual TTS controls (Speak / Pause / Resume / Stop) */}
-                                  <button
-                                    type="button"
-                                    data-testid="msg-tts-btn"
-                                    onClick={() => {
-                                      if (speakingMsgId === m.id) {
-                                        if (speechState === 'paused') {
-                                          bilingualSpeechPlayer.resume();
-                                        } else {
-                                          bilingualSpeechPlayer.pause();
-                                        }
-                                      } else {
-                                        const { cleanResponse } =
-                                          extractThinkingAndResponse(
-                                            m.text,
-                                            m.thinking
-                                          );
-                                        speakText(
-                                          cleanResponse || m.text,
-                                          m.id
-                                        );
-                                      }
-                                    }}
-                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
-                                    title={
-                                      speakingMsgId === m.id
-                                        ? speechState === 'paused'
-                                          ? 'Resume speech'
-                                          : 'Pause speech'
-                                        : 'Read aloud (Bengali & English)'
-                                    }
-                                  >
-                                    {speakingMsgId === m.id &&
-                                    speechState === 'speaking' ? (
-                                      <>
-                                        <Pause className="w-3.5 h-3.5" />
-                                        <span>Pause</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Volume2 className="w-3.5 h-3.5" />
-                                        <span>
-                                          {speakingMsgId === m.id &&
-                                          speechState === 'paused'
-                                            ? 'Resume'
-                                            : 'Listen'}
-                                        </span>
-                                      </>
-                                    )}
-                                  </button>
-
-                                  {speakingMsgId === m.id && (
-                                    <button
-                                      type="button"
-                                      data-testid="msg-tts-stop-btn"
-                                      onClick={() =>
-                                        bilingualSpeechPlayer.stop()
-                                      }
-                                      className="msg-action text-rose-400 min-h-[36px] sm:min-h-[30px] px-2"
-                                      title="Stop speech"
-                                    >
-                                      <Square className="w-2.5 h-2.5 fill-current" />
-                                      <span>Stop</span>
-                                    </button>
-                                  )}
                                 </>
                               ) : (
-                                <>
-                                  <button
-                                    type="button"
-                                    data-testid="user-msg-copy-btn"
-                                    onClick={() => {
-                                      navigator.clipboard?.writeText(
-                                        cleanUserText || m.text
-                                      );
-                                      showToast('মেসেজ কপি করা হয়েছে');
-                                    }}
-                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
-                                  >
-                                    <Copy className="w-3.5 h-3.5" />
-                                    <span>Copy</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    data-testid="user-msg-edit-btn"
-                                    onClick={() => {
-                                      if (isGenerating) return;
-                                      const idx = activeChat.msgs.findIndex(
-                                        (x) => x.id === m.id
-                                      );
-                                      if (idx >= 0) {
-                                        setInputText(cleanUserText || m.text);
-                                        setChats((prev) =>
-                                          prev.map((c) =>
-                                            c.id === activeChat.id
-                                              ? {
-                                                  ...c,
-                                                  msgs: c.msgs.slice(0, idx),
-                                                }
-                                              : c
-                                          )
-                                        );
-                                        composerRef.current?.focus();
-                                      }
-                                    }}
-                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                    <span>Edit</span>
-                                  </button>
-                                </>
+                                <button
+                                  type="button"
+                                  data-testid="user-msg-copy-btn"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(
+                                      cleanUserText || m.text
+                                    );
+                                    showToast('কপি করা হয়েছে');
+                                  }}
+                                  className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                  title="Copy"
+                                  aria-label="Copy message"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
                               )}
                             </div>
 
@@ -6503,207 +6526,168 @@ export default function App() {
                       </div>
                     )}
 
-                  {/* Bilingual Voice Input Review Bar (editable in composer before send) */}
-                  {(isListening || voiceReviewPending) && (
-                    <div
-                      data-testid="voice-review-bar"
-                      className="mb-2 px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] flex flex-wrap items-center justify-between gap-2 text-xs"
-                    >
-                      <div className="flex items-center gap-2 text-[var(--text-2)]">
-                        <Mic
-                          className={`w-3.5 h-3.5 ${
-                            isListening ? 'text-rose-400 animate-pulse' : 'text-[var(--primary)]'
-                          }`}
-                        />
-                        <span>
-                          {isListening
-                            ? 'Listening... speak naturally'
-                            : 'Review & edit captured voice before sending'}
-                        </span>
+                  {isListening && !voiceCallOpen ? (
+                    <VoiceWaveformBar
+                      isListening={isListening}
+                      speechActivityAt={voiceActivityAt}
+                      liveText={voiceLiveText}
+                      onCancel={cancelVoiceDictation}
+                      onConfirm={confirmVoiceDictation}
+                    />
+                  ) : (
+                    <>
+                      {/* Textarea */}
+                      <div className="composer-input-wrap">
+                      <textarea
+                        ref={composerRef}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onPaste={(e) => {
+                          const items = e.clipboardData?.items;
+                          if (!items) return;
+                          const pastedFiles: File[] = [];
+                          for (const it of items) {
+                            const file = it.getAsFile();
+                            if (file) {
+                              pastedFiles.push(file);
+                            }
+                          }
+                          if (pastedFiles.length > 0) {
+                            e.preventDefault();
+                            handleProcessIncomingFiles(pastedFiles);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            e.key === 'Enter' &&
+                            ((settings.sendOnEnter && !e.shiftKey) ||
+                              e.ctrlKey ||
+                              e.metaKey)
+                          ) {
+                            e.preventDefault();
+                            handleSend();
+                          } else if (
+                            e.key === 'ArrowUp' &&
+                            !inputText &&
+                            sentHistoryRef.current.length > 0
+                          ) {
+                            e.preventDefault();
+                            if (histIdxRef.current < 0) {
+                              histIdxRef.current = sentHistoryRef.current.length;
+                            }
+                            histIdxRef.current = Math.max(
+                              0,
+                              histIdxRef.current - 1
+                            );
+                            setInputText(
+                              sentHistoryRef.current[histIdxRef.current] || ''
+                            );
+                          }
+                        }}
+                        placeholder={`Ask ${
+                          activeIsBuiltin
+                            ? activeModelLabel
+                            : activeDisplayName === 'Msfta shop ai'
+                              ? activeModelLabel
+                              : activeDisplayName
+                        } anything…`}
+                        className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
+                      />
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {(['auto', 'bn-BD', 'en-US'] as VoiceLangMode[]).map(
-                          (lng) => (
-                            <button
-                              key={lng}
-                              type="button"
-                              onClick={() => setVoiceLangMode(lng)}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-medium cursor-pointer ${
-                                voiceLangMode === lng
-                                  ? 'bg-[var(--primary)] text-white'
-                                  : 'bg-[var(--surface)] text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                              }`}
-                            >
-                              {lng === 'auto'
-                                ? 'Auto'
-                                : lng === 'bn-BD'
-                                  ? 'বাংলা'
-                                  : 'English'}
-                            </button>
-                          )
-                        )}
-                        {voiceReviewPending && (
+
+                      {/* Unified Composer Toolbar */}
+                      <div className="composer-bar">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <button
                             type="button"
-                            onClick={() => setVoiceReviewPending(false)}
-                            className="p-0.5 text-[var(--ink-dim)] hover:text-[var(--ink)] cursor-pointer"
-                            title="Dismiss voice notice"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="composer-icon"
+                            title="Attach photo or file"
                           >
-                            <X className="w-3.5 h-3.5" />
+                            <Plus className="w-5 h-5" />
                           </button>
-                        )}
+
+                          <button
+                            type="button"
+                            data-testid="model-selector-btn"
+                            onClick={() => {
+                              setMoreModelsOpen(!activeIsBuiltin);
+                              setBottomModelMenuOpen((v) => !v);
+                            }}
+                            className="composer-model"
+                            title="Select Model"
+                          >
+                            <span className="truncate">{activeModelLabel}</span>
+                            <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isToolEnabled('web_search', settings.enabledTools)) {
+                                showToast('Web search tool is disabled in Settings → Tools.');
+                                return;
+                              }
+                              setWebSearch((w) => {
+                                showToast(!w ? 'Web search on' : 'Web search off');
+                                return !w;
+                              });
+                            }}
+                            className={`composer-icon composer-icon-web ${
+                              webSearch && isToolEnabled('web_search', settings.enabledTools)
+                                ? 'is-on'
+                                : ''
+                            }`}
+                            title={
+                              !isToolEnabled('web_search', settings.enabledTools)
+                                ? 'Web Search disabled in Settings → Tools'
+                                : webSearch
+                                  ? 'Web Search active'
+                                  : 'Enable Web Search'
+                            }
+                          >
+                            <Globe className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            data-testid="voice-mic-btn"
+                            onClick={toggleMic}
+                            className="composer-icon"
+                            title="Voice Input"
+                            aria-label="Voice Input"
+                          >
+                            <Mic className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            data-testid="send-btn"
+                            onClick={() => {
+                              if (isGenerating) {
+                                abortRef.current?.abort();
+                              } else {
+                                handleSend();
+                              }
+                            }}
+                            className={`composer-send${inputText.trim() || isGenerating ? ' is-ready' : ''}`}
+                            title={
+                              isGenerating ? 'Stop generation' : 'Send message'
+                            }
+                            aria-label={isGenerating ? 'Stop generating' : 'Send message'}
+                          >
+                            {isGenerating ? (
+                              <Square className="w-4 h-4 fill-current" />
+                            ) : (
+                              <ArrowUp className="w-4 h-4 stroke-[2.4]" />
+                            )}
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    </>
                   )}
-
-                  {/* Textarea */}
-                  <div className="composer-input-wrap">
-                  <textarea
-                    ref={composerRef}
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    onPaste={(e) => {
-                      const items = e.clipboardData?.items;
-                      if (!items) return;
-                      const pastedFiles: File[] = [];
-                      for (const it of items) {
-                        const file = it.getAsFile();
-                        if (file) {
-                          pastedFiles.push(file);
-                        }
-                      }
-                      if (pastedFiles.length > 0) {
-                        e.preventDefault();
-                        handleProcessIncomingFiles(pastedFiles);
-                      }
-                    }}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === 'Enter' &&
-                        ((settings.sendOnEnter && !e.shiftKey) ||
-                          e.ctrlKey ||
-                          e.metaKey)
-                      ) {
-                        e.preventDefault();
-                        handleSend();
-                      } else if (
-                        e.key === 'ArrowUp' &&
-                        !inputText &&
-                        sentHistoryRef.current.length > 0
-                      ) {
-                        e.preventDefault();
-                        if (histIdxRef.current < 0) {
-                          histIdxRef.current = sentHistoryRef.current.length;
-                        }
-                        histIdxRef.current = Math.max(
-                          0,
-                          histIdxRef.current - 1
-                        );
-                        setInputText(
-                          sentHistoryRef.current[histIdxRef.current] || ''
-                        );
-                      }
-                    }}
-                    placeholder={`Ask ${
-                      activeIsBuiltin
-                        ? activeModelLabel
-                        : activeDisplayName === 'Msfta shop ai'
-                          ? activeModelLabel
-                          : activeDisplayName
-                    } anything…`}
-                    className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
-                  />
-                  </div>
-
-                  {/* Screenshot 1 Unified Composer Toolbar: [+  Model Pill  ...  Mic  Terracotta ↑] */}
-                  <div className="composer-bar">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="composer-icon"
-                        title="Attach photo or file"
-                      >
-                        <Plus className="w-5 h-5" />
-                      </button>
-
-                      <button
-                        type="button"
-                        data-testid="model-selector-btn"
-                        onClick={() => {
-                          setMoreModelsOpen(!activeIsBuiltin);
-                          setBottomModelMenuOpen((v) => !v);
-                        }}
-                        className="composer-model"
-                        title="Select Model"
-                      >
-                        <span className="truncate">{activeModelLabel}</span>
-                        <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!isToolEnabled('web_search', settings.enabledTools)) {
-                            showToast('Web search tool is disabled in Settings → Tools.');
-                            return;
-                          }
-                          setWebSearch((w) => {
-                            showToast(!w ? 'Web search on' : 'Web search off');
-                            return !w;
-                          });
-                        }}
-                        className={`composer-icon composer-icon-web ${
-                          webSearch && isToolEnabled('web_search', settings.enabledTools)
-                            ? 'is-on'
-                            : ''
-                        }`}
-                        title={
-                          !isToolEnabled('web_search', settings.enabledTools)
-                            ? 'Web Search disabled in Settings → Tools'
-                            : webSearch
-                              ? 'Web Search active'
-                              : 'Enable Web Search'
-                        }
-                      >
-                        <Globe className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={toggleMic}
-                        className={`composer-icon ${isListening ? 'is-on' : ''}`}
-                        title={isListening ? 'Stop Listening' : 'Voice Input'}
-                      >
-                        <Mic className="w-4 h-4" />
-                      </button>
-
-                      <button
-                        type="button"
-                        data-testid="send-btn"
-                        onClick={() => {
-                          if (isGenerating) {
-                            abortRef.current?.abort();
-                          } else {
-                            handleSend();
-                          }
-                        }}
-                        className={`composer-send${inputText.trim() || isGenerating ? ' is-ready' : ''}`}
-                        title={
-                          isGenerating ? 'Stop generation' : 'Send message'
-                        }
-                        aria-label={isGenerating ? 'Stop generating' : 'Send message'}
-                      >
-                        {isGenerating ? (
-                          <Square className="w-4 h-4 fill-current" />
-                        ) : (
-                          <ArrowUp className="w-4 h-4 stroke-[2.4]" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Screenshot 4 Bottom-Sheet "Select model" Modal */}
@@ -6729,7 +6713,7 @@ export default function App() {
                         <div className="ref-sheet-title">Select model</div>
                       </div>
 
-                      {/* Primary Model Group (V2 Special) */}
+                      {/* Primary Model Group */}
                       <div className="ref-sheet-group">
                         {[...V2_SPECIAL_MODELS]
                           .sort((a, b) => {
@@ -6739,15 +6723,6 @@ export default function App() {
                           .map((spec) => {
                             const isSelectedV2 =
                               activeIsBuiltin && activeModelName === spec.id;
-                            const qStat = getV2QuotaStatusForModel(spec.id);
-                            const tagText =
-                              spec.id === 'smfta-max'
-                                ? qStat.isUnlimited
-                                  ? 'Max'
-                                  : 'Pro or Max'
-                                : spec.id === 'smfta-v2-pro'
-                                  ? 'Pro'
-                                  : null;
                             return (
                               <button
                                 key={spec.id}
@@ -6759,54 +6734,18 @@ export default function App() {
                                 }}
                                 className="ref-sheet-row"
                               >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="ref-sheet-row-title truncate">
-                                      {spec.label}
-                                    </span>
-                                    {tagText && (
-                                      <span className="ref-sheet-tag">{tagText}</span>
-                                    )}
-                                  </div>
-                                  <div className="ref-sheet-row-desc truncate">
-                                    {spec.desc}
-                                  </div>
-                                </div>
-                                {isSelectedV2 ? (
+                                <span className="ref-sheet-row-title truncate">
+                                  {spec.label}
+                                </span>
+                                {isSelectedV2 && (
                                   <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
-                                ) : (
-                                  <span className="text-[11px] text-[var(--ink-dim)] font-mono shrink-0">
-                                    {qStat.isUnlimited
-                                      ? '∞'
-                                      : qStat.isTestingBypass
-                                        ? qStat.testingRemaining
-                                        : `${qStat.remaining}/${qStat.limit}`}
-                                  </span>
                                 )}
                               </button>
                             );
                           })}
                       </div>
 
-                      {/* Footnote Caption matching Screenshot 4 */}
-                      <div className="px-1 text-[13px] leading-snug text-[var(--ink-dim)]">
-                        {isV2AuthorizedTester
-                          ? 'Admin Unlimited active with zero daily limits. '
-                          : `Daily limits reset in ${v2ResetInfo.label}. `}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setBottomModelMenuOpen(false);
-                            setSettingsTab('connections');
-                            setSettingsOpen(true);
-                          }}
-                          className="underline text-[var(--ink-muted)] hover:text-[var(--ink)] cursor-pointer"
-                        >
-                          Learn more
-                        </button>
-                      </div>
-
-                      {/* Effort / Processing Mode Row matching Screenshot 4 */}
+                      {/* Effort / Processing Mode Row */}
                       <div className="ref-sheet-group">
                         <button
                           type="button"
@@ -6841,10 +6780,7 @@ export default function App() {
                           }}
                           className="ref-sheet-row"
                         >
-                          <div className="flex items-center gap-2.5">
-                            <span className="ref-sheet-row-title">Effort</span>
-                            <span className="ref-sheet-tag">Recommended</span>
-                          </div>
+                          <span className="ref-sheet-row-title">Effort</span>
                           <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)]">
                             <span>
                               {settings.mode === 'fast'
@@ -6858,7 +6794,7 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* More Models (V1 Natural + Custom Providers + Firestore Sync) */}
+                      {/* More Models (Built-in Tiers + Custom Providers) */}
                       <div className="ref-sheet-group">
                         <button
                           type="button"
@@ -6875,9 +6811,6 @@ export default function App() {
 
                         {moreModelsOpen && (
                           <div className="border-t border-[var(--border)] bg-[var(--surface)]/50">
-                            <div className="px-4 pt-2.5 pb-1 text-[11px] font-medium text-[var(--ink-dim)]">
-                              V1 – Natural
-                            </div>
                             {BUILTIN_TIERS.map((tier) => {
                               const isSelectedTier =
                                 activeIsBuiltin &&
@@ -6904,14 +6837,9 @@ export default function App() {
                                   }}
                                   className="ref-sheet-row"
                                 >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="ref-sheet-row-title truncate">
-                                      {tier.label}
-                                    </div>
-                                    <div className="ref-sheet-row-desc truncate">
-                                      {tier.desc}
-                                    </div>
-                                  </div>
+                                  <span className="ref-sheet-row-title truncate">
+                                    {tier.label}
+                                  </span>
                                   {isSelectedTier && (
                                     <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
                                   )}
@@ -6930,13 +6858,8 @@ export default function App() {
                                 if (vModels.length === 0) return null;
                                 return (
                                   <div key={customProf.id} className="border-t border-[var(--border)]">
-                                    <div className="px-4 pt-2.5 pb-1 text-[11px] font-medium text-[var(--ink-dim)] flex items-center justify-between">
-                                      <span className="truncate">{customProf.name}</span>
-                                      <span>
-                                        {customProf.verified || customProf.verificationStatus === 'verified'
-                                          ? 'Verified'
-                                          : 'Custom'}
-                                      </span>
+                                    <div className="px-4 pt-2 pb-1 text-[11px] font-medium text-[var(--ink-dim)] truncate">
+                                      {customProf.name}
                                     </div>
                                     {vModels.map((mId) => {
                                       const isSelectedCustom =
@@ -6968,41 +6891,6 @@ export default function App() {
                                   </div>
                                 );
                               })}
-
-                            <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between gap-2 text-xs">
-                              <span className="text-[var(--ink-dim)] truncate">
-                                {firebaseUser
-                                  ? `Synced: ${firebaseUser.email || firebaseUser.displayName || 'Account'}`
-                                  : 'Firestore Sync: Sign in to sync'}
-                              </span>
-                              {firebaseUser ? (
-                                <button
-                                  type="button"
-                                  data-testid="firebase-signout-btn"
-                                  onClick={() => void signOutFromFirebase()}
-                                  className="px-2.5 py-1 rounded-full bg-[var(--surface-3)] text-[var(--ink)] cursor-pointer shrink-0"
-                                >
-                                  Sign out
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  data-testid="firebase-signin-btn"
-                                  onClick={() =>
-                                    void signInWithFirebaseGoogle().catch((e) =>
-                                      showToast(
-                                        e instanceof Error
-                                          ? e.message
-                                          : 'Sign-in cancelled'
-                                      )
-                                    )
-                                  }
-                                  className="px-3 py-1 rounded-full bg-[var(--primary)] text-white font-medium cursor-pointer shrink-0"
-                                >
-                                  Sync
-                                </button>
-                              )}
-                            </div>
                           </div>
                         )}
                       </div>
@@ -7021,6 +6909,27 @@ export default function App() {
               />
             </div>
           </main>
+
+          {/* Claude.ai-Style Right-Side Live Code & Artifact Preview Panel */}
+          <ClaudeArtifactPanel
+            artifact={activeArtifact}
+            onClose={() => setActiveArtifact(null)}
+            onSelectBundleFile={(bf) =>
+              setActiveArtifact((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      title: bf.title || bf.filename,
+                      filename: bf.filename,
+                      lang: bf.lang,
+                      code: bf.content,
+                    }
+                  : null
+              )
+            }
+            onToast={showToast}
+          />
+          </>
         )}
       </div>
 

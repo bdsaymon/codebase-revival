@@ -90,7 +90,7 @@ describe('SMFTA System Health & Memory Diagnostics', () => {
     expect(res.report?.localKeysCount).toBe(1);
   });
 
-  it('cleans stale task-plan keys, embeds SAYMON HASAN master profile, enforces no unrequested code, and skips auto-memory on large notes', () => {
+  it('cleans stale task-plan keys, embeds SAYMON HASAN master profile, allows full design/code/long-form output, and skips auto-memory on large notes', () => {
     expect(isTemporaryStaleKey('smfta_active_task_plan')).toBe(true);
 
     const seeded = ensureMasterProfileMemory([]);
@@ -109,7 +109,7 @@ describe('SMFTA System Health & Memory Diagnostics', () => {
     expect(prompt).toContain('SAYMON HASAN');
     expect(prompt).toContain('MSFTASHOP');
     expect(prompt).toContain('Saudi Arabia');
-    expect(prompt).toContain('NEVER generate, write, or output any code');
+    expect(prompt).toContain('DESIGN, CODE & LONG-FORM OUTPUT RULE');
     expect(prompt).not.toContain('LIVE PREVIEW RULE');
   });
 });

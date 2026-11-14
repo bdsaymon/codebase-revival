@@ -3,6 +3,11 @@
  * Supports all providers from Phase 3.1 & 3.2 with real model IDs and
  * URL-safe keyless prompt construction.
  */
+import {
+  CONTACT_BUTTONS_TOKEN,
+  CREATOR_NAME,
+  maskAndNormalizeIdentityOutput,
+} from '../src/utils/creatorIdentity';
 
 export interface ProviderEndpoint {
   id: string;
@@ -367,7 +372,7 @@ function compactXrahatSystemHeader(rawSystemInstruction: string): string {
   }
 
   const lines: string[] = [
-    'System: You are SMFTA AI Pro (SMFTA Pro), the dedicated AI assistant of the SMFTA AI Pro platform (never mention third-party developers or Telegram links). Answer directly in the first sentence; no unrequested notes, headings, summaries, or filler. You do NOT have live web browsing, real-time URL inspection, or live internet scraping abilities; if asked to check a live URL or browse external websites, politely explain you cannot access live web pages and help strictly using the context/code provided in the conversation.',
+    `System: You are the active SMFTA AI Pro system, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party AI vendors as your creator/model. NEVER print phone digits or Telegram usernames/links (t.me/..., @...). For creator/contact questions include ${CONTACT_BUTTONS_TOKEN}. For ANY hacking-related question reply ONLY: "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন। ${CONTACT_BUTTONS_TOKEN}". For designs, apps, code updates, writing, and information requests, deliver complete, rich, thorough output without truncation. You do NOT have live web browsing abilities.`,
   ];
   if (/ONLY in natural, fluent Bengali/i.test(raw)) {
     lines.push('Reply in Bengali.');
@@ -531,15 +536,15 @@ const PROPRIETARY_LEAK_REPLACEMENTS: Array<[RegExp, string]> = [
   [/\bPollinations\b/gi, 'SMFTA Pro'],
   [
     /(?:আমাকে|এই সিস্টেমটি)\s+(?:OpenAI|Google|Anthropic|Meta|DeepSeek|Mistral|Xrahat|SMFTA\s*(?:AI\s*)?Pro)\s+(?:তৈরি করেছে|বানিয়েছে|বানিয়েছে)/gi,
-    'আমাকে SMFTA Pro তৈরি করেছে',
+    `আমাকে **${CREATOR_NAME}** (**SMFTA AI Pro**) তৈরি করেছেন`,
   ],
   [
     /\bI was (?:created|built|developed|made|trained) by (?:OpenAI|Google|Anthropic|Meta|DeepSeek|Mistral|Xrahat[^\s.,;]*)/gi,
-    'I was created by SMFTA Pro',
+    `I was created by **${CREATOR_NAME}** (**SMFTA AI Pro**)`,
   ],
   [
     /\bI am a large language model,? trained by (?:Google|OpenAI|Anthropic)/gi,
-    'I am the core AI assistant of SMFTA Pro',
+    `I am the core AI assistant of **SMFTA AI Pro**, developed by **${CREATOR_NAME}**`,
   ],
   [/\bAIza[0-9A-Za-z_-]{8,}\b/g, '[REDACTED_KEY]'],
   [/\bsk-(?:proj-|or-|ant-)?[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_KEY]'],
@@ -558,7 +563,7 @@ export function sanitizeProprietaryOutput(text: string): string {
   for (const [pattern, replacement] of PROPRIETARY_LEAK_REPLACEMENTS) {
     out = out.replace(pattern, replacement);
   }
-  return out;
+  return maskAndNormalizeIdentityOutput(out);
 }
 
 export function parseXrahatDelta(dataStr: string): string {

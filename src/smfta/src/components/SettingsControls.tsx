@@ -4,7 +4,6 @@ export function SettingSelect({
   label,
   value,
   options,
-  description,
   testId,
   onChange,
 }: {
@@ -16,15 +15,10 @@ export function SettingSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="settings-control">
-      <span>{label}</span>
-      {description ? (
-        <span className="text-[11px] font-normal text-[var(--text-3)] -mt-1">
-          {description}
-        </span>
-      ) : null}
+    <div className="flex items-center justify-between gap-4 py-2.5 border-b border-[var(--border)] last:border-b-0">
+      <span className="text-[13.5px] font-medium text-[var(--ink)]">{label}</span>
       <select
-        className="cs-input"
+        className="cs-input max-w-[220px] text-xs sm:text-[13px] py-1.5 px-2.5"
         aria-label={label}
         data-testid={testId}
         value={value}
@@ -36,7 +30,7 @@ export function SettingSelect({
           </option>
         ))}
       </select>
-    </label>
+    </div>
   );
 }
 
@@ -46,7 +40,6 @@ export function SettingNumber({
   min,
   max,
   step = 1,
-  description,
   testId,
   onChange,
 }: {
@@ -60,15 +53,10 @@ export function SettingNumber({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="settings-control">
-      <span>{label}</span>
-      {description ? (
-        <span className="text-[11px] font-normal text-[var(--text-3)] -mt-1">
-          {description}
-        </span>
-      ) : null}
+    <div className="flex items-center justify-between gap-4 py-2 border-b border-[var(--border)] last:border-b-0">
+      <span className="text-[13px] font-medium text-[var(--ink)]">{label}</span>
       <input
-        className="cs-input tabular-nums"
+        className="cs-input tabular-nums w-28 text-right text-xs py-1.5 px-2.5"
         aria-label={label}
         data-testid={testId}
         type="number"
@@ -82,7 +70,7 @@ export function SettingNumber({
           if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)));
         }}
       />
-    </label>
+    </div>
   );
 }
 
@@ -91,7 +79,6 @@ export function SettingText({
   value,
   placeholder,
   maxLength,
-  description,
   mono,
   type = 'text',
   testId,
@@ -109,14 +96,9 @@ export function SettingText({
 }) {
   return (
     <label className="settings-control">
-      <span>{label}</span>
-      {description ? (
-        <span className="text-[11px] font-normal text-[var(--text-3)] -mt-1">
-          {description}
-        </span>
-      ) : null}
+      <span className="text-[13px] font-medium text-[var(--ink)]">{label}</span>
       <input
-        className={`cs-input ${mono ? 'font-mono text-xs' : ''}`}
+        className={`cs-input ${mono ? 'font-mono text-xs' : 'text-[13px]'}`}
         aria-label={label}
         data-testid={testId}
         type={type}
@@ -135,7 +117,6 @@ export function SettingTextarea({
   placeholder,
   rows = 3,
   maxLength,
-  description,
   mono,
   testId,
   onChange,
@@ -152,12 +133,7 @@ export function SettingTextarea({
 }) {
   return (
     <label className="settings-control">
-      <span>{label}</span>
-      {description ? (
-        <span className="text-[11px] font-normal text-[var(--text-3)] -mt-1">
-          {description}
-        </span>
-      ) : null}
+      <span className="text-[13px] font-medium text-[var(--ink)]">{label}</span>
       <textarea
         className={`cs-textarea w-full text-xs ${mono ? 'font-mono' : ''}`}
         aria-label={label}
@@ -174,7 +150,6 @@ export function SettingTextarea({
 
 export function SettingToggle({
   label,
-  description,
   checked,
   disabled,
   testId,
@@ -188,17 +163,8 @@ export function SettingToggle({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2 border-b border-[var(--border)] last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">
-          {label}
-        </div>
-        {description ? (
-          <div className="text-[11px] sm:text-xs text-[var(--text-3)] mt-0.5">
-            {description}
-          </div>
-        ) : null}
-      </div>
+    <div className="flex items-center justify-between gap-4 py-2.5 border-b border-[var(--border)] last:border-b-0">
+      <span className="text-[13.5px] font-medium text-[var(--ink)]">{label}</span>
       <button
         type="button"
         role="switch"
@@ -239,8 +205,8 @@ export function SettingSegmented({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 py-1.5">
-      <div className="text-xs sm:text-sm font-semibold text-[var(--text)]">{label}</div>
+    <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)] last:border-b-0">
+      <span className="text-[13.5px] font-medium text-[var(--ink)]">{label}</span>
       <div className="cs-seg" data-testid={testId}>
         {options.map((opt) => (
           <button
@@ -261,13 +227,11 @@ export function SettingSegmented({
 
 export function SettingsCard({
   title,
-  description,
-  icon,
   rightSlot,
   testId,
   children,
 }: {
-  title: string;
+  title?: string;
   description?: string;
   icon?: ReactNode;
   rightSlot?: ReactNode;
@@ -277,25 +241,19 @@ export function SettingsCard({
   return (
     <section
       data-testid={testId}
-      className="fs-settings-card rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5"
+      className="fs-settings-card rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
     >
-      <header className="flex items-start justify-between gap-3 pb-3 mb-3 border-b border-[var(--border)]">
-        <div className="flex items-start gap-2.5 min-w-0">
-          {icon ? (
-            <span className="mt-0.5 text-[var(--primary)] shrink-0">{icon}</span>
-          ) : null}
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-[var(--text)] tracking-tight">
+      {(title || rightSlot) && (
+        <header className="flex items-center justify-between gap-3 pb-2 mb-2 border-b border-[var(--border)]">
+          {title ? (
+            <h3 className="text-[13px] font-semibold text-[var(--ink-muted)]">
               {title}
             </h3>
-            {description ? (
-              <p className="text-xs text-[var(--text-3)] mt-0.5">{description}</p>
-            ) : null}
-          </div>
-        </div>
-        {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
-      </header>
-      <div className="space-y-3">{children}</div>
+          ) : <span />}
+          {rightSlot ? <div className="shrink-0">{rightSlot}</div> : null}
+        </header>
+      )}
+      <div>{children}</div>
     </section>
   );
 }

@@ -15,10 +15,12 @@
  */
 
 /** Characters per second at rest — comfortable human typing speed. */
-export const TYPE_BASE_CPS = 62;
-/** Never type faster than this, even when far behind. */
-export const TYPE_MAX_CPS = 1400;
-/** Above this backlog we switch to proportional catch-up. */
+export const TYPE_BASE_CPS = 72;
+/** Never type faster than this during active streaming. */
+export const TYPE_MAX_CPS = 360;
+/** Smooth upper cap while finishing a buffered tail. */
+export const TYPE_FINISHING_MAX_CPS = 420;
+/** Threshold kept for compatibility with callers/tests. */
 export const TYPE_CATCHUP_BACKLOG = 900;
 
 /**
@@ -26,7 +28,7 @@ export const TYPE_CATCHUP_BACKLOG = 900;
  *
  * @param backlog  characters still waiting (target.length - shown)
  * @param dtMs     milliseconds since the previous frame
- * @param finishing upstream finished — drain quickly but not instantly
+ * @param finishing upstream finished — type out smoothly, never dump at once
  */
 export function revealChars(
   backlog: number,
@@ -34,18 +36,18 @@ export function revealChars(
   finishing = false
 ): number {
   if (backlog <= 0) return 0;
-  const dt = Math.min(90, Math.max(0, dtMs || 16));
+  const dt = Math.min(90, Math.max(8, dtMs || 16));
 
   if (finishing) {
-    // ~4 frames for a short tail, ~10 for a long one — visible, never a jump.
-    return Math.min(backlog, Math.max(1, Math.ceil(backlog / 4)));
+    const rate = Math.min(
+      TYPE_FINISHING_MAX_CPS,
+      Math.max(115, TYPE_BASE_CPS * 1.65 + backlog * 0.6)
+    );
+    return Math.min(backlog, Math.max(1, Math.ceil((rate * dt) / 1000)));
   }
 
-  const rate = Math.min(TYPE_MAX_CPS, TYPE_BASE_CPS + backlog * 1.5);
-  let chars = Math.ceil((rate * dt) / 1000);
-  if (backlog > TYPE_CATCHUP_BACKLOG) {
-    chars = Math.max(chars, Math.ceil(backlog * 0.16));
-  }
+  const rate = Math.min(TYPE_MAX_CPS, TYPE_BASE_CPS + backlog * 0.45);
+  const chars = Math.ceil((rate * dt) / 1000);
   return Math.min(backlog, Math.max(1, chars));
 }
 

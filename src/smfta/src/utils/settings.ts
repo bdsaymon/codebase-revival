@@ -70,12 +70,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   externalModel: '',
   externalBaseUrl: '',
   allowKeylessFallback: false,
-  // Spec defaults: temperature 0.7 · top P 0.9 · max output tokens 4096.
+  // Spec defaults: temperature 0.7 · top P 0.9 · max output tokens 16384.
   weightTemp: 0.7,
   topP: 0.9,
   topK: 40,
   stopSequences: [],
-  maxOutputTokens: 4096,
+  maxOutputTokens: 16384,
   trainingData: '',
   fastDecision: true,
   thinkingMode: 'medium',

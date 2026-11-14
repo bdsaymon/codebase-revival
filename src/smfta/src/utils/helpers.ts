@@ -3,6 +3,12 @@ import type { SelfSkillDraft } from './selfEngine';
 import { APP_VERSION, APP_UPDATED } from '../version';
 import { isGreetingMessage } from './streamGuard';
 import { DEFAULT_SETTINGS } from './settings';
+import {
+  CONTACT_BUTTONS_TOKEN,
+  CREATOR_NAME,
+  CREATOR_TELEGRAM_HANDLE,
+  maskAndNormalizeIdentityOutput,
+} from './creatorIdentity';
 
 export { APP_VERSION, APP_UPDATED, DEFAULT_SETTINGS };
 
@@ -366,7 +372,7 @@ export function tryLocalMath(txt: string): number | null {
 
 export function sanitizeProprietaryOutput(text: string): string {
   if (!text) return '';
-  return text
+  const cleaned = text
     .replace(/\n+\s*(?:---|\*\*\*|___)\s*\n+[\s\S]*?(?:pollinations|ko-fi\.com|buymeacoffee\.com|xrahat|blackbox\.ai|support\s+pollinations)[\s\S]*$/gi, '')
     .replace(/(?:\n+|\s+)(?:🌸|🐝|⚡|💡)?\s*\**(?:Powered\s+by|Support|Brought\s+to\s+you\s+by)\s+Pollinations(?:\.AI)?\**[^\n]*/gi, '')
     .replace(/https?:\/\/(?:t\.me|telegram\.me)\/education_of_purpose[^\s)"'\]]*/gi, '')
@@ -389,25 +395,26 @@ export function sanitizeProprietaryOutput(text: string): string {
     .replace(/এক্সরাহাত|রাহাত\s*ডেভ|মোঃ\s*রাহাত|ডেভেলপার\s*রাহাত/gi, 'SMFTA Pro')
     .replace(
       /(?:আমাকে\s+)?(?:OpenAI|ওপেনএআই|Google|গুগল|Anthropic|অ্যানথ্রপিক|DeepSeek|ডিপসিক|Meta|মেটা|Alibaba|আলিবাবা|Microsoft|মাইক্রোসোফট|Pollinations|SMFTA Pro|রাহাত)\s*(?:তৈরি\s*করেছে|বানিয়েছে|বানিয়েছে|ডেভেলপ\s*করেছে|দ্বারা\s*তৈরি|কর্তৃক\s*নির্মিত)/gi,
-      'আমাকে **SMFTA Pro** সিস্টেমের নিজস্ব প্রযুক্তিতে তৈরি করা হয়েছে'
+      `আমাকে **${CREATOR_NAME}** (**SMFTA AI Pro** প্ল্যাটফর্ম) তৈরি করেছেন`
     )
     .replace(
       /আমি\s+(?:ChatGPT|চ্যাটজিপিটি|গুগলের\s+একটি\s+লার্জ\s+ল্যাঙ্গুয়েজ\s+মডেল|গুগলের\s+একটি\s+লার্জ\s+ল্যাঙ্গুয়েজ\s+মডেল|ওপেনএআই-এর\s+একটি\s+মডেল|OpenAI-এর\s+একটি\s+এআই)/gi,
-      'আমি **SMFTA Pro** সিস্টেমের নিজস্ব এআই অ্যাসিস্ট্যান্ট'
+      'আমি **SMFTA AI Pro** সিস্টেমের নিজস্ব এআই অ্যাসিস্ট্যান্ট'
     )
     .replace(
       /\b(?:I\s+was\s+|I\s+am\s+|I'm\s+)?(?:created|developed|built|trained|made)\s+by\s+(?:OpenAI|Google|Anthropic|DeepSeek|Meta|Alibaba|Microsoft|Pollinations(?:\.AI)?|Rahat|Blackbox(?:\s*AI)?)\b/gi,
-      'developed exclusively for **SMFTA Pro**'
+      `developed by **${CREATOR_NAME}** for **SMFTA AI Pro**`
     )
     .replace(
       /\bI\s+am\s+(?:ChatGPT|a\s+large\s+language\s+model\s+trained\s+by\s+(?:OpenAI|Google|Anthropic))\b/gi,
-      'I am the dedicated AI assistant of **SMFTA Pro**'
+      'I am the dedicated AI assistant of **SMFTA AI Pro**'
     )
     .replace(/AIza[0-9A-Za-z\-_]{15,}/g, '[CONFIDENTIAL_KEY]')
     .replace(/sk-[0-9A-Za-z\-_]{15,}/g, '[CONFIDENTIAL_KEY]')
     .replace(/cc_[0-9A-Za-z\-_]{15,}/g, '[CONFIDENTIAL_KEY]')
     .replace(/gsk_[0-9A-Za-z\-_]{15,}/g, '[CONFIDENTIAL_KEY]')
     .replace(/ADMIN PROTOCOL \(CONFIDENTIAL[^\n]*/gi, '');
+  return maskAndNormalizeIdentityOutput(cleaned);
 }
 
 // Fast-Decision Algorithm: instant local response for identity/ownership, greetings, trained Q&A, or date/time queries
@@ -452,9 +459,9 @@ export function tryFastDecisionResponse(
 
   if (isBnIdentity || isEnIdentity) {
     const bnReply =
-      `আমি **SMFTA AI Pro** (SMFTA Pro v${APP_VERSION}) — **SMFTA AI Pro** প্ল্যাটফর্মের নিজস্ব ও নির্ধারিত AI অ্যাসিস্ট্যান্ট। কোড লেখা ও চালানো, ডিজাইন, নোট, ZIP প্রজেক্ট আর নিজের UI — সব এখানেই সামলাতে পারি। কী দরকার বলুন।`;
+      `আমি **SMFTA Pro** (**SMFTA AI Pro** প্ল্যাটফর্ম v${APP_VERSION}), এবং আমাকে তৈরি করেছেন **${CREATOR_NAME}**। যেকোনো প্রশ্ন, হ্যাকিং বা কোনো সমস্যা হলে সরাসরি নিচের **WhatsApp Now** বাটনে ক্লিক করে বা Telegram (**${CREATOR_TELEGRAM_HANDLE}**)-এ যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
     const enReply =
-      `I am **SMFTA AI Pro** (SMFTA Pro v${APP_VERSION}), the dedicated AI assistant of the **SMFTA AI Pro** platform — code, design, notes, ZIP projects and my own UI. What do you need?`;
+      `I am **SMFTA Pro** on the **SMFTA AI Pro** platform (v${APP_VERSION}), developed by **${CREATOR_NAME}**. For inquiries, security concerns, or any issue, reach out via WhatsApp or Telegram (**${CREATOR_TELEGRAM_HANDLE}**):\n\n${CONTACT_BUTTONS_TOKEN}`;
     if (replyLang === 'bn') return bnReply;
     if (replyLang === 'en') return enReply;
     const hasBn = /[\u0980-\u09FF]/.test(clean) || isBnIdentity;

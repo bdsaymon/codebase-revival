@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { sanitizeSettings } from '../smfta/src/utils/settings';
 import { resolveEffectiveProvider, inferModelForCustomBaseUrl } from '../smfta/server/providers';
 import { buildAdHocProviderConfig } from '../smfta/server/aiClient';
-import { buildProtocolRequest, parseProtocolResponse } from '../smfta/server/engine/adapters';
+import {
+  adaptRequestBodyForUnsupportedParam,
+  buildProtocolRequest,
+  parseProtocolResponse,
+} from '../smfta/server/engine/adapters';
+import { classifyPromptComplexity, isLongCodeOrWritingRequest } from '../smfta/server/intentRules';
 import { classifyProviderError } from '../smfta/server/engine/errorClassifier';
 import {
   DEFAULT_PROVIDER_MODELS,
@@ -167,5 +172,63 @@ describe('custom provider routing', () => {
     expect(err404.errorClass).toBe('MODEL_UNAVAILABLE');
     expect(err404.transient).toBe(false);
     expect(err404.retrySameCandidateAllowed).toBe(false);
+  });
+
+  it('never emits unsupported top_k for Groq/OpenAI-compatible models and auto-adapts HTTP 400 parameter rejections', () => {
+    const req = buildProtocolRequest({
+      protocol: 'openai_compatible',
+      baseUrl: 'https://api.groq.com/openai/v1/chat/completions',
+      apiKey: 'gsk_test_fixture',
+      modelId: 'openai/gpt-oss-120b',
+      messages: [{ role: 'user', content: 'Hi' }],
+      maxOutput: 16384,
+      temperature: 0.7,
+      topP: 0.9,
+      topK: 40,
+      stream: true,
+    });
+    expect('top_k' in req.body).toBe(false);
+
+    const adaptedTopK = adaptRequestBodyForUnsupportedParam(
+      'openai_compatible',
+      { model: 'openai/gpt-oss-120b', top_k: 40, max_tokens: 16384, stream: true },
+      'invalid_request_error property \'top_k\' is unsupported'
+    );
+    expect(adaptedTopK.adapted).toBe(true);
+    expect('top_k' in adaptedTopK.body).toBe(false);
+
+    const adaptedMaxTokens = adaptRequestBodyForUnsupportedParam(
+      'openai_compatible',
+      { model: 'gpt-5', max_tokens: 16384, stream: false },
+      "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+    );
+    expect(adaptedMaxTokens.adapted).toBe(true);
+    expect('max_tokens' in adaptedMaxTokens.body).toBe(false);
+    expect(adaptedMaxTokens.body.max_completion_tokens).toBe(16384);
+
+    const clampedLimit = adaptRequestBodyForUnsupportedParam(
+      'openai_compatible',
+      { model: 'custom-model', max_tokens: 32768, stream: true },
+      'invalid_request_error: max_tokens must be less than or equal to 8192'
+    );
+    expect(clampedLimit.adapted).toBe(true);
+    expect(clampedLimit.body.max_tokens).toBe(8192);
+  });
+
+  it('allocates large token budgets and removes strict no-code blocks for design, update, and detailed info requests', () => {
+    expect(isLongCodeOrWritingRequest('আমাকে একটি সুন্দর ই-কমার্স ওয়েবসাইটের বড় ডিজাইন তৈরি করে দাও')).toBe(true);
+    expect(isLongCodeOrWritingRequest('আমার বর্তমান কোডটি আপডেট করে ডার্ক থিম যোগ করো')).toBe(true);
+    expect(isLongCodeOrWritingRequest('বাংলাদেশের ইতিহাস সম্পর্কে বড় ও বিস্তারিত তথ্য দাও')).toBe(true);
+
+    const designDecision = classifyPromptComplexity({
+      text: 'একটি আধুনিক পোর্টফোলিও ডিজাইন তৈরি করে দাও',
+      mode: 'fast',
+    });
+    expect(designDecision.complexity).toBe('deep');
+    expect(designDecision.maxOutputTokens).toBeGreaterThanOrEqual(16384);
+
+    const sys = buildSystemInstruction({ mode: 'balanced' });
+    expect(sys).not.toContain('STRICT NO-UNREQUESTED-CODE RULE');
+    expect(sys).toContain('DESIGN, CODE & LONG-FORM OUTPUT RULE');
   });
 });

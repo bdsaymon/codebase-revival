@@ -17,6 +17,10 @@ import {
   ADMIN_EMAILS,
 } from '../src/utils/v2UsageLimits';
 import { MASTER_PROFILE_PROMPT_BASELINE } from '../src/utils/memoryBank';
+import {
+  detectGeminiThinkingStyle,
+  resolveGeminiThinkingBudget,
+} from '../src/utils/thinking';
 import { sanitizeProprietaryOutput } from './providers';
 
 interface UserDailyUsageRecord {
@@ -334,16 +338,32 @@ export function buildV2GenAiRequestConfig(params: {
     return cfg;
   }
 
+  const style = detectGeminiThinkingStyle(normalized);
+  const mappedBudgetEffort: 'low' | 'medium' | 'high' =
+    effort ??
+    (params.spec.thinkingLevel === 'HIGH'
+      ? 'high'
+      : params.spec.thinkingLevel === 'LOW'
+      ? 'medium'
+      : 'low');
+
   const cfg: Record<string, unknown> = {
     systemInstruction: params.fullSystemInstruction,
     temperature: params.spec.temperature,
     maxOutputTokens: params.spec.maxOutputTokens,
   };
   if (allowThinking) {
-    cfg.thinkingConfig = {
-      includeThoughts: true,
-      thinkingLevel: resolveEffortToThinkingLevel(effort, params.spec.thinkingLevel),
-    };
+    if (style === 'gemini25_budget') {
+      cfg.thinkingConfig = {
+        includeThoughts: true,
+        thinkingBudget: resolveGeminiThinkingBudget(mappedBudgetEffort, true),
+      };
+    } else {
+      cfg.thinkingConfig = {
+        includeThoughts: true,
+        thinkingLevel: resolveEffortToThinkingLevel(effort, params.spec.thinkingLevel),
+      };
+    }
   }
   if (params.spec.useSearchGrounding) {
     cfg.tools = [{ googleSearch: {} }];
@@ -526,11 +546,13 @@ export function isTransientV2UpstreamError(err: unknown): boolean {
 export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const spec = getV2ModelSpec(modelId);
   const primary = spec.serverGeminiModel;
-  const secondary =
-    primary === 'gemini-3.1-flash-lite'
-      ? 'gemini-4-hydrogen'
-      : 'gemini-3.1-flash-lite';
-  return primary === secondary ? [primary] : [primary, secondary];
+  if (modelId === 'smfta-v5') {
+    return Array.from(new Set([primary, 'gemini-3-flash-preview', 'gemini-3.8-flash']));
+  }
+  if (modelId === 'smfta-v2-pro') {
+    return Array.from(new Set([primary, 'gemini-3.8-flash', 'gemini-3.5-flash-lite']));
+  }
+  return Array.from(new Set([primary, 'gemini-3-flash-preview', 'gemini-3.5-flash-lite']));
 }
 
 /**
@@ -581,7 +603,7 @@ export async function streamV2FirebaseModel(params: {
     };
   }
 
-  const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nTarget maximum length guidance: keep answer balanced within roughly ${spec.maxOutputTokens} tokens.\nIMPORTANT: Never output code or code blocks unless the user explicitly asks for code. Always reply in simple, direct Bengali unless asked otherwise. Never output raw <think> tags inside the answer. Provide only the clean, final answer.`;
+  const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nWhen the user requests large writing, detailed information, UI/web designs, builds, or code updates, produce the full, complete, production-ready result with zero truncation or placeholders. Mirror the user's language (default to clear Bengali for Bengali prompts). Never output raw <think> tags inside the answer. Provide only the clean, final answer.`;
 
   const candidates = getV2ServerFallbackModels(params.modelId);
   let lastError: unknown = null;
@@ -596,16 +618,16 @@ export async function streamV2FirebaseModel(params: {
     }
 
     const candidateModel = candidates[i]!;
-    const config = buildV2GenAiRequestConfig({
-      modelName: candidateModel,
-      spec,
-      fullSystemInstruction,
-      thinkingEnabled: params.thinkingEnabled,
-      thinkingEffort: params.thinkingEffort,
-    });
+    const runCandidate = async (allowTools: boolean) => {
+      const config = buildV2GenAiRequestConfig({
+        modelName: candidateModel,
+        spec: allowTools ? spec : { ...spec, useSearchGrounding: false },
+        fullSystemInstruction,
+        thinkingEnabled: params.thinkingEnabled,
+        thinkingEffort: params.thinkingEffort,
+      });
 
-    let emittedAny = false;
-    try {
+      let emittedAny = false;
       const responseStream = await ai.models.generateContentStream({
         model: candidateModel,
         contents,
@@ -667,11 +689,38 @@ export async function streamV2FirebaseModel(params: {
         }
       }
 
-      if (emittedAny || params.signal.aborted) {
+      return { emittedAny, collectedSources };
+    };
+
+    try {
+      let attemptRes: {
+        emittedAny: boolean;
+        collectedSources: Array<{ title: string; uri: string }>;
+      };
+      try {
+        attemptRes = await runCandidate(true);
+      } catch (innerErr) {
+        if (params.signal.aborted) throw innerErr;
+        const innerParsed = extractCleanV2ErrorMessage(innerErr);
+        // If search grounding failed with 400 or 429 on this candidate, retry once without search tool
+        if (
+          spec.useSearchGrounding &&
+          (innerParsed.httpStatus === 400 || innerParsed.isRateLimit)
+        ) {
+          attemptRes = await runCandidate(false);
+        } else {
+          throw innerErr;
+        }
+      }
+
+      if (attemptRes.emittedAny || params.signal.aborted) {
         return {
           ok: true,
           modelLabel: spec.label,
-          sources: collectedSources.length > 0 ? collectedSources : undefined,
+          sources:
+            attemptRes.collectedSources.length > 0
+              ? attemptRes.collectedSources
+              : undefined,
         };
       }
 
@@ -687,10 +736,13 @@ export async function streamV2FirebaseModel(params: {
       }
 
       lastError = err;
+      const errParsed = extractCleanV2ErrorMessage(err);
       if (
-        !emittedAny &&
         i < candidates.length - 1 &&
-        isTransientV2UpstreamError(err)
+        (isTransientV2UpstreamError(err) ||
+          errParsed.isRateLimit ||
+          errParsed.httpStatus === 400 ||
+          errParsed.httpStatus === 404)
       ) {
         continue;
       }

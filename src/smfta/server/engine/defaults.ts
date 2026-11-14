@@ -9,8 +9,8 @@ export const ENGINE_DEFAULTS = {
   // Deadlines & Timeouts
   OVERALL_DEADLINE_MS: 40_000,
   PER_ATTEMPT_TIMEOUT_MS: 25_000,
-  STREAM_FIRST_TOKEN_TIMEOUT_MS: 12_000,
-  STREAM_NEXT_CHUNK_TIMEOUT_MS: 15_000,
+  STREAM_FIRST_TOKEN_TIMEOUT_MS: 25_000,
+  STREAM_NEXT_CHUNK_TIMEOUT_MS: 20_000,
 
   // Retries & Attempts
   MAX_ATTEMPTS_PER_REQUEST: 6,
@@ -76,8 +76,8 @@ export const ENGINE_DEFAULTS = {
 
 export const DEFAULT_OVERALL_DEADLINE_MS = 40_000;
 export const DEFAULT_PER_ATTEMPT_TIMEOUT_MS = 25_000;
-export const STREAM_FIRST_TOKEN_TIMEOUT_MS = 12_000;
-export const STREAM_NEXT_CHUNK_TIMEOUT_MS = 15_000;
+export const STREAM_FIRST_TOKEN_TIMEOUT_MS = 25_000;
+export const STREAM_NEXT_CHUNK_TIMEOUT_MS = 20_000;
 export const STREAM_PING_INTERVAL_MS = 15_000;
 
 export const QUOTA_SAFETY_MARGIN = 0.9; // 90% of stated limit (L2, I1)
@@ -143,9 +143,19 @@ export const DEFAULT_PROVIDER_REGISTRY: ProviderConfig[] = [
     key_env_var_name: 'GEMINI_API_KEY',
     models: [
       {
-        model_id: 'gemini-flash-latest',
+        model_id: 'gemini-3-flash-preview',
         context_window: 1_000_000,
-        max_output: 8_192,
+        max_output: 16_384,
+        tools: true,
+        json: true,
+        stream: true,
+        input_price_per_1k: 0.00015,
+        output_price_per_1k: 0.0006,
+      },
+      {
+        model_id: 'gemini-3.8-flash',
+        context_window: 1_000_000,
+        max_output: 16_384,
         tools: true,
         json: true,
         stream: true,
@@ -165,22 +175,12 @@ export const DEFAULT_PROVIDER_REGISTRY: ProviderConfig[] = [
       {
         model_id: 'gemini-2.5-flash',
         context_window: 1_000_000,
-        max_output: 8_192,
+        max_output: 16_384,
         tools: true,
         json: true,
         stream: true,
         input_price_per_1k: 0.00015,
         output_price_per_1k: 0.0006,
-      },
-      {
-        model_id: 'gemini-2.5-pro',
-        context_window: 1_000_000,
-        max_output: 8_192,
-        tools: true,
-        json: true,
-        stream: true,
-        input_price_per_1k: 0.00125,
-        output_price_per_1k: 0.005,
       },
       {
         model_id: 'gemini-2.5-flash-lite',
@@ -191,6 +191,16 @@ export const DEFAULT_PROVIDER_REGISTRY: ProviderConfig[] = [
         stream: true,
         input_price_per_1k: 0.0001,
         output_price_per_1k: 0.0004,
+      },
+      {
+        model_id: 'gemini-2.5-pro',
+        context_window: 1_000_000,
+        max_output: 32_768,
+        tools: true,
+        json: true,
+        stream: true,
+        input_price_per_1k: 0.00125,
+        output_price_per_1k: 0.005,
       },
     ],
     rpm: 15,

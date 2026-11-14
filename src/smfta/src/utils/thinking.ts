@@ -5,10 +5,14 @@ export type GeminiModelThinkingStyle = 'gemini25_budget' | 'gemini3_level' | 'no
 export function detectGeminiThinkingStyle(modelId: string): GeminiModelThinkingStyle {
   const m = String(modelId || '').toLowerCase().trim();
   if (!m) return 'none';
-  if (/gemini-3|smfta-max|smfta-v2-pro|smfta-v5/i.test(m)) {
+  if (/gemini-3/i.test(m)) {
     return 'gemini3_level';
   }
-  if (/gemini-2\.5|smfta-pro|smfta-flash/i.test(m)) {
+  if (
+    /gemini-2\.5|smfta-flash|smfta-pro|smfta-ultra|smfta-v5|smfta-v2-pro|smfta-max/i.test(
+      m
+    )
+  ) {
     return 'gemini25_budget';
   }
   return 'none';
@@ -18,7 +22,7 @@ export function isThinkingCapableModel(modelId: string): boolean {
   const m = String(modelId || '').toLowerCase().trim();
   if (!m) return false;
   if (detectGeminiThinkingStyle(m) !== 'none') return true;
-  return /deepseek-r1|qwq|o1|o3|o4|claude-3-7|claude-sonnet-4|claude-opus-4|reasoning|think/i.test(
+  return /deepseek-r1|deepseek-reasoner|deepseek-v4|qwen3|qwq|o1|o3|o4|gpt-oss|gpt-5|claude-3-7|claude-sonnet-4|claude-opus-4|claude-sonnet-5|claude-opus-4\.8|mercury|reasoning|think/i.test(
     m
   );
 }
@@ -30,7 +34,16 @@ export function supportsNativeThinking(
   const m = String(modelId || '').toLowerCase().trim();
   const p = String(providerId || '').toLowerCase().trim();
   if (m && isThinkingCapableModel(m)) return true;
-  if (p === 'gemini' && (!m || /gemini-2\.5|gemini-3/i.test(m))) return true;
+  if (
+    (p === 'gemini' ||
+      p === 'gemini_custom' ||
+      p === 'gemini_openai' ||
+      p === 'gemini_server' ||
+      p === 'firebase_v2') &&
+    (!m || /gemini-2\.5|gemini-3|smfta-/i.test(m))
+  ) {
+    return true;
+  }
   if (p === 'smfta_cloud' || p === 'xrahat') return true;
   return false;
 }
@@ -42,7 +55,7 @@ export function resolveGeminiThinkingBudget(
   if (!thinkingEnabled || effort === 'off') return 0;
   if (effort === 'low') return 1024;
   if (effort === 'medium') return 4096;
-  if (effort === 'high') return 8192;
+  if (effort === 'high') return 12288;
   return -1;
 }
 
@@ -56,12 +69,28 @@ export function resolveGemini3ThinkingLevel(
   return 'MEDIUM';
 }
 
-export function buildGeminiThinkingConfig(params: {
-  modelId: string;
-  thinkingEnabled?: boolean;
-  thinkingMode?: ThinkingEffortLevel;
-}): Record<string, unknown> | undefined {
-  const { modelId, thinkingEnabled = true, thinkingMode = 'auto' } = params;
+export function buildGeminiThinkingConfig(
+  modelOrParams:
+    | string
+    | {
+        modelId: string;
+        thinkingEnabled?: boolean;
+        thinkingMode?: ThinkingEffortLevel;
+      },
+  effortArg?: ThinkingEffortLevel,
+  thinkingEnabledArg?: boolean
+): Record<string, unknown> | undefined {
+  const modelId =
+    typeof modelOrParams === 'string' ? modelOrParams : modelOrParams.modelId;
+  const thinkingMode =
+    typeof modelOrParams === 'string'
+      ? effortArg ?? 'auto'
+      : modelOrParams.thinkingMode ?? 'auto';
+  const thinkingEnabled =
+    typeof modelOrParams === 'string'
+      ? thinkingEnabledArg ?? true
+      : modelOrParams.thinkingEnabled ?? true;
+
   const style = detectGeminiThinkingStyle(modelId);
   if (style === 'none') {
     return undefined;
@@ -69,12 +98,6 @@ export function buildGeminiThinkingConfig(params: {
 
   const enabled = thinkingEnabled !== false && thinkingMode !== 'off';
   if (!enabled) {
-    if (style === 'gemini25_budget') {
-      return {
-        thinkingBudget: 0,
-        includeThoughts: false,
-      };
-    }
     return undefined;
   }
 
@@ -190,12 +213,14 @@ export function toBengaliDigits(num: number): string {
   return String(safe).replace(/\d/g, (d) => BN_DIGITS[Number(d)] || d);
 }
 
+export const formatBengaliNumber = toBengaliDigits;
+
 export function formatThinkingTimerLabel(
   elapsedSec: number,
-  isStreamingThinking: boolean
+  isCompleted = false
 ): string {
   const safeSec = Math.max(0, Math.round(Number(elapsedSec) || 0));
-  if (isStreamingThinking) {
+  if (!isCompleted) {
     if (safeSec <= 0) return 'ভাবছি…';
     return `${toBengaliDigits(safeSec)} সেকেন্ড ভাবছি`;
   }

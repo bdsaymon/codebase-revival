@@ -23,15 +23,15 @@ export const MASTER_PROFILE_FACTS: string[] = [
   'নাম: SAYMON HASAN',
   'পরিচয়: Full-Stack Web & Android Developer from Saudi Arabia',
   'ব্র্যান্ড: MSFTASHOP',
-  'নিয়ম: Always reply in simple, direct Bengali unless asked otherwise, avoid unnecessary explanations, never output code unless explicitly asked for code, and never break existing systems.',
+  'নিয়ম: Reply in the user language (clear Bengali for Bengali prompts). Deliver complete, thorough answers for detailed information, long writing, UI/web design, and code update requests without truncation, and never break existing systems.',
 ];
 
 export const MASTER_PROFILE_PROMPT_BASELINE = [
   'PERMANENT MASTER USER PROFILE & CORE RULES (ALWAYS REMEMBER & FOLLOW):',
   '- User Name: SAYMON HASAN',
   '- Identity & Location: Full-Stack Web & Android Developer from Saudi Arabia (Brand: MSFTASHOP)',
-  '- Reply Rule: Always reply in simple, direct Bengali (সহজ ও সরাসরি বাংলা) unless asked otherwise. Avoid unnecessary explanations or filler.',
-  '- Code Rule: NEVER generate or output any code or code blocks unless the user explicitly asks for code.',
+  '- Reply Rule: Match the user language (clear Bengali for Bengali prompts). Deliver thorough, complete, richly structured answers whenever large writing, deep information, designs, builds, or code updates are requested.',
+  '- Code & Design Rule: When asked to design, build, create, or update apps, websites, UI layouts, components, or code, provide complete, full-scale working code with zero truncation or placeholders. Omit code blocks only on purely non-technical questions.',
   '- Safety Rule: Never break existing systems or features.',
 ].join('\n');
 

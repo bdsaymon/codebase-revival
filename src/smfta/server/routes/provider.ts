@@ -564,7 +564,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
   const inferredFromUrl = inferModelForCustomBaseUrl(effectiveBaseUrl);
   // P1-03: Always probe the exact selected model if the user provided one; only use discoveredModels[0] when user left model blank
   const effectiveProbeModel =
-    effectiveProvider === 'gemini_custom'
+    effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai'
       ? normalizeGeminiModelName(requestedExplicitModel)
       : requestedExplicitModel
       ? requestedExplicitModel

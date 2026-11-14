@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {
+  adaptRequestBodyForUnsupportedParam,
   buildProbeRequest,
   buildProtocolRequest,
   parseProtocolResponse,
@@ -166,6 +167,7 @@ export interface EngineResponse {
   ok: boolean;
   requestId: string;
   text: string;
+  thinking?: string;
   userMessage?: string;
   structuredData?: unknown;
   truncated: boolean;
@@ -368,13 +370,19 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
     const trimmedBody = bodyText.trim();
     if (/^(?:event:|data:\s*(?:\[DONE\]|\{))/m.test(trimmedBody)) {
       let aggregatedText = '';
+      let aggregatedThinking = '';
       let sseErrorMsg = '';
       for (const line of trimmedBody.split(/\r?\n/)) {
         const t = line.trim();
         if (t.startsWith('data:')) {
           try {
-            const tok = extractTokenFromSseDataLine(t.slice(5));
-            if (tok) aggregatedText += tok;
+            const ev = extractSseEventsFromLine(t.slice(5));
+            if (ev.thinking) aggregatedThinking += ev.thinking;
+            if (ev.text) aggregatedText += ev.text;
+            if (!ev.thinking && !ev.text) {
+              const tok = extractTokenFromSseDataLine(t.slice(5));
+              if (tok) aggregatedText += tok;
+            }
           } catch (sseErr: unknown) {
             sseErrorMsg =
               sseErr instanceof Error ? sseErr.message : String(sseErr);
@@ -385,12 +393,16 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
         bodyText = JSON.stringify({
           error: { message: sseErrorMsg, type: 'upstream_sse_error' },
         });
-      } else if (aggregatedText.trim()) {
+      } else if (aggregatedText.trim() || aggregatedThinking.trim()) {
         bodyText = JSON.stringify({
           choices: [
             {
               index: 0,
-              message: { role: 'assistant', content: aggregatedText },
+              message: {
+                role: 'assistant',
+                content: aggregatedText,
+                ...(aggregatedThinking ? { reasoning_content: aggregatedThinking } : {}),
+              },
               finish_reason: 'stop',
             },
           ],
@@ -403,12 +415,17 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
   if (resp.ok && requestedStream && bodyText.trim()) {
     const trimmedBody = bodyText.trim();
     if (/^(?:event:|data:\s*(?:\[DONE\]|\{))/m.test(trimmedBody)) {
-      async function* replaySseLines(): AsyncGenerator<string> {
+      async function* replaySseLines(): AsyncGenerator<StreamChunkItem> {
         for (const line of trimmedBody.split(/\r?\n/)) {
           const t = line.trim();
           if (t.startsWith('data:')) {
-            const tok = extractTokenFromSseDataLine(t.slice(5));
-            if (tok) yield tok;
+            const ev = extractSseEventsFromLine(t.slice(5));
+            if (ev.thinking || ev.text) {
+              yield ev;
+            } else {
+              const tok = extractTokenFromSseDataLine(t.slice(5));
+              if (tok) yield tok;
+            }
           }
         }
       }
@@ -431,9 +448,12 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
             : 'openai_compatible',
           parsedJson
         );
-        if (parsedProto.text && parsedProto.text.trim()) {
-          async function* singleChunk(): AsyncGenerator<string> {
-            yield parsedProto.text;
+        if ((parsedProto.text && parsedProto.text.trim()) || parsedProto.thinking) {
+          async function* singleChunk(): AsyncGenerator<StreamChunkItem> {
+            yield {
+              ...(parsedProto.thinking ? { thinking: parsedProto.thinking } : {}),
+              ...(parsedProto.text ? { text: parsedProto.text } : {}),
+            };
           }
           return {
             status: resp.status,
@@ -1154,15 +1174,17 @@ export class HardenedAIEngine {
           }
 
           let preferredScore = 2;
-          if (
-            extraOptions?.preferredProviderId &&
-            provider.provider_id === extraOptions.preferredProviderId
-          ) {
-            preferredScore =
-              extraOptions.preferredModelId &&
-              model.model_id === extraOptions.preferredModelId
-                ? 0
-                : 1;
+          const prefProv = extraOptions?.preferredProviderId;
+          const prefModel = extraOptions?.preferredModelId;
+          const providerMatches =
+            Boolean(prefProv) &&
+            (provider.provider_id === prefProv ||
+              ((prefProv === 'gemini_custom' || prefProv === 'gemini_openai') &&
+                provider.provider_id === 'gemini'));
+          if (providerMatches) {
+            preferredScore = prefModel && model.model_id === prefModel ? 0 : 1;
+          } else if (!prefProv && prefModel && model.model_id === prefModel) {
+            preferredScore = 0;
           }
 
           candidates.push({
@@ -1486,14 +1508,29 @@ export class HardenedAIEngine {
             ? AbortSignal.any([req.abortSignal, timeoutSignal])
             : timeoutSignal;
 
-          httpResp = await this.httpTransport({
-            url: protocolReq.url,
-            method: 'POST',
-            headers: protocolReq.headers,
-            body: JSON.stringify(protocolReq.body),
-            signal: combinedSignal,
-            redirect: 'manual',
-          });
+          let currentBody = protocolReq.body;
+          for (let paramFixTry = 0; paramFixTry < 3; paramFixTry++) {
+            httpResp = await this.httpTransport({
+              url: protocolReq.url,
+              method: 'POST',
+              headers: protocolReq.headers,
+              body: JSON.stringify(currentBody),
+              signal: combinedSignal,
+              redirect: 'manual',
+            });
+            if (httpResp.status === 400 && paramFixTry < 2) {
+              const adaptation = adaptRequestBodyForUnsupportedParam(
+                provider.protocol,
+                currentBody,
+                httpResp.bodyText
+              );
+              if (adaptation.adapted) {
+                currentBody = adaptation.body;
+                continue;
+              }
+            }
+            break;
+          }
         } catch (err: unknown) {
           transportErr = err;
           const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
@@ -1889,6 +1926,9 @@ export class HardenedAIEngine {
             ok: true,
             requestId,
             text: textVal.text,
+            thinking: parsedResp.thinking
+              ? sanitizeModelTextOutput(parsedResp.thinking, [apiKey])
+              : undefined,
             truncated: textVal.truncated,
             providerUsed: provider.provider_id,
             providerId: provider.provider_id,
@@ -2579,14 +2619,33 @@ export class HardenedAIEngine {
       });
 
       try {
-        const resp = await this.httpTransport({
+        let currentStreamBody = protocolReq.body;
+        let resp = await this.httpTransport({
           url: protocolReq.url,
           method: 'POST',
           headers: protocolReq.headers,
-          body: JSON.stringify(protocolReq.body),
+          body: JSON.stringify(currentStreamBody),
           signal: upstreamAbort.signal,
           redirect: 'manual',
         });
+
+        for (let paramFixTry = 0; paramFixTry < 3 && resp.status === 400; paramFixTry++) {
+          const adaptation = adaptRequestBodyForUnsupportedParam(
+            provider.protocol,
+            currentStreamBody,
+            resp.bodyText
+          );
+          if (!adaptation.adapted) break;
+          currentStreamBody = adaptation.body;
+          resp = await this.httpTransport({
+            url: protocolReq.url,
+            method: 'POST',
+            headers: protocolReq.headers,
+            body: JSON.stringify(currentStreamBody),
+            signal: upstreamAbort.signal,
+            redirect: 'manual',
+          });
+        }
 
         if (resp.status < 200 || resp.status >= 300 || !resp.streamChunks) {
           if (firstTokenTimer) clearTimeout(firstTokenTimer);
@@ -2934,13 +2993,22 @@ export class HardenedAIEngine {
   }): void {
     const { classified, provider, keyId, modelId } = params;
     const kp = this.getKeyPool(provider);
+    const hasUntriedSiblingModel =
+      provider.resolved_keys.length === 1 &&
+      provider.models.some(
+        (m) =>
+          m.model_id !== modelId &&
+          kp.isModelAvailableForKey(
+            provider.provider_id,
+            keyId,
+            m.model_id,
+            provider.config_hash
+          )
+      );
+
     switch (classified.errorClass) {
       case 'RATE_LIMITED':
-        if (
-          provider.is_client_supplied &&
-          provider.resolved_keys.length === 1 &&
-          provider.models.length > 1
-        ) {
+        if (hasUntriedSiblingModel) {
           kp.markModelUnavailableForKey({
             providerId: provider.provider_id,
             keyId,
@@ -2959,11 +3027,7 @@ export class HardenedAIEngine {
         }
         break;
       case 'QUOTA_EXHAUSTED':
-        if (
-          provider.is_client_supplied &&
-          provider.resolved_keys.length === 1 &&
-          provider.models.length > 1
-        ) {
+        if (hasUntriedSiblingModel) {
           kp.markModelUnavailableForKey({
             providerId: provider.provider_id,
             keyId,

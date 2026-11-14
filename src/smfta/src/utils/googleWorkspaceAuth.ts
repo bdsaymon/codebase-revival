@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import firebaseConfig from '../../../../firebase-applet-config.json';
 import { GOOGLE_WORKSPACE_SCOPES, storeEncryptedProviderSession } from './cloudVault';
 
 function getFirebaseAuth() {

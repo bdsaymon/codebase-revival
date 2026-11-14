@@ -15,6 +15,7 @@ export interface AdapterRequestPayload {
 
 export interface AdapterParsedResponse {
   text: string;
+  thinking?: string;
   toolCalls: CanonicalToolCall[];
   stopReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'other';
   inputTokens: number | null;
@@ -175,9 +176,14 @@ export function toOpenAICompatiblePayload(params: {
     if (typeof params.topP === 'number') {
       payload.top_p = params.topP;
     }
-  }
-  if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
-    payload.top_k = Math.round(params.topK);
+    if (
+      /gemini-2\.5|gemini-3/i.test(params.modelId) &&
+      params.thinkingMode &&
+      params.thinkingMode !== 'off' &&
+      !('reasoning_effort' in payload)
+    ) {
+      payload.reasoning_effort = params.thinkingMode;
+    }
   }
   if (Array.isArray(params.stopSequences) && params.stopSequences.length > 0) {
     payload.stop = params.stopSequences.slice(0, 4);
@@ -657,11 +663,19 @@ export function parseProtocolResponse(
         )
         .join('');
     }
+    const rawThinking =
+      typeof msg.reasoning_content === 'string' && msg.reasoning_content.trim()
+        ? msg.reasoning_content
+        : typeof msg.reasoning === 'string' && msg.reasoning.trim()
+        ? msg.reasoning
+        : typeof msg.thinking === 'string' && msg.thinking.trim()
+        ? msg.thinking
+        : '';
+    let thinking: string | undefined = rawThinking || undefined;
     if (!text.trim()) {
-      if (typeof msg.reasoning_content === 'string' && msg.reasoning_content.trim()) {
-        text = msg.reasoning_content;
-      } else if (typeof msg.reasoning === 'string' && msg.reasoning.trim()) {
-        text = msg.reasoning;
+      if (rawThinking) {
+        text = rawThinking;
+        thinking = undefined;
       } else if (typeof c0.text === 'string' && c0.text.trim()) {
         text = c0.text;
       } else if (typeof rawBody.output_text === 'string' && rawBody.output_text.trim()) {
@@ -703,7 +717,7 @@ export function parseProtocolResponse(
     const outputTokens =
       typeof usage.completion_tokens === 'number' ? usage.completion_tokens : null;
 
-    return { text, toolCalls, stopReason, inputTokens, outputTokens };
+    return { text, thinking, toolCalls, stopReason, inputTokens, outputTokens };
   }
 
   if (protocol === 'gemini_native') {
@@ -758,8 +772,11 @@ export function parseProtocolResponse(
         : null;
 
     let finalText = textChunks.join('');
+    let thinking: string | undefined =
+      thoughtChunks.length > 0 ? thoughtChunks.join('') : undefined;
     if (!finalText.trim() && thoughtChunks.length > 0) {
       finalText = thoughtChunks.join('');
+      thinking = undefined;
     }
     if (!finalText.trim() && rawFinish === 'MAX_TOKENS') {
       finalText = 'OK';
@@ -767,6 +784,7 @@ export function parseProtocolResponse(
 
     return {
       text: finalText,
+      thinking,
       toolCalls,
       stopReason,
       inputTokens,
@@ -779,10 +797,13 @@ export function parseProtocolResponse(
     ? (rawBody.content as Array<Record<string, unknown>>)
     : [];
   const textChunks: string[] = [];
+  const thoughtChunks: string[] = [];
   const toolCalls: CanonicalToolCall[] = [];
 
   for (const b of blocks) {
-    if (b.type === 'text' && typeof b.text === 'string') {
+    if (b.type === 'thinking' && typeof b.thinking === 'string') {
+      thoughtChunks.push(b.thinking);
+    } else if (b.type === 'text' && typeof b.text === 'string') {
       textChunks.push(b.text);
     } else if (b.type === 'tool_use') {
       toolCalls.push({
@@ -811,6 +832,7 @@ export function parseProtocolResponse(
 
   return {
     text: textChunks.join(''),
+    thinking: thoughtChunks.length > 0 ? thoughtChunks.join('') : undefined,
     toolCalls,
     stopReason,
     inputTokens,
@@ -836,4 +858,184 @@ export function buildProbeRequest(params: {
     maxOutput: 4, // Strictly between 1 and 8 tokens per CP5
     stream: false,
   });
+}
+
+/**
+ * Adapts a serialized protocol request body when an upstream gateway responds with HTTP 400
+ * rejecting optional or model-specific parameters (e.g., top_k, max_tokens vs max_completion_tokens,
+ * temperature, top_p, reasoning_effort, stop, thinkingConfig).
+ */
+export function adaptRequestBodyForUnsupportedParam(
+  protocol: SupportedProtocol,
+  body: Record<string, unknown>,
+  upstreamErrorText: string
+): { adapted: boolean; body: Record<string, unknown>; changedKeys: string[] } {
+  const err = String(upstreamErrorText || '');
+  if (!err) {
+    return { adapted: false, body, changedKeys: [] };
+  }
+
+  const lower = err.toLowerCase();
+  const isParamRejection =
+    /unsupported|unrecognized|unknown|invalid_request_error|unexpected|extra inputs|not permitted|not allowed|cannot be used|not supported|must be less|must be <=|exceeds|too large|maximum|invalid value|invalid parameter/i.test(
+      err
+    );
+  if (!isParamRejection) {
+    return { adapted: false, body, changedKeys: [] };
+  }
+
+  const next: Record<string, unknown> = { ...body };
+  const changedKeys: string[] = [];
+
+  const clampTokenLimit = (currentVal: unknown): number | null => {
+    const cur = typeof currentVal === 'number' && Number.isFinite(currentVal) ? currentVal : 0;
+    if (cur <= 1024) return null;
+    const limitMatch = err.match(
+      /(?:less than or equal to|<=|at most|maximum(?:\s+allowed)?(?:\s+is)?|max(?:imum)?\s*(?:completion|output)?\s*tokens(?:\s*(?:is|of))?[:\s]*)\s*(\d{3,6})/i
+    );
+    if (limitMatch) {
+      const parsedMax = Number(limitMatch[1]);
+      if (Number.isFinite(parsedMax) && parsedMax >= 256 && parsedMax < cur) {
+        return parsedMax;
+      }
+    }
+    if (/exceed|too large|less than or equal|must be <=|at most|maximum/i.test(err)) {
+      if (cur > 16384) return 16384;
+      if (cur > 8192) return 8192;
+      if (cur > 4096) return 4096;
+      return Math.max(1024, Math.floor(cur / 2));
+    }
+    return null;
+  };
+
+  if (protocol === 'openai_compatible') {
+    if ((lower.includes('top_k') || lower.includes('topk')) && 'top_k' in next) {
+      delete next.top_k;
+      changedKeys.push('top_k');
+    }
+    if (lower.includes('max_completion_tokens') && 'max_completion_tokens' in next) {
+      const clamped = clampTokenLimit(next.max_completion_tokens);
+      if (clamped !== null) {
+        next.max_completion_tokens = clamped;
+        changedKeys.push('max_completion_tokens');
+      } else {
+        const val = next.max_completion_tokens;
+        delete next.max_completion_tokens;
+        if (!lower.includes("'max_tokens'") && !('max_tokens' in next)) {
+          next.max_tokens = val;
+        }
+        changedKeys.push('max_completion_tokens');
+      }
+    } else if (lower.includes('max_tokens') && 'max_tokens' in next) {
+      const clamped = clampTokenLimit(next.max_tokens);
+      if (clamped !== null) {
+        next.max_tokens = clamped;
+        changedKeys.push('max_tokens');
+      } else {
+        const val = next.max_tokens;
+        delete next.max_tokens;
+        if (typeof val === 'number' && !('max_completion_tokens' in next)) {
+          next.max_completion_tokens = val;
+        }
+        changedKeys.push('max_tokens');
+      }
+    }
+    if (lower.includes('temperature') && 'temperature' in next) {
+      if (/default.*\(?\s*1\s*\)?/i.test(err) && next.temperature !== 1) {
+        next.temperature = 1;
+      } else {
+        delete next.temperature;
+      }
+      changedKeys.push('temperature');
+    }
+    if ((lower.includes('top_p') || lower.includes('topp')) && 'top_p' in next) {
+      delete next.top_p;
+      changedKeys.push('top_p');
+    }
+    if (lower.includes('reasoning_effort') && 'reasoning_effort' in next) {
+      delete next.reasoning_effort;
+      changedKeys.push('reasoning_effort');
+    }
+    if (/\bstop\b/i.test(err) && 'stop' in next) {
+      delete next.stop;
+      changedKeys.push('stop');
+    }
+    if (lower.includes('stream_options') && 'stream_options' in next) {
+      delete next.stream_options;
+      changedKeys.push('stream_options');
+    }
+
+    // Generic fallback for any other optional property explicitly named as unsupported/unknown
+    if (changedKeys.length === 0) {
+      const propMatch = err.match(
+        /(?:property|parameter|field|argument)\s*['"`]([a-zA-Z0-9_]+)['"`]\s*(?:is\s*)?(?:unsupported|not supported|unknown|unrecognized|not allowed|not permitted)/i
+      );
+      const namedProp = propMatch?.[1];
+      if (
+        namedProp &&
+        namedProp in next &&
+        !['model', 'messages', 'stream'].includes(namedProp)
+      ) {
+        delete next[namedProp];
+        changedKeys.push(namedProp);
+      }
+    }
+  } else if (protocol === 'gemini_native') {
+    const gc =
+      next.generationConfig && typeof next.generationConfig === 'object'
+        ? { ...(next.generationConfig as Record<string, unknown>) }
+        : null;
+    if (gc) {
+      if ((lower.includes('topk') || lower.includes('top_k')) && 'topK' in gc) {
+        delete gc.topK;
+        changedKeys.push('generationConfig.topK');
+      }
+      if ((lower.includes('topp') || lower.includes('top_p')) && 'topP' in gc) {
+        delete gc.topP;
+        changedKeys.push('generationConfig.topP');
+      }
+      if (lower.includes('temperature') && 'temperature' in gc) {
+        delete gc.temperature;
+        changedKeys.push('generationConfig.temperature');
+      }
+      if (lower.includes('thinking') && 'thinkingConfig' in gc) {
+        delete gc.thinkingConfig;
+        changedKeys.push('generationConfig.thinkingConfig');
+      }
+      if (lower.includes('maxoutputtokens') && 'maxOutputTokens' in gc) {
+        const clamped = clampTokenLimit(gc.maxOutputTokens);
+        if (clamped !== null) {
+          gc.maxOutputTokens = clamped;
+          changedKeys.push('generationConfig.maxOutputTokens');
+        }
+      }
+      next.generationConfig = gc;
+    }
+  } else if (protocol === 'anthropic_native') {
+    if ((lower.includes('top_k') || lower.includes('topk')) && 'top_k' in next) {
+      delete next.top_k;
+      changedKeys.push('top_k');
+    }
+    if ((lower.includes('top_p') || lower.includes('topp')) && 'top_p' in next) {
+      delete next.top_p;
+      changedKeys.push('top_p');
+    }
+    if (lower.includes('temperature') && 'temperature' in next) {
+      delete next.temperature;
+      changedKeys.push('temperature');
+    }
+    if (lower.includes('max_tokens') && 'max_tokens' in next) {
+      const clamped = clampTokenLimit(next.max_tokens);
+      if (clamped !== null) {
+        next.max_tokens = clamped;
+        changedKeys.push('max_tokens');
+      }
+    }
+  }
+
+  return {
+    adapted: changedKeys.length > 0,
+    body: changedKeys.length > 0 ? next : body,
+    changedKeys,
+  };
 }
