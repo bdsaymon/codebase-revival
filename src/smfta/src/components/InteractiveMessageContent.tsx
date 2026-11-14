@@ -14,11 +14,15 @@ import {
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
 import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
+import { formatThinkingTimerLabel } from '../utils/thinking';
 
 interface InteractiveMessageContentProps {
   messageId: string;
   text: string;
   thinking?: string;
+  thinkingDurationSec?: number;
+  statusSteps?: string[];
+  liveThinkingSummary?: boolean;
   isStreaming?: boolean;
   proactiveSuggestions?: ProactiveSuggestion[];
   revisions?: InlineRevision[];
@@ -188,12 +192,11 @@ export function formatThinkingHeadline(
 ): string {
   const topic = extractThinkingTopic(thinkingText);
   if (isReasoningActive) {
-    const suffix = topic.endsWith('...') ? '' : '...';
-    return `Thinking: ${topic}${suffix}`;
+    return `Thinking: ${topic}...`;
   }
-  const cleanTopic = topic.replace(/\.{2,}$/, '').trim() || 'request';
   const secs = estimateThinkingSeconds(thinkingText, durationSeconds);
-  return `Thought on ${cleanTopic} (${secs} seconds)`;
+  const unit = secs === 1 ? 'second' : 'seconds';
+  return `Thought on ${topic} (${secs} ${unit})`;
 }
 
 function parseBlocks(markdown: string): ParsedBlock[] {
@@ -509,6 +512,9 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   messageId,
   text,
   thinking,
+  thinkingDurationSec,
+  statusSteps = [],
+  liveThinkingSummary = true,
   isStreaming = false,
   proactiveSuggestions = [],
   revisions = [],
@@ -536,22 +542,42 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   const [expandedCodeBlocks, setExpandedCodeBlocks] = useState<Record<number, boolean>>({});
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
   const [showRevisions, setShowRevisions] = useState<boolean>(false);
-  const [isThinkingExpanded, setIsThinkingExpanded] = useState<boolean>(false);
 
   const { thinkingText, cleanResponse, isThinkingActive } = extractThinkingAndResponse(
     text,
     thinking
   );
 
-  const isReasoningNow = Boolean(isThinkingActive || (isStreaming && !cleanResponse && thinkingText));
+  const hasAnswerStarted = Boolean(cleanResponse.trim().length > 0);
+  const isReasoningNow = Boolean(
+    isThinkingActive ||
+      (isStreaming && !hasAnswerStarted && Boolean(thinkingText))
+  );
   const thinkingStartRef = useRef<number | null>(null);
-  const [measuredThinkSec, setMeasuredThinkSec] = useState<number | undefined>(undefined);
+  const [liveElapsedSec, setLiveElapsedSec] = useState<number>(0);
+  const [measuredThinkSec, setMeasuredThinkSec] = useState<number | undefined>(
+    thinkingDurationSec
+  );
+  const [userToggledThinking, setUserToggledThinking] = useState<boolean | null>(
+    null
+  );
 
+  // Live 1-second timer while reasoning is active, and auto-collapse when answer starts
   useEffect(() => {
     if (isReasoningNow) {
       if (thinkingStartRef.current === null) {
         thinkingStartRef.current = Date.now();
       }
+      const tick = () => {
+        if (thinkingStartRef.current !== null) {
+          setLiveElapsedSec(
+            Math.max(0, Math.floor((Date.now() - thinkingStartRef.current) / 1000))
+          );
+        }
+      };
+      tick();
+      const interval = setInterval(tick, 500);
+      return () => clearInterval(interval);
     } else if (thinkingStartRef.current !== null) {
       const elapsedSec = Math.max(
         1,
@@ -559,13 +585,32 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
       );
       setMeasuredThinkSec(elapsedSec);
       thinkingStartRef.current = null;
+      // Auto-collapse as soon as main answer starts arriving
+      setUserToggledThinking(false);
     }
   }, [isReasoningNow]);
 
-  const thinkingHeadline = formatThinkingHeadline(
-    thinkingText,
-    isReasoningNow,
-    measuredThinkSec
+  // If answer starts arriving while user hasn't manually re-opened after answer start, auto-collapse
+  useEffect(() => {
+    if (hasAnswerStarted && !isReasoningNow) {
+      setUserToggledThinking((prev) => (prev === true ? false : prev));
+    }
+  }, [hasAnswerStarted, isReasoningNow]);
+
+  const effectiveDurationSec = isReasoningNow
+    ? liveElapsedSec
+    : thinkingDurationSec ??
+      measuredThinkSec ??
+      estimateThinkingSeconds(thinkingText, measuredThinkSec);
+
+  const isThinkingExpanded =
+    userToggledThinking !== null
+      ? userToggledThinking
+      : isReasoningNow && liveThinkingSummary !== false;
+
+  const thinkingHeadline = formatThinkingTimerLabel(
+    effectiveDurationSec,
+    isReasoningNow
   );
 
   const isWebCodeLang = (lang?: string): boolean => {
@@ -724,7 +769,26 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   return (
     <div className="msg-prose space-y-1.5 text-[var(--text)]">
 
-      {/* Modern Collapsible "Thinking" UI with Animated Aurora Gradient Glow */}
+      {/* Real Status Steps (মেমোরি দেখছি / ওয়েবে খুঁজছি / ফাইল পড়ছি) */}
+      {statusSteps.length > 0 && isStreaming && !hasAnswerStarted && (
+        <div
+          data-testid="live-status-steps"
+          className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-3)] mb-1"
+        >
+          {statusSteps.map((st, idx) => (
+            <span
+              key={`${idx}-${st}`}
+              data-testid="live-status-badge"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)]/60 text-[11px] font-medium text-[var(--text-2)]"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--primary)] animate-pulse" />
+              {st}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Claude-Style Collapsible Live Thinking Box (Shown ONLY when real thinking exists) */}
       {(Boolean(thinkingText) || isThinkingActive) && (
         <div
           data-testid="thinking-accordion"
@@ -735,7 +799,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
               type="button"
               data-testid="thinking-accordion-toggle"
               aria-expanded={isThinkingExpanded}
-              onClick={() => setIsThinkingExpanded((prev) => !prev)}
+              onClick={() => setUserToggledThinking(!isThinkingExpanded)}
               className="w-full min-w-0 flex items-center justify-between gap-2 text-xs sm:text-[13px] font-medium text-[var(--text-2)] hover:text-[var(--text)] transition-colors cursor-pointer"
             >
               <span className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
@@ -746,15 +810,20 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                 />
                 <Sparkles
                   className={`w-3.5 h-3.5 text-purple-400 shrink-0 ${
-                    isReasoningNow ? 'animate-spin' : 'animate-pulse'
+                    isReasoningNow ? 'animate-spin' : ''
                   }`}
                 />
                 <span
                   data-testid="thinking-accordion-headline"
-                  className="truncate text-left font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(139,92,246,0.45)]"
+                  className="truncate text-left font-semibold bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent"
                 >
                   {thinkingHeadline}
                 </span>
+                {statusSteps.length > 0 && (
+                  <span className="text-[11px] text-[var(--text-3)] truncate">
+                    · {statusSteps[statusSteps.length - 1]}
+                  </span>
+                )}
               </span>
               <ChevronDown
                 className={`w-4 h-4 text-purple-400/80 shrink-0 transition-transform duration-200 ${
@@ -766,9 +835,9 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
             {isThinkingExpanded && (
               <div
                 data-testid="thinking-accordion-content"
-                className="mt-2.5 pt-2.5 px-3 py-2.5 rounded-lg border-t border-purple-500/20 bg-muted/40 font-mono text-xs leading-relaxed text-[var(--text-2)] max-h-60 overflow-y-auto whitespace-pre-wrap"
+                className="mt-2 pt-2 px-3 py-2 rounded-lg border-t border-purple-500/20 bg-muted/30 text-[11.5px] leading-relaxed text-[var(--text-3)] font-normal max-h-60 overflow-y-auto whitespace-pre-wrap"
               >
-                {thinkingText || 'Thinking...'}
+                {thinkingText || 'ভাবছি…'}
               </div>
             )}
           </div>

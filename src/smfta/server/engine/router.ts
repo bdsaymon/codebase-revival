@@ -4,6 +4,7 @@ import {
   buildProtocolRequest,
   parseProtocolResponse,
 } from './adapters';
+import { extractSseEventsFromLine } from './thinking';
 import {
   DEFAULT_ENGINE_REGISTRY_CONFIG,
   validateCustomHeaders,
@@ -184,11 +185,18 @@ export interface EngineResponse {
   attempts: AttemptRecord[];
 }
 
+export type StreamChunkItem =
+  | string
+  | {
+      thinking?: string;
+      text?: string;
+    };
+
 export interface HttpResponseLike {
   status: number;
   headers: Record<string, string | undefined>;
   bodyText: string;
-  streamChunks?: AsyncIterable<string>;
+  streamChunks?: AsyncIterable<StreamChunkItem>;
 }
 
 export type HttpTransportFn = (params: {
@@ -297,7 +305,7 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
   ) {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    async function* generateChunks(): AsyncGenerator<string> {
+    async function* generateChunks(): AsyncGenerator<StreamChunkItem> {
       let sseBuffer = '';
       let detectedSse = false;
       try {
@@ -319,8 +327,10 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
                 continue;
               }
               if (trimmed.startsWith('data:')) {
-                const token = extractTokenFromSseDataLine(trimmed.slice(5));
-                if (token) yield token;
+                const extracted = extractSseEventsFromLine(trimmed.slice(5));
+                if (extracted.thinking || extracted.text) {
+                  yield extracted;
+                }
               }
             }
           } else {
@@ -328,8 +338,10 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
           }
         }
         if (detectedSse && sseBuffer.trim().startsWith('data:')) {
-          const token = extractTokenFromSseDataLine(sseBuffer.trim().slice(5));
-          if (token) yield token;
+          const extracted = extractSseEventsFromLine(sseBuffer.trim().slice(5));
+          if (extracted.thinking || extracted.text) {
+            yield extracted;
+          }
         }
       } finally {
         try {
@@ -2373,6 +2385,7 @@ export class HardenedAIEngine {
     req: EngineRequest,
     callbacks: {
       onToken: (token: string) => void;
+      onThinking?: (thinkingChunk: string) => void;
       onReset?: () => void;
       onErrorEvent?: (safeMessage: string) => void;
       onComplete?: (finalText: string) => void;
@@ -2640,7 +2653,33 @@ export class HardenedAIEngine {
           if (req.abortSignal?.aborted) {
             throw new Error('ClientDisconnectAbort');
           }
-          const cleanToken = sanitizeModelTextOutput(rawChunk, [apiKey]);
+          const rawThinking =
+            typeof rawChunk === 'object' && rawChunk !== null
+              ? rawChunk.thinking || ''
+              : '';
+          const rawText =
+            typeof rawChunk === 'string'
+              ? rawChunk
+              : typeof rawChunk === 'object' && rawChunk !== null
+              ? rawChunk.text || ''
+              : '';
+
+          if (rawThinking) {
+            const cleanThinking = sanitizeModelTextOutput(rawThinking, [apiKey]);
+            if (cleanThinking) {
+              if (!firstTokenEmitted) {
+                firstTokenEmitted = true;
+                if (firstTokenTimer) {
+                  clearTimeout(firstTokenTimer);
+                  firstTokenTimer = null;
+                }
+              }
+              resetNextChunkTimer();
+              callbacks.onThinking?.(cleanThinking);
+            }
+          }
+
+          const cleanToken = sanitizeModelTextOutput(rawText, [apiKey]);
           if (cleanToken) {
             if (!firstTokenEmitted) {
               firstTokenEmitted = true;

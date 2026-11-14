@@ -45,6 +45,9 @@ import {
   Server,
   Sparkles,
   Volume2,
+  ThumbsUp,
+  ThumbsDown,
+  EyeOff,
 } from 'lucide-react';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -133,7 +136,10 @@ import {
   parseImportPayload,
   sanitizeSettingsForExport,
 } from './utils/exportData';
-import { InteractiveMessageContent } from './components/InteractiveMessageContent';
+import {
+  InteractiveMessageContent,
+  extractThinkingAndResponse,
+} from './components/InteractiveMessageContent';
 import {
   Project,
   buildProjectPreview,
@@ -203,6 +209,7 @@ import {
   factsToText,
   MASTER_PROFILE_FACTS,
   MASTER_PROFILE_NAME,
+  mergeExtractedMemories,
   migrateMemory,
   retrieveRelevantMemories,
   MEMORY_MAX,
@@ -287,6 +294,8 @@ import {
   stripWorkspaceSecrets,
   upsertCloudSession,
   wipeCloudWorkspace,
+  loadDeletedChatIds,
+  markChatDeleted,
 } from './utils/cloudSync';
 import {
   MCP_STORAGE_KEY,
@@ -342,6 +351,8 @@ import {
   isAuthorizedTestingUser,
   tryStreamViaFirebaseAiLogic,
   FirestoreUsageSnapshot,
+  deleteConversationFromFirestore,
+  clearAllFirestoreConversations,
 } from './utils/firebaseV2Client';
 import {
   bilingualSpeechPlayer,
@@ -454,13 +465,21 @@ export default function App() {
   }, []);
   const [chats, setChats] = useState<ChatSession[]>(() => {
     const saved = loadJSON<ChatSession[]>(LS_KEYS.chats, []);
+    const deletedIds = new Set(loadDeletedChatIds());
     const freshSession: ChatSession = {
       id: Date.now(),
       title: 'New Chat',
       msgs: [],
     };
     const historySessions = Array.isArray(saved)
-      ? saved.filter((c) => c && Array.isArray(c.msgs) && c.msgs.length > 0)
+      ? saved.filter(
+          (c) =>
+            c &&
+            !c.incognito &&
+            !deletedIds.has(c.id) &&
+            Array.isArray(c.msgs) &&
+            c.msgs.length > 0
+        )
       : [];
     return [freshSession, ...historySessions];
   });
@@ -696,6 +715,8 @@ export default function App() {
   // Renaming chat inline state
   const [renamingChatId, setRenamingChatId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [feedbackReasonMsgId, setFeedbackReasonMsgId] = useState<string | null>(null);
+  const [feedbackReasonInput, setFeedbackReasonInput] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
@@ -811,9 +832,13 @@ export default function App() {
       if (user && user.emailVerified) {
         unsubConvs = subscribeToFirestoreConversations(user, (remoteSessions) => {
           setChats((prev) => {
-            const byId = new Map(prev.map((c) => [c.id, c]));
+            const deletedIds = new Set(loadDeletedChatIds());
+            const byId = new Map(
+              prev.filter((c) => !deletedIds.has(c.id)).map((c) => [c.id, c])
+            );
             let changed = false;
             for (const rs of remoteSessions) {
+              if (deletedIds.has(rs.id)) continue;
               const local = byId.get(rs.id);
               if (
                 !local ||
@@ -878,8 +903,10 @@ export default function App() {
     if (!firebaseUser?.uid || !firebaseUser.emailVerified) return;
     if (streamingMsgId !== null) return;
     const timer = window.setTimeout(() => {
+      const deletedIds = new Set(loadDeletedChatIds());
       for (const session of chats) {
         if (!session.msgs || session.msgs.length === 0) continue;
+        if (session.incognito || deletedIds.has(session.id)) continue;
         const lastMsg = session.msgs[session.msgs.length - 1];
         const sig = `${session.title}:${session.msgs.length}:${lastMsg?.id || ''}:${(lastMsg?.text || '').length}`;
         if (firestoreSyncedChatSigsRef.current.get(session.id) === sig) continue;
@@ -1256,7 +1283,11 @@ export default function App() {
     // v18.11 + v19.0 — Auto-Save Conversations & Privacy Mode stop disk persistence.
     if (settings.autoSaveChat === false || settings.conversationPrivacyMode) return;
     try {
-      localStorage.setItem(LS_KEYS.chats, JSON.stringify(chats));
+      const deletedIds = new Set(loadDeletedChatIds());
+      const persistable = chats.filter(
+        (c) => !c.incognito && !deletedIds.has(c.id)
+      );
+      localStorage.setItem(LS_KEYS.chats, JSON.stringify(persistable));
     } catch {
       showToast(
         '⚠️ স্টোরেজ কোটা পূর্ণ — চ্যাট সংরক্ষণে সমস্যা হচ্ছে। অনুগ্রহ করে Backup এক্সপোর্ট করুন।',
@@ -1930,7 +1961,7 @@ export default function App() {
           setNotebookOpen(true);
           applied.push('Opened Notebook');
         } else if (action.connector === 'settings') {
-          setSettingsTab('self');
+          setSettingsTab('general');
           setCurrentView('settings');
           applied.push('Opened Control Center');
         }
@@ -2414,8 +2445,10 @@ export default function App() {
 
   const handleDeleteChat = (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
-    // The whole conversation (all of its messages) is one cloud row: one
-    // DELETE removes every message atomically with the conversation.
+    // Record persistent tombstone so cloud/Firestore sync never resurrects this chat
+    markChatDeleted(id);
+    firestoreSyncedChatSigsRef.current.delete(id);
+    // Delete from Supabase cloud session table
     if (cloudClient && userId && cloudReady) {
       deleteCloudSession(cloudClient, userId, id)
         .then(() => setCloudStatus('saved'))
@@ -2424,21 +2457,35 @@ export default function App() {
           console.warn('[cloudSync.deleteSession]', delErr);
         });
     }
+    // Delete from Firebase Firestore conversations + sessions
+    if (firebaseUser && firebaseUser.emailVerified) {
+      void deleteConversationFromFirestore(firebaseUser, id).catch(() => {});
+    }
     syncedSessionVersions.current.delete(id);
     const remaining = chats.filter((c) => c.id !== id);
-    if (remaining.length === 0) {
-      const fresh: ChatSession = {
-        id: Date.now(),
-        title: 'New Conversation',
-        msgs: [],
-      };
-      setChats([fresh]);
-      setActiveId(fresh.id);
-    } else {
-      setChats(remaining);
-      if (activeId === id) setActiveId(remaining[0].id);
+    const nextChats: ChatSession[] =
+      remaining.length === 0
+        ? [
+            {
+              id: Date.now(),
+              title: 'New Conversation',
+              msgs: [],
+            },
+          ]
+        : remaining;
+    try {
+      localStorage.setItem(
+        LS_KEYS.chats,
+        JSON.stringify(nextChats.filter((c) => !c.incognito))
+      );
+    } catch {
+      // ignore storage errors
     }
-    showToast('Chat deleted');
+    setChats(nextChats);
+    if (remaining.length === 0 || activeId === id) {
+      setActiveId(nextChats[0].id);
+    }
+    showToast('চ্যাট স্থায়ীভাবে মুছে ফেলা হয়েছে');
   };
 
   const handleClearActiveChat = () => {
@@ -2904,9 +2951,17 @@ export default function App() {
       }
     }
 
-    // 4. Auto-extract implicit user memory only for concise personal messages (never block/pollute on large notes)
+    // 4. Auto-extract implicit user memory only for concise personal messages (never block/pollute on large notes, paused memory, or incognito)
+    const isIncognitoTurn = Boolean(
+      activeChat.incognito || settings.conversationPrivacyMode
+    );
     let currentMemory = [...memory];
-    if (settings.autoMemory !== false && rawTxt.length <= 450) {
+    if (
+      settings.autoMemory !== false &&
+      !settings.memoryPaused &&
+      !isIncognitoTurn &&
+      rawTxt.length <= 450
+    ) {
       const implicit = extractImplicitUserMemory(rawTxt);
       if (implicit.detectedName) {
         setProfile((prev) => ({ ...prev, name: implicit.detectedName as string }));
@@ -2936,6 +2991,8 @@ export default function App() {
         firebaseUser &&
         firebaseUser.emailVerified &&
         settings.autoMemory !== false &&
+        !settings.memoryPaused &&
+        !isIncognitoTurn &&
         rawTxt.length <= 450 &&
         currentMemory.length > 0
       ) {
@@ -3281,6 +3338,13 @@ export default function App() {
       );
       const mcpToolsContext = buildMcpPromptContext(mcpServers);
 
+      const activeChatProject = (settings.projects || []).find(
+        (p) => p.id === targetSession?.projectId
+      );
+      const isIncognitoChat = Boolean(
+        targetSession?.incognito || settings.conversationPrivacyMode
+      );
+
       const buildRequestBody = (msgs: StreamMsg[]) =>
         JSON.stringify({
         messages: msgs,
@@ -3290,6 +3354,17 @@ export default function App() {
         workPersona: settings.workPersona || 'allrounder',
         creativity: settings.creativity,
         customInst: settings.customInst,
+        nickname: settings.nickname || profile.name || '',
+        globalInstructions: settings.globalInstructions || settings.customInst || '',
+        projectInstructions: activeChatProject?.instructions || '',
+        projectName: activeChatProject?.name || '',
+        responseStyle: settings.responseStyle || 'normal',
+        customStyleSample: settings.customStyleSample || '',
+        responseLength: settings.responseLength || 'normal',
+        memoryPaused: Boolean(settings.memoryPaused),
+        incognito: isIncognitoChat,
+        thinkingEnabled: settings.thinkingEnabled !== false,
+        liveThinkingSummary: settings.liveThinkingSummary !== false,
         outputFormat: settings.outputFormat || 'auto',
         userProfileContext: settings.userProfileContext || '',
         knowledgeContext: kbResult.promptContext || '',
@@ -3297,8 +3372,16 @@ export default function App() {
         // v18.11 personalization signals for the server-side system prompt.
         responseTone: settings.responseTone || 'friendly',
         codingPrefs: settings.codingPrefs || '',
-        memory: contextRelevantMemory,
-        autoMemory: settings.autoMemory !== false,
+        memory:
+          settings.autoMemory !== false &&
+          !settings.memoryPaused &&
+          !isIncognitoChat
+            ? contextRelevantMemory
+            : [],
+        autoMemory:
+          settings.autoMemory !== false &&
+          !settings.memoryPaused &&
+          !isIncognitoChat,
         includeHistory: settings.includeHistory !== false,
         activeWidgets: selfWidgets.map((w) => w.title),
         webSearch: Boolean(
@@ -3325,8 +3408,11 @@ export default function App() {
         trainingData: settings.trainingData || '',
         fastDecision: settings.fastDecision !== false,
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
-        userName: profile.name || MASTER_PROFILE_NAME,
-        chatHistorySummary,
+        userName: settings.nickname || profile.name || MASTER_PROFILE_NAME,
+        chatHistorySummary:
+          settings.crossChatReference !== false && !isIncognitoChat
+            ? chatHistorySummary
+            : '',
         activeSkills: matchedSkills
           .filter((sk) => sk.type === 'prompt' && sk.prompt)
           .map((sk) => ({ name: sk.name, description: sk.description, prompt: sk.prompt })),
@@ -3437,6 +3523,9 @@ export default function App() {
       let revealFinishing = false;
       let revealDoneCb: (() => void) | null = null;
       let liveThinking = '';
+      let liveStatusSteps: string[] = [];
+      let thinkingStartMs: number | null = null;
+      let computedThinkingSec: number | undefined;
 
       const scheduleReveal = (): number => {
         if (typeof window.requestAnimationFrame === 'function') {
@@ -3457,7 +3546,7 @@ export default function App() {
       const paintReveal = () => {
         const visible = safeSlice(revealTarget, revealShown);
         if (!bubbleCreated) {
-          if (!visible.trim() && !liveThinking.trim()) {
+          if (!visible.trim() && !liveThinking.trim() && liveStatusSteps.length === 0) {
             return;
           }
           bubbleCreated = true;
@@ -3469,6 +3558,8 @@ export default function App() {
             role: 'ai',
             text: visible || ' ',
             thinking: liveThinking || undefined,
+            thinkingDurationSec: computedThinkingSec,
+            statusSteps: liveStatusSteps.length > 0 ? [...liveStatusSteps] : undefined,
             v2ModelId: isV2Request ? effectiveExternalModel : undefined,
             ts: reqStart,
             turnId,
@@ -3486,6 +3577,9 @@ export default function App() {
             ...m,
             text: visible || m.text || ' ',
             thinking: liveThinking || m.thinking,
+            thinkingDurationSec: computedThinkingSec ?? m.thinkingDurationSec,
+            statusSteps:
+              liveStatusSteps.length > 0 ? [...liveStatusSteps] : m.statusSteps,
           }));
         }
         scrollToBottom(false);
@@ -3717,6 +3811,12 @@ export default function App() {
                   ? parsed.delta
                   : '';
               if (deltaTxt) {
+                if (thinkingStartMs !== null && computedThinkingSec === undefined) {
+                  computedThinkingSec = Math.max(
+                    1,
+                    Math.round((Date.now() - thinkingStartMs) / 1000)
+                  );
+                }
                 if (firstTokenPerf === null) {
                   firstTokenPerf =
                     typeof performance !== 'undefined'
@@ -4090,9 +4190,58 @@ export default function App() {
       }
 
       const newlySavedMemories: string[] =
-        settings.autoMemory !== false && memories.length > 0
+        settings.autoMemory !== false &&
+        !settings.memoryPaused &&
+        !isIncognitoChat &&
+        memories.length > 0
           ? rememberFacts(memories, 'ai')
           : [];
+
+      // Periodic / post-turn lightweight AI memory extraction (JSON key-value with duplicate update & sensitive filter)
+      if (
+        settings.autoMemory !== false &&
+        !settings.memoryPaused &&
+        !isIncognitoChat &&
+        lastUserPrompt.length >= 6 &&
+        lastUserPrompt.length <= 2000
+      ) {
+        void (async () => {
+          try {
+            const extRes = await fetch('/api/memory/extract', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messages: [
+                  ...contextSlice.slice(-4),
+                  { role: 'ai', text: (finalText || cleanText).slice(0, 800) },
+                ],
+                existingMemories: memoryRef.current.slice(0, 40),
+                provider: activeProvider,
+                externalKeys: effectiveExternalKeys,
+                externalModel: effectiveExternalModel,
+                externalBaseUrl: effectiveExternalBaseUrl,
+                memoryPaused: Boolean(settings.memoryPaused),
+                incognito: isIncognitoChat,
+                autoMemory: settings.autoMemory !== false,
+              }),
+            });
+            if (!extRes.ok) return;
+            const extData = await extRes.json();
+            if (Array.isArray(extData?.memories) && extData.memories.length > 0) {
+              const mergedRes = mergeExtractedMemories(
+                memoryRef.current,
+                extData.memories
+              );
+              if (mergedRes.addedOrUpdated.length > 0) {
+                memoryRef.current = mergedRes.memories;
+                setMemory(mergedRes.memories);
+              }
+            }
+          } catch {
+            // Non-blocking background extraction
+          }
+        })();
+      }
 
       let appliedSummary: string | undefined;
       let appliedWidgetId: string | undefined;
@@ -4153,11 +4302,21 @@ export default function App() {
           : undefined);
       const latencySecFormatted = `${(computedLatencyMs / 1000).toFixed(2)}s`;
 
+      const finalThinkingSec =
+        computedThinkingSec ??
+        (thinkingStartMs !== null
+          ? Math.max(1, Math.round((Date.now() - thinkingStartMs) / 1000))
+          : undefined);
+
       const finalCompletedMsg: ChatMessage = {
         id: aiMsgId,
         role: 'ai',
         text: finalText || cleanText || accumulated,
         thinking: extractedThinking || liveThinking || undefined,
+        thinkingDurationSec:
+          extractedThinking || liveThinking ? finalThinkingSec : undefined,
+        statusSteps:
+          liveStatusSteps.length > 0 ? [...liveStatusSteps] : undefined,
         v2ModelId: isV2Request ? effectiveExternalModel : undefined,
         ts: reqStart,
         status: 'complete',
@@ -4190,6 +4349,9 @@ export default function App() {
         ...m,
         ...finalCompletedMsg,
         thinking: finalCompletedMsg.thinking || m.thinking,
+        thinkingDurationSec:
+          finalCompletedMsg.thinkingDurationSec ?? m.thinkingDurationSec,
+        statusSteps: finalCompletedMsg.statusSteps ?? m.statusSteps,
       }));
 
       setTelemetryLogs(
@@ -4207,7 +4369,12 @@ export default function App() {
       );
 
       // Synchronize ALL persistent sessions (V1 & V2) & memory to Cloud Firestore when authenticated
-      if (firebaseUser && firebaseUser.emailVerified && !settings.conversationPrivacyMode) {
+      if (
+        firebaseUser &&
+        firebaseUser.emailVerified &&
+        !settings.conversationPrivacyMode &&
+        !isIncognitoChat
+      ) {
         const lastUserMessageObj = historyMsgs[historyMsgs.length - 1];
         const sessionVersionTag = isV2Request ? 'v2' : 'v1';
         const sessionModelTag =
@@ -4868,8 +5035,12 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // P1-26: Full wipe of all local storage keys and application state
+  // P1-26: Full wipe of all local storage keys, Supabase sessions, and Firestore conversations
   const handleClearChatHistory = () => {
+    for (const c of chats) {
+      markChatDeleted(c.id);
+    }
+    firestoreSyncedChatSigsRef.current.clear();
     try {
       localStorage.removeItem(LS_KEYS.chats);
     } catch {
@@ -4880,6 +5051,9 @@ export default function App() {
         .then(() => syncedSessionVersions.current.clear())
         .catch(() => {});
     }
+    if (firebaseUser && firebaseUser.emailVerified) {
+      void clearAllFirestoreConversations(firebaseUser).catch(() => {});
+    }
     const fresh: ChatSession = {
       id: Date.now(),
       title: 'New Chat',
@@ -4888,7 +5062,7 @@ export default function App() {
     };
     setChats([fresh]);
     setActiveId(fresh.id);
-    showToast('Chat history cleared');
+    showToast('সব চ্যাট হিস্ট্রি স্থায়ীভাবে মুছে ফেলা হয়েছে');
   };
 
   const handleDeleteCloudData = async () => {
@@ -5185,26 +5359,95 @@ export default function App() {
           <main className={`v2-main${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
             {/* HEADER — Screenshot 1 & 4: Staggered Menu Left, Quiet Brand, Pill Group [New Chat | •••] Right */}
             <header className="app-header">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 min-w-0">
                 <button
                   type="button"
                   data-testid="drawer-menu-btn"
                   onClick={() => setSidebarOpen(true)}
-                  className="ref-circle-btn"
+                  className="ref-circle-btn shrink-0"
                   aria-label="Open menu"
                   title="Conversations & Navigation"
                 >
                   <StaggeredMenuIcon className="w-4 h-4" />
                 </button>
-                <span className="hidden sm:inline text-[15px] font-medium text-[var(--ink-muted)]">
+                <span className="hidden sm:inline text-[15px] font-medium text-[var(--ink-muted)] truncate">
                   {activeDisplayName === 'Msfta shop ai'
                     ? 'SMFTA AI'
                     : activeDisplayName || 'SMFTA AI'}
                 </span>
+
+                {/* Active Project Selector Pill (Section ঘ: Projects) */}
+                {(settings.projects || []).length > 0 && (
+                  <select
+                    data-testid="active-project-selector"
+                    value={activeChat.projectId || ''}
+                    onChange={(e) => {
+                      const nextProjId = e.target.value || undefined;
+                      setChats((prev) =>
+                        prev.map((c) =>
+                          c.id === activeChat.id
+                            ? { ...c, projectId: nextProjId }
+                            : c
+                        )
+                      );
+                    }}
+                    className="max-w-[130px] sm:max-w-[180px] px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink)] outline-none cursor-pointer truncate"
+                    title="এই চ্যাটের প্রজেক্ট নির্বাচন করুন"
+                  >
+                    <option value="">প্রজেক্ট ছাড়া চ্যাট</option>
+                    {(settings.projects || []).map((proj) => (
+                      <option key={proj.id} value={proj.id}>
+                        📁 {proj.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {activeChat.incognito && (
+                  <span
+                    data-testid="incognito-active-badge"
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold shrink-0"
+                    title="Incognito চ্যাট চালু আছে — কোনো মেমোরি বা হিস্ট্রি সেভ হবে না"
+                  >
+                    <EyeOff className="w-3 h-3" />
+                    <span className="hidden xs:inline">Incognito</span>
+                  </span>
+                )}
               </div>
 
-              <div className="relative flex items-center">
+              <div className="relative flex items-center gap-1.5">
                 <div className="ref-pill-group">
+                  <button
+                    type="button"
+                    data-testid="incognito-chat-toggle"
+                    onClick={() => {
+                      const nextIncog = !activeChat.incognito;
+                      setChats((prev) =>
+                        prev.map((c) =>
+                          c.id === activeChat.id
+                            ? { ...c, incognito: nextIncog }
+                            : c
+                        )
+                      );
+                      showToast(
+                        nextIncog
+                          ? '🕶️ Incognito চ্যাট চালু — মেমোরি ও হিস্ট্রি সেভ হবে না'
+                          : 'Incognito চ্যাট বন্ধ করা হয়েছে'
+                      );
+                    }}
+                    className={`ref-pill-icon-btn ${
+                      activeChat.incognito ? 'text-amber-400' : ''
+                    }`}
+                    aria-label="Incognito chat toggle"
+                    aria-pressed={Boolean(activeChat.incognito)}
+                    title={
+                      activeChat.incognito
+                        ? 'Incognito চ্যাট বন্ধ করুন'
+                        : 'Incognito চ্যাট (মেমোরি ও হিস্ট্রি ছাড়া চ্যাট)'
+                    }
+                  >
+                    <EyeOff className="w-[16px] h-[16px]" />
+                  </button>
                   <button
                     type="button"
                     onClick={handleNewChat}
@@ -5235,7 +5478,7 @@ export default function App() {
                     />
                     <div
                       data-testid="header-menu-popover"
-                      className="absolute right-0 top-full mt-2 w-44 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
+                      className="absolute right-0 top-full mt-2 w-48 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
                     >
                       <button
                         type="button"
@@ -5248,6 +5491,35 @@ export default function App() {
                       >
                         <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
                         <span>New Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-incognito"
+                        onClick={() => {
+                          const nextIncog = !activeChat.incognito;
+                          setChats((prev) =>
+                            prev.map((c) =>
+                              c.id === activeChat.id
+                                ? { ...c, incognito: nextIncog }
+                                : c
+                            )
+                          );
+                          setHeaderMenuOpen(false);
+                          showToast(
+                            nextIncog
+                              ? '🕶️ Incognito চ্যাট চালু — মেমোরি ও হিস্ট্রি সেভ হবে না'
+                              : 'Incognito চ্যাট বন্ধ করা হয়েছে'
+                          );
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <EyeOff className="w-3.5 h-3.5 text-amber-400" />
+                        <span>
+                          {activeChat.incognito
+                            ? 'Incognito বন্ধ করুন'
+                            : 'Incognito চ্যাট'}
+                        </span>
                       </button>
 
                       <button
@@ -5438,6 +5710,11 @@ export default function App() {
                             messageId={m.id}
                             text={m.text}
                             thinking={m.thinking}
+                            thinkingDurationSec={m.thinkingDurationSec}
+                            statusSteps={m.statusSteps}
+                            liveThinkingSummary={
+                              settings.liveThinkingSummary !== false
+                            }
                             isStreaming={streamingMsgId === m.id}
                             proactiveSuggestions={m.proactiveSuggestions}
                             revisions={m.revisions}
@@ -5629,193 +5906,357 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Plain Single-Line Timestamp & Quiet Actions */}
-                      {streamingMsgId !== m.id && (
-                        <div className="msg-actions">
-                          <span className="font-mono-num whitespace-nowrap">
-                            {settings.showTimestamps !== false
-                              ? formatTime(m.ts)
-                              : ''}
-                            {settings.showTokenUsage === true && m.latencySec
-                              ? `${
-                                  settings.showTimestamps !== false ? ' · ' : ''
-                                }${m.latencySec}${
-                                  m.timing?.ttftMs
-                                    ? ` · TTFT ${m.timing.ttftMs}ms`
-                                    : ''
-                                }`
-                              : ''}
-                          </span>
+                      {/* Message Bottom Action Row (Outside message text, hidden while streaming) */}
+                      {streamingMsgId !== m.id && (() => {
+                        const latestAiMsg = [...activeChat.msgs]
+                          .reverse()
+                          .find((x) => x.role === 'ai');
+                        const isLatestAiMsg =
+                          m.role === 'ai' && latestAiMsg?.id === m.id;
+                        const submitFeedback = async (
+                          rating: 'up' | 'down',
+                          reasonText?: string
+                        ) => {
+                          const fb = {
+                            rating,
+                            reason: reasonText?.trim() || undefined,
+                            createdAt: Date.now(),
+                          };
+                          updateMessageInChat(activeChat.id, m.id, (old) => ({
+                            ...old,
+                            feedback: fb,
+                          }));
+                          setFeedbackReasonMsgId(null);
+                          setFeedbackReasonInput('');
+                          showToast(
+                            rating === 'up'
+                              ? 'ধন্যবাদ! আপনার মতামত সংরক্ষিত হয়েছে'
+                              : 'মতামত সংরক্ষিত হয়েছে'
+                          );
+                          try {
+                            await fetch('/api/feedback', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                messageId: m.id,
+                                sessionId: String(activeChat.id),
+                                rating,
+                                reason: fb.reason || '',
+                                model: m.modelUsed || m.requestedModel || activeModelName,
+                                provider: m.providerUsed || m.requestedProvider || '',
+                              }),
+                            });
+                          } catch {
+                            // Offline feedback stays saved on message in local/cloud session
+                          }
+                        };
 
-                          {m.role === 'ai' ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard?.writeText(m.text);
-                                  showToast('Copied');
-                                }}
-                                className="msg-action"
-                              >
-                                <Copy className="w-3 h-3" />
-                                <span>Copy</span>
-                              </button>
+                        return (
+                          <div className="flex flex-col gap-1.5 mt-1">
+                            <div
+                              data-testid={`msg-actions-${m.role}`}
+                              className={`msg-actions flex flex-wrap items-center gap-1 ${
+                                isLatestAiMsg
+                                  ? 'opacity-100'
+                                  : 'opacity-90 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity'
+                              }`}
+                            >
+                              <span className="font-mono-num whitespace-nowrap mr-1">
+                                {settings.showTimestamps !== false
+                                  ? formatTime(m.ts)
+                                  : ''}
+                                {settings.showTokenUsage === true && m.latencySec
+                                  ? `${
+                                      settings.showTimestamps !== false ? ' · ' : ''
+                                    }${m.latencySec}${
+                                      m.timing?.ttftMs
+                                        ? ` · TTFT ${m.timing.ttftMs}ms`
+                                        : ''
+                                    }`
+                                  : ''}
+                              </span>
 
-                              {(m.status === 'stopped' || (!m.isError && looksTruncated(m.text))) && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (isGenerating) return;
-                                    const idx = activeChat.msgs.findIndex(
-                                      (x) => x.id === m.id
-                                    );
-                                    if (idx > 0) {
-                                      const priorMsgs = activeChat.msgs.slice(0, idx);
-                                      streamAIResponse(
-                                        activeChat.id,
-                                        priorMsgs,
-                                        undefined,
-                                        undefined,
-                                        { id: m.id, prefixText: m.text }
+                              {m.role === 'ai' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    data-testid="msg-copy-btn"
+                                    onClick={() => {
+                                      const { cleanResponse } =
+                                        extractThinkingAndResponse(
+                                          m.text,
+                                          m.thinking
+                                        );
+                                      navigator.clipboard?.writeText(
+                                        cleanResponse || m.text
                                       );
+                                      showToast('উত্তর কপি করা হয়েছে');
+                                    }}
+                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
+                                    title="শুধু মূল উত্তর কপি করুন (থিংকিং ছাড়া)"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-feedback-up-btn"
+                                    onClick={() => void submitFeedback('up')}
+                                    className={`msg-action min-h-[36px] sm:min-h-[30px] px-2 ${
+                                      m.feedback?.rating === 'up'
+                                        ? 'text-emerald-400 font-semibold'
+                                        : ''
+                                    }`}
+                                    title="ভালো উত্তর"
+                                  >
+                                    <ThumbsUp className="w-3.5 h-3.5" />
+                                    <span>ভালো উত্তর</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-feedback-down-btn"
+                                    onClick={() => {
+                                      if (feedbackReasonMsgId === m.id) {
+                                        setFeedbackReasonMsgId(null);
+                                      } else {
+                                        setFeedbackReasonMsgId(m.id);
+                                        setFeedbackReasonInput(
+                                          m.feedback?.reason || ''
+                                        );
+                                      }
+                                    }}
+                                    className={`msg-action min-h-[36px] sm:min-h-[30px] px-2 ${
+                                      m.feedback?.rating === 'down'
+                                        ? 'text-amber-400 font-semibold'
+                                        : ''
+                                    }`}
+                                    title="খারাপ উত্তর"
+                                  >
+                                    <ThumbsDown className="w-3.5 h-3.5" />
+                                    <span>খারাপ উত্তর</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-retry-btn"
+                                    onClick={() => {
+                                      if (isGenerating) return;
+                                      const idx = activeChat.msgs.findIndex(
+                                        (x) => x.id === m.id
+                                      );
+                                      if (idx > 0) {
+                                        const trimmed = activeChat.msgs.slice(
+                                          0,
+                                          idx
+                                        );
+                                        setChats((prev) =>
+                                          prev.map((c) =>
+                                            c.id === activeChat.id
+                                              ? { ...c, msgs: trimmed }
+                                              : c
+                                          )
+                                        );
+                                        streamAIResponse(
+                                          activeChat.id,
+                                          trimmed
+                                        );
+                                      }
+                                    }}
+                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
+                                    title="আবার উত্তর তৈরি করুন (Retry)"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>Retry</span>
+                                  </button>
+
+                                  {(m.status === 'stopped' ||
+                                    (!m.isError && looksTruncated(m.text))) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (isGenerating) return;
+                                        const idx = activeChat.msgs.findIndex(
+                                          (x) => x.id === m.id
+                                        );
+                                        if (idx > 0) {
+                                          const priorMsgs = activeChat.msgs.slice(
+                                            0,
+                                            idx
+                                          );
+                                          streamAIResponse(
+                                            activeChat.id,
+                                            priorMsgs,
+                                            undefined,
+                                            undefined,
+                                            { id: m.id, prefixText: m.text }
+                                          );
+                                        }
+                                      }}
+                                      className="msg-action text-[var(--primary)] font-medium min-h-[36px] sm:min-h-[30px] px-2"
+                                      title="Continue generating remainder of this answer"
+                                    >
+                                      <Play className="w-3.5 h-3.5" />
+                                      <span>Continue</span>
+                                    </button>
+                                  )}
+
+                                  {/* Bilingual TTS controls (Speak / Pause / Resume / Stop) */}
+                                  <button
+                                    type="button"
+                                    data-testid="msg-tts-btn"
+                                    onClick={() => {
+                                      if (speakingMsgId === m.id) {
+                                        if (speechState === 'paused') {
+                                          bilingualSpeechPlayer.resume();
+                                        } else {
+                                          bilingualSpeechPlayer.pause();
+                                        }
+                                      } else {
+                                        const { cleanResponse } =
+                                          extractThinkingAndResponse(
+                                            m.text,
+                                            m.thinking
+                                          );
+                                        speakText(
+                                          cleanResponse || m.text,
+                                          m.id
+                                        );
+                                      }
+                                    }}
+                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
+                                    title={
+                                      speakingMsgId === m.id
+                                        ? speechState === 'paused'
+                                          ? 'Resume speech'
+                                          : 'Pause speech'
+                                        : 'Read aloud (Bengali & English)'
                                     }
-                                  }}
-                                  className="msg-action text-[var(--primary)] font-medium"
-                                  title="Continue generating remainder of this answer"
-                                >
-                                  <Play className="w-3 h-3" />
-                                  <span>Continue</span>
-                                </button>
+                                  >
+                                    {speakingMsgId === m.id &&
+                                    speechState === 'speaking' ? (
+                                      <>
+                                        <Pause className="w-3.5 h-3.5" />
+                                        <span>Pause</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Volume2 className="w-3.5 h-3.5" />
+                                        <span>
+                                          {speakingMsgId === m.id &&
+                                          speechState === 'paused'
+                                            ? 'Resume'
+                                            : 'Listen'}
+                                        </span>
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {speakingMsgId === m.id && (
+                                    <button
+                                      type="button"
+                                      data-testid="msg-tts-stop-btn"
+                                      onClick={() =>
+                                        bilingualSpeechPlayer.stop()
+                                      }
+                                      className="msg-action text-rose-400 min-h-[36px] sm:min-h-[30px] px-2"
+                                      title="Stop speech"
+                                    >
+                                      <Square className="w-2.5 h-2.5 fill-current" />
+                                      <span>Stop</span>
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    data-testid="user-msg-copy-btn"
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(
+                                        cleanUserText || m.text
+                                      );
+                                      showToast('মেসেজ কপি করা হয়েছে');
+                                    }}
+                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
+                                  >
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-testid="user-msg-edit-btn"
+                                    onClick={() => {
+                                      if (isGenerating) return;
+                                      const idx = activeChat.msgs.findIndex(
+                                        (x) => x.id === m.id
+                                      );
+                                      if (idx >= 0) {
+                                        setInputText(cleanUserText || m.text);
+                                        setChats((prev) =>
+                                          prev.map((c) =>
+                                            c.id === activeChat.id
+                                              ? {
+                                                  ...c,
+                                                  msgs: c.msgs.slice(0, idx),
+                                                }
+                                              : c
+                                          )
+                                        );
+                                        composerRef.current?.focus();
+                                      }
+                                    }}
+                                    className="msg-action min-h-[36px] sm:min-h-[30px] px-2"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                    <span>Edit</span>
+                                  </button>
+                                </>
                               )}
+                            </div>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (isGenerating) return;
-                                  const idx = activeChat.msgs.findIndex(
-                                    (x) => x.id === m.id
-                                  );
-                                  if (idx > 0) {
-                                    const trimmed = activeChat.msgs.slice(
-                                      0,
-                                      idx
-                                    );
-                                    setChats((prev) =>
-                                      prev.map((c) =>
-                                        c.id === activeChat.id
-                                          ? { ...c, msgs: trimmed }
-                                          : c
-                                      )
-                                    );
-                                    streamAIResponse(
-                                      activeChat.id,
-                                      trimmed
-                                    );
-                                  }
-                                }}
-                                className="msg-action"
+                            {/* Optional Short Reason Box when "খারাপ উত্তর" is clicked */}
+                            {m.role === 'ai' && feedbackReasonMsgId === m.id && (
+                              <div
+                                data-testid="feedback-reason-box"
+                                className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] max-w-md"
                               >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Retry</span>
-                              </button>
-
-                              {/* Bilingual TTS controls (Speak / Pause / Resume / Stop) */}
-                              <button
-                                type="button"
-                                data-testid="msg-tts-btn"
-                                onClick={() => {
-                                  if (speakingMsgId === m.id) {
-                                    if (speechState === 'paused') {
-                                      bilingualSpeechPlayer.resume();
-                                    } else {
-                                      bilingualSpeechPlayer.pause();
-                                    }
-                                  } else {
-                                    speakText(m.text, m.id);
+                                <input
+                                  type="text"
+                                  data-testid="feedback-reason-input"
+                                  value={feedbackReasonInput}
+                                  onChange={(e) =>
+                                    setFeedbackReasonInput(e.target.value)
                                   }
-                                }}
-                                className="msg-action"
-                                title={
-                                  speakingMsgId === m.id
-                                    ? speechState === 'paused'
-                                      ? 'Resume speech'
-                                      : 'Pause speech'
-                                    : 'Read aloud (Bengali & English)'
-                                }
-                              >
-                                {speakingMsgId === m.id && speechState === 'speaking' ? (
-                                  <>
-                                    <Pause className="w-3 h-3" />
-                                    <span>Pause</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Volume2 className="w-3 h-3" />
-                                    <span>
-                                      {speakingMsgId === m.id && speechState === 'paused'
-                                        ? 'Resume'
-                                        : 'Listen'}
-                                    </span>
-                                  </>
-                                )}
-                              </button>
-
-                              {speakingMsgId === m.id && (
+                                  placeholder="কেন উত্তরটি ভালো লাগেনি? (ঐচ্ছিক)"
+                                  className="flex-1 min-w-[180px] px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text)] outline-none"
+                                />
                                 <button
                                   type="button"
-                                  data-testid="msg-tts-stop-btn"
-                                  onClick={() => bilingualSpeechPlayer.stop()}
-                                  className="msg-action text-rose-400"
-                                  title="Stop speech"
-                                >
-                                  <Square className="w-2.5 h-2.5 fill-current" />
-                                  <span>Stop</span>
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (isGenerating) return;
-                                  const idx = activeChat.msgs.findIndex(
-                                    (x) => x.id === m.id
-                                  );
-                                  if (idx >= 0) {
-                                    setInputText(m.text);
-                                    setChats((prev) =>
-                                      prev.map((c) =>
-                                        c.id === activeChat.id
-                                          ? {
-                                              ...c,
-                                              msgs: c.msgs.slice(0, idx),
-                                            }
-                                          : c
-                                      )
-                                    );
+                                  data-testid="feedback-reason-submit"
+                                  onClick={() =>
+                                    void submitFeedback(
+                                      'down',
+                                      feedbackReasonInput
+                                    )
                                   }
-                                }}
-                                className="msg-action"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard?.writeText(m.text);
-                                  showToast('Copied');
-                                }}
-                                className="msg-action"
-                              >
-                                <Copy className="w-3 h-3" />
-                                <span>Copy</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
+                                  className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold cursor-pointer"
+                                >
+                                  জমা দিন
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFeedbackReasonMsgId(null)}
+                                  className="px-2 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
+                                >
+                                  বাতিল
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   );
@@ -6356,7 +6797,7 @@ export default function App() {
                           type="button"
                           onClick={() => {
                             setBottomModelMenuOpen(false);
-                            setSettingsTab('providers');
+                            setSettingsTab('connections');
                             setSettingsOpen(true);
                           }}
                           className="underline text-[var(--ink-muted)] hover:text-[var(--ink)] cursor-pointer"
@@ -6696,6 +7137,21 @@ export default function App() {
         onDeleteCloudData={handleDeleteCloudData}
         cloudConnected={Boolean(cloudClient && userId)}
         cloudUserEmail={auth.user?.email || undefined}
+        activeProjectId={activeChat.projectId || null}
+        onSelectActiveProject={(projId) => {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === activeChat.id
+                ? { ...c, projectId: projId || undefined }
+                : c
+            )
+          );
+          showToast(
+            projId
+              ? 'প্রজেক্ট এই চ্যাটে যুক্ত করা হয়েছে'
+              : 'প্রজেক্ট এই চ্যাট থেকে সরানো হয়েছে'
+          );
+        }}
       />
 
       {/* Image Lightbox */}

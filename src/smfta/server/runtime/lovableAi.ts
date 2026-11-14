@@ -32,6 +32,7 @@ export async function streamFromLovableAi(params: {
   requestedModel?: string | null;
   signal: AbortSignal;
   emitDelta: (delta: string) => void;
+  emitThinking?: (thinking: string) => void;
   maxTokens?: number;
   temperature?: number;
 }): Promise<{ ok: boolean; model: string; status?: number }> {
@@ -90,9 +91,20 @@ export async function streamFromLovableAi(params: {
         }
         try {
           const parsed = JSON.parse(data) as {
-            choices?: Array<{ delta?: { content?: string } }>;
+            choices?: Array<{
+              delta?: {
+                content?: string;
+                reasoning_content?: string;
+                reasoning?: string;
+              };
+            }>;
           };
-          const delta = parsed.choices?.[0]?.delta?.content;
+          const deltaObj = parsed.choices?.[0]?.delta;
+          const reasoning = deltaObj?.reasoning_content || deltaObj?.reasoning;
+          if (reasoning && params.emitThinking) {
+            params.emitThinking(reasoning);
+          }
+          const delta = deltaObj?.content;
           if (delta) {
             params.emitDelta(delta);
             emitted = true;

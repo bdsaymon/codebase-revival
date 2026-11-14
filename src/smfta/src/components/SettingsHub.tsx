@@ -1,19 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Activity,
+  Brain,
   ChevronLeft,
   ChevronRight,
-  Cpu,
-  Database,
-  Info,
+  FileText,
+  FolderKanban,
   KeyRound,
-  Layers,
   Plug,
   Search,
   Shield,
   Sliders,
   Sparkles,
-  Wrench,
   X,
 } from 'lucide-react';
 import {
@@ -65,28 +62,29 @@ import { clearTelemetryLogs, loadTelemetryLogs } from '../utils/telemetryLog';
 import { rotateKeystoreMasterKey } from '../utils/secureKeystore';
 import { APP_VERSION } from '../version';
 import { GeneralSection } from './settings/GeneralSection';
-import { ModelsSection } from './settings/ModelsSection';
-import { ProvidersApiSection } from './settings/ProvidersApiSection';
-import { McpIntegrationsSection } from './settings/McpIntegrationsSection';
-import { DatabaseBridgeSection } from './settings/DatabaseBridgeSection';
+import { InstructionsSection } from './settings/InstructionsSection';
 import { MemoryKnowledgeSection } from './settings/MemoryKnowledgeSection';
-import { ToolsCapabilitiesSection } from './settings/ToolsCapabilitiesSection';
-import { PerformanceAdvancedSection } from './settings/PerformanceAdvancedSection';
+import { ProjectsSection } from './settings/ProjectsSection';
+import { ModelsSection } from './settings/ModelsSection';
 import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
-import { AboutSystemSection } from './settings/AboutSystemSection';
+import { ConnectionsSection } from './settings/ConnectionsSection';
 
 export type SettingsTabId =
   | 'general'
+  | 'instructions'
+  | 'memory'
+  | 'projects'
   | 'models'
+  | 'data'
+  | 'connections'
+  // Legacy aliases preserved for backward compatibility
   | 'providers'
   | 'mcp'
   | 'database'
-  | 'memory'
   | 'tools'
   | 'performance'
   | 'security'
   | 'about'
-  // Legacy aliases preserved for backward compatibility
   | 'responses'
   | 'privacy'
   | 'account'
@@ -96,7 +94,6 @@ export type SettingsTabId =
   | 'shortcuts'
   | 'notifications'
   | 'accessibility'
-  | 'data'
   | 'integrations'
   | 'profile'
   | 'engine'
@@ -107,21 +104,17 @@ export type SettingsTabId =
 
 export type SectionId =
   | 'general'
-  | 'models'
-  | 'providers'
-  | 'mcp'
-  | 'database'
+  | 'instructions'
   | 'memory'
-  | 'tools'
-  | 'performance'
-  | 'security'
-  | 'about';
+  | 'projects'
+  | 'models'
+  | 'data'
+  | 'connections';
 
 interface CategoryDescriptor {
   id: SectionId;
   code: string;
   label: string;
-  group: 'Workspace' | 'AI Engine' | 'Knowledge & Tools' | 'System & Trust';
   hint: string;
   keywords: string[];
   icon: React.ComponentType<{ className?: string }>;
@@ -130,287 +123,100 @@ interface CategoryDescriptor {
 const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
   {
     id: 'general',
-    code: '01',
-    label: 'General',
-    group: 'Workspace',
-    hint: 'Appearance, RTL/LTR language, chat behavior, alerts',
-    keywords: [
-      'appearance',
-      'theme',
-      'dark',
-      'light',
-      'system',
-      'accent',
-      'layout',
-      'font',
-      'language',
-      'rtl',
-      'ltr',
-      'enter',
-      'scroll',
-      'streaming',
-      'notifications',
-      'sound',
-      'chime',
-    ],
+    code: 'ক',
+    label: 'সাধারণ (General)',
+    hint: 'থিম (Light/Dark/System), ভাষা, লেখার আকার, Enter চাপলে মেসেজ',
+    keywords: ['general', 'theme', 'dark', 'light', 'system', 'language', 'font', 'enter', 'সাধারণ', 'থিম', 'ভাষা'],
     icon: Sliders,
   },
   {
-    id: 'models',
-    code: '02',
-    label: 'AI Models',
-    group: 'AI Engine',
-    hint: 'Default/Fast/Reasoning/Vision slots, thinking, capabilities',
-    keywords: [
-      'model',
-      'fast',
-      'reasoning',
-      'vision',
-      'slot',
-      'thinking',
-      'effort',
-      'summary',
-      'response length',
-      'output format',
-      'json',
-      'markdown',
-      'context window',
-      'capabilities',
-    ],
-    icon: Sparkles,
-  },
-  {
-    id: 'providers',
-    code: '03',
-    label: 'Providers & API',
-    group: 'AI Engine',
-    hint: 'Custom providers, priority, keys, usage & reliability',
-    keywords: [
-      'provider',
-      'api',
-      'key',
-      'base url',
-      'headers',
-      'params',
-      'custom',
-      'test',
-      'priority',
-      'fallback',
-      'retry',
-      'timeout',
-      'usage',
-      'tokens',
-      'history',
-      'mercury',
-      'gemini',
-      'openai',
-      'anthropic',
-    ],
-    icon: Cpu,
-  },
-  {
-    id: 'mcp',
-    code: '04',
-    label: 'MCP & Integrations',
-    group: 'Knowledge & Tools',
-    hint: 'MCP servers, tool permissions, GitHub & cloud apps',
-    keywords: [
-      'mcp',
-      'server',
-      'sse',
-      'http',
-      'stdio',
-      'tools',
-      'permissions',
-      'allow',
-      'deny',
-      'approval',
-      'github',
-      'google',
-      'integrations',
-      'connectors',
-    ],
-    icon: Plug,
-  },
-  {
-    id: 'database',
-    code: '05',
-    label: 'Database & Bridge',
-    group: 'Knowledge & Tools',
-    hint: 'DB connections, data bridge sync, storage & backups',
-    keywords: [
-      'database',
-      'supabase',
-      'firebase',
-      'postgresql',
-      'mysql',
-      'mongodb',
-      'bridge',
-      'mapping',
-      'sync',
-      'storage',
-      'indexeddb',
-      'localstorage',
-      'backup',
-      'restore',
-      'rollback',
-      'export',
-    ],
-    icon: Database,
+    id: 'instructions',
+    code: 'খ',
+    label: 'Instructions',
+    hint: 'আপনাকে কী নামে ডাকব, Global instructions ও Style সিলেক্টর',
+    keywords: ['instructions', 'nickname', 'global', 'style', 'concise', 'explanatory', 'formal', 'custom', 'নির্দেশনা'],
+    icon: FileText,
   },
   {
     id: 'memory',
-    code: '06',
-    label: 'Memory & Knowledge',
-    group: 'Knowledge & Tools',
-    hint: 'Short/long-term memory, Knowledge Base & vector RAG',
-    keywords: [
-      'memory',
-      'retention',
-      'facts',
-      'knowledge',
-      'base',
-      'documents',
-      'upload',
-      'vector',
-      'rag',
-      'search',
-      'retrieval',
-      'chunks',
-      'instructions',
-      'persona',
-      'tone',
-    ],
-    icon: Layers,
+    code: 'গ',
+    label: 'Memory',
+    hint: 'চ্যাট থেকে মেমোরি তৈরি, দেখা, খোঁজা, এডিট, Pause ও Reset',
+    keywords: ['memory', 'facts', 'pause', 'reset', 'incognito', 'search', 'মেমোরি'],
+    icon: Brain,
   },
   {
-    id: 'tools',
-    code: '07',
-    label: 'Tools & Capabilities',
-    group: 'Knowledge & Tools',
-    hint: 'Web search, image studio, files, sandbox & voice',
-    keywords: [
-      'web search',
-      'image',
-      'generation',
-      'file',
-      'upload',
-      'code',
-      'interpreter',
-      'sandbox',
-      'voice',
-      'tts',
-      'audio',
-      'capabilities',
-    ],
-    icon: Wrench,
+    id: 'projects',
+    code: 'ঘ',
+    label: 'Projects',
+    hint: 'নতুন প্রজেক্ট তৈরি, প্রজেক্টের নির্দেশনা, এডিট ও ডিলিট',
+    keywords: ['projects', 'project', 'workspace', 'প্রজেক্ট'],
+    icon: FolderKanban,
   },
   {
-    id: 'performance',
-    code: '08',
-    label: 'Performance & Advanced',
-    group: 'System & Trust',
-    hint: 'Sampling params, concurrency, compression & diagnostics',
-    keywords: [
-      'temperature',
-      'topp',
-      'topk',
-      'stop',
-      'max tokens',
-      'concurrency',
-      'cache',
-      'compression',
-      'context',
-      'developer',
-      'diagnostics',
-      'telemetry',
-      'logs',
-    ],
-    icon: Activity,
+    id: 'models',
+    code: 'ঙ',
+    label: 'মডেল ও থিংকিং',
+    hint: 'বর্তমান মডেল, Thinking চালু, পরিমাণ (Low/Medium/High), লাইভ থিংকিং ও দৈর্ঘ্য',
+    keywords: ['models', 'thinking', 'live', 'effort', 'low', 'medium', 'high', 'length', 'মডেল', 'থিংকিং'],
+    icon: Sparkles,
   },
   {
-    id: 'security',
-    code: '09',
-    label: 'Security & Privacy',
-    group: 'System & Trust',
-    hint: 'AES-GCM keystore, key rotation, privacy mode & data controls',
-    keywords: [
-      'security',
-      'encryption',
-      'aes',
-      'keystore',
-      'rotate',
-      'privacy',
-      'incognito',
-      'telemetry',
-      'opt out',
-      'retention',
-      'session',
-      'delete',
-      'clear',
-      'export',
-    ],
+    id: 'data',
+    code: 'চ',
+    label: 'ডেটা ও প্রাইভেসি',
+    hint: 'সব ডেটা এক্সপোর্ট (JSON), চ্যাট হিস্ট্রি মুছে ফেলা ও সব ডেটা মুছে ফেলা',
+    keywords: ['data', 'privacy', 'security', 'export', 'json', 'delete', 'clear', 'history', 'ডেটা', 'প্রাইভেসি'],
     icon: Shield,
   },
   {
-    id: 'about',
-    code: '10',
-    label: 'About & System',
-    group: 'System & Trust',
-    hint: 'Version info, live health probes, edge runtime & changelog',
-    keywords: [
-      'about',
-      'version',
-      'health',
-      'status',
-      'edge',
-      'cloudflare',
-      'changelog',
-      'whats new',
-      'support',
-    ],
-    icon: Info,
+    id: 'connections',
+    code: 'ছ',
+    label: 'কানেকশন (Connections)',
+    hint: 'GitHub, Supabase, Vercel সরাসরি কানেকশন এবং Advanced প্রোভাইডার ও API কী',
+    keywords: ['connections', 'oauth', 'github', 'supabase', 'vercel', 'providers', 'api', 'key', 'advanced', 'কানেকশন'],
+    icon: Plug,
   },
 ];
 
 function normalizeTab(t?: SettingsTabId): SectionId {
   switch (t) {
+    case 'instructions':
+    case 'personalization':
+    case 'profile':
+      return 'instructions';
+    case 'memory':
+      return 'memory';
+    case 'projects':
+      return 'projects';
     case 'models':
     case 'ai':
     case 'responses':
+    case 'performance':
+    case 'tools':
       return 'models';
+    case 'data':
+    case 'security':
+    case 'privacy':
+    case 'database':
+      return 'data';
+    case 'connections':
     case 'providers':
-    case 'engine':
-    case 'weights':
-    case 'upgrade':
-      return 'providers';
     case 'mcp':
     case 'connectors':
     case 'integrations':
+    case 'engine':
+    case 'weights':
+    case 'upgrade':
     case 'self':
-      return 'mcp';
-    case 'database':
-    case 'data':
-      return 'database';
-    case 'memory':
-    case 'personalization':
-      return 'memory';
-    case 'tools':
-      return 'tools';
-    case 'performance':
-      return 'performance';
-    case 'security':
-    case 'privacy':
-      return 'security';
-    case 'about':
-      return 'about';
+      return 'connections';
     case 'general':
     case 'appearance':
     case 'account':
-    case 'profile':
     case 'notifications':
     case 'accessibility':
     case 'shortcuts':
+    case 'about':
     default:
       return 'general';
   }
@@ -472,6 +278,8 @@ export interface SettingsModalProps {
   onDeleteCloudData?: () => Promise<void>;
   cloudConnected?: boolean;
   cloudUserEmail?: string;
+  activeProjectId?: string;
+  onSelectActiveProject?: (projectId: string | undefined) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -519,6 +327,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeleteCloudData,
   cloudConnected,
   cloudUserEmail,
+  activeProjectId,
+  onSelectActiveProject,
 }) => {
   const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
@@ -1413,18 +1223,93 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             notify={notify}
           />
         );
+      case 'instructions':
+        return (
+          <InstructionsSection
+            draft={draft}
+            profileName={profileName}
+            onNameChange={handleNameChange}
+            patch={patch}
+          />
+        );
+      case 'memory':
+        return (
+          <MemoryKnowledgeSection
+            draft={draft}
+            patch={patch}
+            memory={memory}
+            onUpdateMemory={onUpdateMemory}
+            onClearMemory={onClearMemory}
+            knowledgeDocs={effectiveKnowledgeDocs}
+            onUpdateKnowledgeDocs={handleUpdateKnowledgeDocs}
+            notify={notify}
+          />
+        );
+      case 'projects':
+        return (
+          <ProjectsSection
+            draft={draft}
+            patch={patch}
+            activeProjectId={activeProjectId}
+            onSelectActiveProject={onSelectActiveProject}
+            notify={notify}
+          />
+        );
       case 'models':
         return (
           <ModelsSection
             draft={draft}
             savedProfiles={localProfiles}
             activeProfile={activeProfile}
+            onActivateProfile={activateSavedProfile}
+            onUpdateProfileModel={(profId, modId) =>
+              updateSavedProfileField(profId, { externalModel: modId })
+            }
             patch={patch}
           />
         );
-      case 'providers':
+      case 'data':
         return (
-          <ProvidersApiSection
+          <SecurityPrivacySection
+            draft={draft}
+            patch={patch}
+            savedProfiles={localProfiles}
+            mcpServers={effectiveMcpServers}
+            dbConnections={effectiveDbConnections}
+            keystoreEphemeral={keystoreEphemeral}
+            onRotateKeystoreKey={handleRotateKeystore}
+            onExportBackup={onExportBackup}
+            onClearChatHistory={() => {
+              if (onClearChatHistory) {
+                onClearChatHistory();
+              } else {
+                try {
+                  localStorage.removeItem('smfta_chats');
+                } catch {
+                  // ignore
+                }
+                notify?.('চ্যাট হিস্ট্রি মুছে ফেলা হয়েছে।');
+              }
+            }}
+            onDeleteCloudData={onDeleteCloudData}
+            onResetSettings={onResetSettings}
+            onClearAllData={onClearAllData}
+            cloudConnected={cloudConnected}
+            cloudUserEmail={cloudUserEmail}
+          />
+        );
+      case 'connections':
+        return (
+          <ConnectionsSection
+            connections={connections}
+            onUpdateConnections={onUpdateConnections}
+            notify={notify}
+            defaultOpenAdvanced={
+              initialTab === 'providers' ||
+              initialTab === 'engine' ||
+              initialTab === 'weights' ||
+              initialTab === 'upgrade'
+            }
             draft={draft}
             patch={patch}
             localProfiles={localProfiles}
@@ -1497,101 +1382,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             usageToday={usageToday}
           />
         );
-      case 'mcp':
-        return (
-          <McpIntegrationsSection
-            draft={draft}
-            patch={patch}
-            mcpServers={effectiveMcpServers}
-            onUpdateMcpServers={handleUpdateMcpServers}
-            connections={connections}
-            onUpdateConnections={onUpdateConnections}
-            notes={notes}
-            notify={notify}
-          />
-        );
-      case 'database':
-        return (
-          <DatabaseBridgeSection
-            draft={draft}
-            patch={patch}
-            dbConnections={effectiveDbConnections}
-            onUpdateDbConnections={handleUpdateDbConnections}
-            dataBridgeConfig={effectiveBridgeConfig}
-            onUpdateDataBridgeConfig={handleUpdateBridgeConfig}
-            onExportBackup={onExportBackup}
-            onImportBackup={onImportBackup}
-            onSaveRollbackPoint={onSaveRollbackPoint}
-            onRollback={onRollback}
-            hasRollbackPoint={hasRollbackPoint}
-            onBackupToGithub={onBackupToGithub}
-            cloudConnected={cloudConnected}
-            notify={notify}
-          />
-        );
-      case 'memory':
-        return (
-          <MemoryKnowledgeSection
-            draft={draft}
-            patch={patch}
-            memory={memory}
-            onUpdateMemory={onUpdateMemory}
-            onClearMemory={onClearMemory}
-            knowledgeDocs={effectiveKnowledgeDocs}
-            onUpdateKnowledgeDocs={handleUpdateKnowledgeDocs}
-            notify={notify}
-          />
-        );
-      case 'tools':
-        return <ToolsCapabilitiesSection draft={draft} patch={patch} />;
-      case 'performance':
-        return (
-          <PerformanceAdvancedSection
-            draft={draft}
-            patch={patch}
-            telemetryLogs={effectiveTelemetryLogs}
-            onClearTelemetryLogs={handleClearLogs}
-            notify={notify}
-          />
-        );
-      case 'security':
-        return (
-          <SecurityPrivacySection
-            draft={draft}
-            patch={patch}
-            savedProfiles={localProfiles}
-            mcpServers={effectiveMcpServers}
-            dbConnections={effectiveDbConnections}
-            keystoreEphemeral={keystoreEphemeral}
-            onRotateKeystoreKey={handleRotateKeystore}
-            onExportBackup={onExportBackup}
-            onClearChatHistory={() => {
-              if (onClearChatHistory) {
-                onClearChatHistory();
-              } else {
-                try {
-                  localStorage.removeItem('smfta_chats');
-                } catch {
-                  // ignore
-                }
-                notify?.('Chat history cleared.');
-              }
-            }}
-            onDeleteCloudData={onDeleteCloudData}
-            onResetSettings={onResetSettings}
-            onClearAllData={onClearAllData}
-            cloudConnected={cloudConnected}
-            cloudUserEmail={cloudUserEmail}
-          />
-        );
-      case 'about':
-        return (
-          <AboutSystemSection
-            onOpenWhatsNew={onOpenWhatsNew}
-            keystoreEphemeral={keystoreEphemeral}
-            cloudConnected={cloudConnected}
-          />
-        );
     }
   };
 
@@ -1603,7 +1393,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         data-testid={testId}
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
-        placeholder="Search settings (MCP, RTL, vector)..."
+        placeholder="সেটিংস খুঁজুন (থিম, মেমোরি, থিংকিং, OAuth)..."
         aria-label="Search settings categories"
         className="w-full bg-transparent text-xs text-[var(--ink)] placeholder:text-[var(--ink-dim)] focus:outline-none"
       />
@@ -1621,79 +1411,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
 
   const renderNavContent = (isMobileList: boolean) => {
-    const groups: Array<CategoryDescriptor['group']> = [
-      'Workspace',
-      'AI Engine',
-      'Knowledge & Tools',
-      'System & Trust',
-    ];
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         {renderSearchBar(isMobileList ? 'settings-search-mobile' : 'settings-search-input')}
 
         {filteredCategories.length === 0 ? (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-5 text-center text-xs text-[var(--text-3)]">
-            No settings match &ldquo;{searchQuery}&rdquo;.
+            &ldquo;{searchQuery}&rdquo; দিয়ে কোনো সেটিংস পাওয়া যায়নি।
           </div>
         ) : (
-          groups.map((grp) => {
-            const items = filteredCategories.filter((c) => c.group === grp);
-            if (items.length === 0) return null;
-            return (
-              <div key={grp} className="space-y-1">
-                <div className="px-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-[var(--ink-dim)]">
-                  {grp}
-                </div>
-                <div className={isMobileList ? 'ref-settings-group' : 'space-y-0.5'}>
-                  {items.map((cat) => {
-                    const Icon = cat.icon;
-                    const isActive = tab === cat.id;
-                    if (isMobileList) {
-                      return (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          data-testid={`settings-mobile-tab-${cat.id}`}
-                          onClick={() => openSection(cat.id)}
-                          className="ref-settings-row"
-                        >
-                          <span className="flex items-center gap-3 min-w-0">
-                            <span className="ref-settings-row-icon">
-                              <Icon className="w-4 h-4" />
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-sm font-semibold text-[var(--ink)] truncate">
-                                {cat.code}. {cat.label}
-                              </span>
-                              <span className="block text-xs text-[var(--ink-dim)] truncate">
-                                {cat.hint}
-                              </span>
-                            </span>
-                          </span>
-                          <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
-                        </button>
-                      );
-                    }
-                    return (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        data-testid={`settings-tab-${cat.id}`}
-                        onClick={() => openSection(cat.id)}
-                        className={`fs-settings-nav-item ${isActive ? 'is-active' : ''}`}
-                      >
-                        <Icon className="w-4 h-4 shrink-0" />
-                        <span className="font-mono text-[10px] opacity-65 shrink-0">
-                          {cat.code}
+          <div className={isMobileList ? 'ref-settings-group' : 'space-y-1'}>
+            {filteredCategories.map((cat) => {
+              const Icon = cat.icon;
+              const isActive = tab === cat.id;
+              if (isMobileList) {
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    data-testid={`settings-mobile-tab-${cat.id}`}
+                    onClick={() => openSection(cat.id)}
+                    className="ref-settings-row"
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <span className="ref-settings-row-icon">
+                        <Icon className="w-4 h-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-[var(--ink)] truncate">
+                          ({cat.code}) {cat.label}
                         </span>
-                        <span className="truncate flex-1 text-left">{cat.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })
+                        <span className="block text-xs text-[var(--ink-dim)] truncate">
+                          {cat.hint}
+                        </span>
+                      </span>
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
+                  </button>
+                );
+              }
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  data-testid={`settings-tab-${cat.id}`}
+                  onClick={() => openSection(cat.id)}
+                  className={`fs-settings-nav-item ${isActive ? 'is-active' : ''}`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="font-mono text-[11px] opacity-70 shrink-0">
+                    ({cat.code})
+                  </span>
+                  <span className="truncate flex-1 text-left">{cat.label}</span>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     );

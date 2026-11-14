@@ -151,7 +151,7 @@ export function toOpenAICompatiblePayload(params: {
     stream: Boolean(params.stream),
   };
 
-  if (/mercury/i.test(params.modelId)) {
+  if (/mercury/i.test(params.modelId) && params.thinkingMode !== 'off') {
     payload.reasoning_effort =
       params.thinkingMode === 'high' || params.thinkingMode === 'medium'
         ? params.thinkingMode

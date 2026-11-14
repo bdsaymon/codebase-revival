@@ -183,27 +183,51 @@ function clearProviderTokenEncrypted(provider: IntegrationProviderId, userId: st
   }
 }
 
+function resolveBaseOrigin(req: Request): string {
+  const appUrl = (process.env.APP_URL || '').trim();
+  if (appUrl) {
+    return appUrl.replace(/\/+$/, '');
+  }
+  const host = req.get('host') || 'localhost:3000';
+  const proto = req.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+  return `${proto}://${host}`;
+}
+
 /**
  * Normalizes redirect URI based on APP_URL or request origin per OAuth skill.
  */
 function resolveRedirectUri(req: Request): string {
-  const appUrl = (process.env.APP_URL || '').trim();
-  if (appUrl) {
-    return `${appUrl.replace(/\/+$/, '')}/auth/callback`;
-  }
-  const host = req.get('host') || 'localhost:3000';
-  const proto = req.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
-  return `${proto}://${host}/auth/callback`;
+  return `${resolveBaseOrigin(req)}/auth/callback`;
 }
 
-export const GOOGLE_REQUIRED_SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/documents',
-  'https://www.googleapis.com/auth/spreadsheets',
-  'https://www.googleapis.com/auth/userinfo.email',
-  'https://www.googleapis.com/auth/userinfo.profile',
-];
+/**
+ * Resolves per-provider callback URI (/api/auth/:provider/callback) per §7.
+ */
+function resolveProviderCallbackUri(
+  req: Request,
+  provider: IntegrationProviderId
+): string {
+  if (provider === 'github' || provider === 'supabase' || provider === 'vercel') {
+    return `${resolveBaseOrigin(req)}/api/auth/${provider}/callback`;
+  }
+  return resolveRedirectUri(req);
+}
+
+export const OAUTH_MINIMAL_SCOPES: Record<IntegrationProviderId, string[]> = {
+  github: ['read:user', 'user:email', 'public_repo'],
+  supabase: ['organizations:read', 'projects:read', 'database:read'],
+  vercel: ['user:read', 'projects:read', 'deployments:read'],
+  google: [
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/documents',
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+  ],
+};
+
+export const GOOGLE_REQUIRED_SCOPES = OAUTH_MINIMAL_SCOPES.google;
 
 function resolveOAuthAppCredentials(
   provider: IntegrationProviderId,
@@ -295,6 +319,8 @@ oauthRouter.get('/api/oauth/config-status', (req: Request, res: Response) => {
         oauthFlowReady: Boolean(ghCreds.clientId && ghCreds.clientSecret),
         storedTokenLast4: getStoredLast4('github'),
         requiredEnvVars: ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'],
+        callbackUrl: resolveProviderCallbackUri(req, 'github'),
+        scopes: OAUTH_MINIMAL_SCOPES.github,
       },
       vercel: {
         clientIdConfigured: Boolean(vcCreds.clientId),
@@ -302,6 +328,8 @@ oauthRouter.get('/api/oauth/config-status', (req: Request, res: Response) => {
         oauthFlowReady: Boolean(vcCreds.clientId && vcCreds.clientSecret),
         storedTokenLast4: getStoredLast4('vercel'),
         requiredEnvVars: ['VERCEL_CLIENT_ID', 'VERCEL_CLIENT_SECRET'],
+        callbackUrl: resolveProviderCallbackUri(req, 'vercel'),
+        scopes: OAUTH_MINIMAL_SCOPES.vercel,
       },
       supabase: {
         clientIdConfigured: Boolean(sbCreds.clientId),
@@ -310,6 +338,8 @@ oauthRouter.get('/api/oauth/config-status', (req: Request, res: Response) => {
         oauthFlowReady: Boolean(sbCreds.clientId && sbCreds.clientSecret),
         storedTokenLast4: getStoredLast4('supabase'),
         requiredEnvVars: ['SUPABASE_CLIENT_ID', 'SUPABASE_CLIENT_SECRET'],
+        callbackUrl: resolveProviderCallbackUri(req, 'supabase'),
+        scopes: OAUTH_MINIMAL_SCOPES.supabase,
       },
       google: {
         clientIdConfigured: Boolean(ggCreds.clientId),
@@ -317,6 +347,8 @@ oauthRouter.get('/api/oauth/config-status', (req: Request, res: Response) => {
         oauthFlowReady: Boolean(ggCreds.clientId),
         storedTokenLast4: getStoredLast4('google'),
         requiredEnvVars: ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+        callbackUrl: resolveProviderCallbackUri(req, 'google'),
+        scopes: OAUTH_MINIMAL_SCOPES.google,
       },
     },
   });
@@ -376,6 +408,9 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
   const { codeVerifier, codeChallenge } = generatePkcePair();
   const userId = req.userId || 'anonymous';
 
+  const requestedScope = typeof req.query.scope === 'string' ? req.query.scope.trim() : '';
+  const providerCallbackUri = resolveProviderCallbackUri(req, provider);
+
   if (provider === 'github') {
     const { clientId } = resolveOAuthAppCredentials('github', customClientId);
     if (!clientId) {
@@ -383,24 +418,26 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
         ok: false,
         provider: 'github',
         requiresCredentials: true,
-        redirectUri,
+        redirectUri: providerCallbackUri,
+        scopes: OAUTH_MINIMAL_SCOPES.github,
         missingEnvVars: ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET'],
         message:
-          'GITHUB_CLIENT_ID environment variable is not configured on the server. Configure GITHUB_CLIENT_ID & GITHUB_CLIENT_SECRET, or connect immediately with a GitHub Personal Access Token (repo, read:user scopes).',
+          'সার্ভারে GITHUB_CLIENT_ID ও GITHUB_CLIENT_SECRET কনফিগার করা নেই। সরাসরি OAuth চালু করতে সার্ভার এনভায়রনমেন্টে এগুলো যোগ করুন অথবা নিচে Personal Access Token ব্যবহার করুন।',
       });
     }
+    const ghScope = requestedScope || OAUTH_MINIMAL_SCOPES.github.join(' ');
     oauthStateStore.set(state, {
       provider: 'github',
       codeVerifier,
-      redirectUri,
+      redirectUri: providerCallbackUri,
       createdAt: Date.now(),
       userId,
       customClientId: clientId,
     });
     const params = new URLSearchParams({
       client_id: clientId,
-      redirect_uri: redirectUri,
-      scope: 'repo read:user user:email',
+      redirect_uri: providerCallbackUri,
+      scope: ghScope,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -409,7 +446,8 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
       ok: true,
       provider: 'github',
       url: `https://github.com/login/oauth/authorize?${params.toString()}`,
-      redirectUri,
+      redirectUri: providerCallbackUri,
+      scopes: OAUTH_MINIMAL_SCOPES.github,
       state,
     });
   }
@@ -466,23 +504,24 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
         ok: false,
         provider: 'supabase',
         requiresCredentials: true,
-        redirectUri,
+        redirectUri: providerCallbackUri,
+        scopes: OAUTH_MINIMAL_SCOPES.supabase,
         missingEnvVars: ['SUPABASE_CLIENT_ID', 'SUPABASE_CLIENT_SECRET'],
         message:
-          'SUPABASE_CLIENT_ID is not configured. Connect using your Supabase Project URL & API Key or Management Personal Access Token directly.',
+          'সার্ভারে SUPABASE_CLIENT_ID ও SUPABASE_CLIENT_SECRET কনফিগার করা নেই। সরাসরি OAuth চালু করতে সার্ভার এনভায়রনমেন্টে এগুলো যোগ করুন অথবা নিচে Access Token ব্যবহার করুন।',
       });
     }
     oauthStateStore.set(state, {
       provider: 'supabase',
       codeVerifier,
-      redirectUri,
+      redirectUri: providerCallbackUri,
       createdAt: Date.now(),
       userId,
       customClientId: clientId,
     });
     const params = new URLSearchParams({
       client_id: clientId,
-      redirect_uri: redirectUri,
+      redirect_uri: providerCallbackUri,
       response_type: 'code',
       state,
       code_challenge: codeChallenge,
@@ -492,7 +531,8 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
       ok: true,
       provider: 'supabase',
       url: `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`,
-      redirectUri,
+      redirectUri: providerCallbackUri,
+      scopes: OAUTH_MINIMAL_SCOPES.supabase,
       state,
     });
   }
@@ -504,23 +544,24 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
         ok: false,
         provider: 'vercel',
         requiresCredentials: true,
-        redirectUri,
+        redirectUri: providerCallbackUri,
+        scopes: OAUTH_MINIMAL_SCOPES.vercel,
         missingEnvVars: ['VERCEL_CLIENT_ID', 'VERCEL_CLIENT_SECRET'],
         message:
-          'VERCEL_CLIENT_ID is not configured. Connect using your Vercel Access Token directly or configure VERCEL_CLIENT_ID & VERCEL_CLIENT_SECRET.',
+          'সার্ভারে VERCEL_CLIENT_ID ও VERCEL_CLIENT_SECRET কনফিগার করা নেই। সরাসরি OAuth চালু করতে সার্ভার এনভায়রনমেন্টে এগুলো যোগ করুন অথবা নিচে Access Token ব্যবহার করুন।',
       });
     }
     oauthStateStore.set(state, {
       provider: 'vercel',
       codeVerifier,
-      redirectUri,
+      redirectUri: providerCallbackUri,
       createdAt: Date.now(),
       userId,
       customClientId: clientId,
     });
     const params = new URLSearchParams({
       client_id: clientId,
-      redirect_uri: redirectUri,
+      redirect_uri: providerCallbackUri,
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
@@ -529,7 +570,8 @@ oauthRouter.get('/api/oauth/url', (req: Request, res: Response) => {
       ok: true,
       provider: 'vercel',
       url: `https://vercel.com/oauth/authorize?${params.toString()}`,
-      redirectUri,
+      redirectUri: providerCallbackUri,
+      scopes: OAUTH_MINIMAL_SCOPES.vercel,
       state,
     });
   }
@@ -896,6 +938,8 @@ const oauthCallbackHandler = async (req: Request, res: Response) => {
 
 oauthRouter.get('/auth/callback', oauthCallbackHandler);
 oauthRouter.get('/auth/callback/', oauthCallbackHandler);
+oauthRouter.get('/api/auth/:provider/callback', oauthCallbackHandler);
+oauthRouter.get('/api/auth/:provider/callback/', oauthCallbackHandler);
 
 /**
  * 2b. Encrypted Session Storage, Refresh & Disconnect Endpoints
@@ -1326,30 +1370,30 @@ oauthRouter.post('/api/integrations/verify', async (req: Request, res: Response)
         {
           id: 'private_repo',
           label: 'Private Repository Access',
-          required: true,
+          required: false,
           granted: hasRepoScope,
           detail: hasRepoScope
             ? `Granted (${privateCount} private repos in recent list)`
-            : 'Missing "repo" scope for private repositories',
+            : 'Public repositories only (minimal scope)',
         },
         {
           id: 'file_read',
           label: 'Repository Contents: Read',
-          required: true,
+          required: false,
           granted: fileReadGranted,
           detail: fileReadDetail,
         },
         {
           id: 'file_write',
           label: 'Repository Contents & Branches: Write',
-          required: true,
+          required: false,
           granted: fileWriteGranted,
           detail: fileWriteDetail,
         },
         {
           id: 'pull_requests',
           label: 'Pull Requests & Issues: Read/Write',
-          required: true,
+          required: false,
           granted: prGranted,
           detail: prDetail,
         },
@@ -1357,8 +1401,6 @@ oauthRouter.post('/api/integrations/verify', async (req: Request, res: Response)
 
       const allGranted = permissions.every((p) => !p.required || p.granted);
       const missingScopes: string[] = [];
-      if (!hasRepoScope) missingScopes.push('repo');
-      if (!fileWriteGranted && !missingScopes.includes('repo')) missingScopes.push('contents:write');
 
       const availableServices: string[] = ['Account Profile'];
       if (repoListGranted) availableServices.push('Repository Explorer');

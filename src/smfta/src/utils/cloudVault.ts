@@ -1874,6 +1874,8 @@ export interface OAuthConfigStatusResponse {
       oauthFlowReady: boolean;
       storedTokenLast4: string | null;
       requiredEnvVars: string[];
+      callbackUrl?: string;
+      scopes?: string[];
     }
   >;
 }

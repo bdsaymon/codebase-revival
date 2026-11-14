@@ -37,7 +37,9 @@ import { parseCustomParamsSafe } from '../engine/adapters';
 import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from '../engine/defaults';
 import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
+import { supportsNativeThinking } from '../engine/thinking';
 import { mergeContinuationText } from '../../src/utils/streamGuard';
+import { parseExtractedMemoriesJson, isSensitiveFact } from '../../src/utils/memoryBank';
 import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
 import {
   isV2ModelId,
@@ -666,6 +668,18 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
 
+  const emitStatus = (status: string, step: string, detail?: string) => {
+    if (!status || clientClosed || res.writableEnded) return;
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'status',
+        status,
+        step,
+        detail: detail || status,
+      })}\n\n`
+    );
+  };
+
   const emitDelta = (delta: string) => {
     if (!delta || clientClosed || res.writableEnded) return;
     const cleanDelta = sanitizeProprietaryOutput(delta);
@@ -676,7 +690,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     fullReplyAccumulator += cleanDelta;
     res.write(
       `data: ${JSON.stringify({
-        type: 'delta',
+        type: 'text',
         text: cleanDelta,
         delta: cleanDelta,
       })}\n\n`
@@ -753,6 +767,16 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     firebaseEmailVerified = false,
     v2TestingBypass = false,
     v2QuotaConfig,
+    nickname = '',
+    globalInstructions = '',
+    projectInstructions = '',
+    projectName = '',
+    responseStyle = 'normal',
+    customStyleSample = '',
+    responseLength = 'medium',
+    memoryPaused = false,
+    incognito = false,
+    thinkingEnabled = true,
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
@@ -766,11 +790,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     typeof topK === 'number' && Number.isFinite(topK) && topK > 0
       ? Math.min(200, Math.max(1, Math.round(topK)))
       : undefined;
-  const effectiveThinkingMode: 'off' | 'low' | 'medium' | 'high' =
-    thinkingMode === 'off' ||
-    thinkingMode === 'low' ||
-    thinkingMode === 'medium' ||
-    thinkingMode === 'high'
+  const requestedThinkingMode: 'off' | 'low' | 'medium' | 'high' =
+    thinkingEnabled === false || thinkingMode === 'off'
+      ? 'off'
+      : thinkingMode === 'low' ||
+        thinkingMode === 'medium' ||
+        thinkingMode === 'high'
       ? thinkingMode
       : 'medium';
   const perAttemptTimeoutMs =
@@ -809,6 +834,36 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   );
 
   const activeCustomModelName = String(externalModel || '').trim();
+  const modelSupportsThinking = supportsNativeThinking(
+    effectiveProvider,
+    activeCustomModelName
+  );
+  const effectiveThinkingMode: 'off' | 'low' | 'medium' | 'high' =
+    requestedThinkingMode !== 'off' && modelSupportsThinking
+      ? requestedThinkingMode
+      : 'off';
+
+  const emitThinking = (thinkingChunk: string) => {
+    if (
+      !thinkingChunk ||
+      effectiveThinkingMode === 'off' ||
+      clientClosed ||
+      res.writableEnded
+    ) {
+      return;
+    }
+    const cleanThinking = sanitizeProprietaryOutput(thinkingChunk);
+    if (!cleanThinking) return;
+    if (firstTokenPerf === null) {
+      firstTokenPerf = performance.now();
+    }
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'thinking',
+        thinking: cleanThinking,
+      })}\n\n`
+    );
+  };
   const RECENT_HISTORY_WINDOW = 40;
   const normalizedHistory: Array<{
     role: string;
@@ -941,6 +996,18 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       return;
     }
 
+    const allowMemoryForRequest =
+      Boolean(autoMemory) && !memoryPaused && !incognito;
+    if (allowMemoryForRequest && memList.length > 0) {
+      emitStatus('মেমোরি দেখছি', 'memory_lookup', 'Using saved memories');
+    }
+    if (
+      lastUserImgs.length > 0 ||
+      (typeof projectContext === 'string' && projectContext.trim().length > 0)
+    ) {
+      emitStatus('ফাইল পড়ছি', 'file_read', 'Reading attached files & context');
+    }
+
     const v2SystemInstruction = buildSystemInstruction({
       mode: mode as 'fast' | 'balanced' | 'power',
       style: style as 'concise' | 'detailed',
@@ -951,8 +1018,35 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       responseTone,
       codingPrefs,
       memory: memList,
+      autoMemory: Boolean(autoMemory),
+      memoryPaused: Boolean(memoryPaused),
+      incognito: Boolean(incognito),
       activeWidgets,
       userName,
+      nickname: typeof nickname === 'string' ? nickname : undefined,
+      globalInstructions:
+        typeof globalInstructions === 'string' ? globalInstructions : undefined,
+      projectInstructions:
+        typeof projectInstructions === 'string'
+          ? projectInstructions
+          : undefined,
+      projectName: typeof projectName === 'string' ? projectName : undefined,
+      responseStyle:
+        responseStyle === 'normal' ||
+        responseStyle === 'concise' ||
+        responseStyle === 'explanatory' ||
+        responseStyle === 'formal' ||
+        responseStyle === 'custom'
+          ? responseStyle
+          : undefined,
+      customStyleSample:
+        typeof customStyleSample === 'string' ? customStyleSample : undefined,
+      responseLength:
+        responseLength === 'short' ||
+        responseLength === 'medium' ||
+        responseLength === 'detailed'
+          ? responseLength
+          : undefined,
       chatHistorySummary: effectiveHistorySummary,
       projectContext:
         typeof projectContext === 'string' ? projectContext.slice(0, 60_000) : '',
@@ -973,6 +1067,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             ],
       signal: upstreamAbortController.signal,
       emitDelta,
+      emitThinking,
+      thinkingEnabled: effectiveThinkingMode !== 'off',
+      thinkingEffort:
+        effectiveThinkingMode === 'off' ? 'low' : effectiveThinkingMode,
     });
 
     if (!v2StreamRes.ok && !clientClosed) {
@@ -1073,6 +1171,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   const webSearchPermitted =
     webToolAllowed && shouldAutoTriggerLiveWeb(lastUserText, Boolean(webSearch));
 
+  const allowMemoryForV1 =
+    Boolean(autoMemory) && !memoryPaused && !incognito;
+  if (allowMemoryForV1 && Array.isArray(memory) && memory.length > 0) {
+    emitStatus('মেমোরি দেখছি', 'memory_lookup', 'Using saved memories');
+  }
+
   if (normalizedHistory.length > 1 || effectiveHistorySummary.length > 0) {
     emitEvent({
       type: 'progress',
@@ -1082,6 +1186,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   }
 
   if (lastUserImgs.length > 0) {
+    emitStatus('ফাইল পড়ছি', 'file_read', `Analyzing ${lastUserImgs.length} attached image${lastUserImgs.length > 1 ? 's' : ''}`);
     emitEvent({
       type: 'progress',
       step: 'image_analysis',
@@ -1091,6 +1196,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     typeof projectContext === 'string' &&
     projectContext.trim().length > 0
   ) {
+    emitStatus('ফাইল পড়ছি', 'file_read', 'Reading workspace & document context');
     if (projectContext.includes('[LIVE GITHUB INTEGRATION')) {
       emitEvent({
         type: 'progress',
@@ -1120,6 +1226,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   let webGroundingBlock = '';
   let groundedSources: Array<{ title: string; url: string }> = [];
   if (webSearchPermitted && lastUserText.length >= 2) {
+    emitStatus('ওয়েবে খুঁজছি', 'web_search', 'Searching live web sources');
     emitEvent({
       type: 'progress',
       step: 'web_search',
@@ -1151,10 +1258,34 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     codingPrefs: String(codingPrefs || ''),
     memory,
     autoMemory: Boolean(autoMemory),
+    memoryPaused: Boolean(memoryPaused),
+    incognito: Boolean(incognito),
     activeWidgets: Array.isArray(activeWidgets)
       ? activeWidgets.map((w: unknown) => String(w || '')).filter(Boolean)
       : undefined,
     userName,
+    nickname: typeof nickname === 'string' ? nickname : undefined,
+    globalInstructions:
+      typeof globalInstructions === 'string' ? globalInstructions : undefined,
+    projectInstructions:
+      typeof projectInstructions === 'string' ? projectInstructions : undefined,
+    projectName: typeof projectName === 'string' ? projectName : undefined,
+    responseStyle:
+      responseStyle === 'normal' ||
+      responseStyle === 'concise' ||
+      responseStyle === 'explanatory' ||
+      responseStyle === 'formal' ||
+      responseStyle === 'custom'
+        ? responseStyle
+        : undefined,
+    customStyleSample:
+      typeof customStyleSample === 'string' ? customStyleSample : undefined,
+    responseLength:
+      responseLength === 'short' ||
+      responseLength === 'medium' ||
+      responseLength === 'detailed'
+        ? responseLength
+        : undefined,
     workPersona,
     webSearch: webSearchPermitted,
     customModelName: activeCustomModelName,
@@ -1349,6 +1480,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           onToken: (delta) => {
             emitDelta(delta);
           },
+          onThinking: (thinkingChunk) => {
+            emitThinking(thinkingChunk);
+          },
           onReset: () => {
             emitReset();
           },
@@ -1464,6 +1598,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       requestedModel: activeCustomModelName,
       signal: upstreamAbortController.signal,
       emitDelta,
+      emitThinking,
       maxTokens: effectiveMaxOutputTokens,
     });
     if (gw.ok) {
@@ -1921,4 +2056,150 @@ chatRouter.post('/v2/quota/simulate', (req: Request, res: Response) => {
     emailVerified: Boolean(emailVerified),
   });
   return res.json({ ok: true, status, ...snapshot });
+});
+
+// ============================================================================
+// 4. LIGHTWEIGHT AI MEMORY EXTRACTION ENDPOINT (§4 Memory System)
+// ============================================================================
+chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
+  const {
+    messages = [],
+    existingMemories = [],
+    autoMemory = true,
+    memoryPaused = false,
+    incognito = false,
+    provider,
+    externalKeys,
+    externalModel,
+    externalBaseUrl,
+  } = req.body || {};
+
+  if (!autoMemory || memoryPaused || incognito) {
+    return res.json({ ok: true, memories: [], skipped: true });
+  }
+
+  const validMessages = Array.isArray(messages)
+    ? messages
+        .slice(-10)
+        .map((m: { role?: string; text?: string; content?: string }) => ({
+          role: m?.role === 'user' ? 'User' : 'AI',
+          text: String(m?.text || m?.content || '').trim().slice(0, 600),
+        }))
+        .filter((m) => m.text.length > 0)
+    : [];
+
+  if (validMessages.length === 0) {
+    return res.json({ ok: true, memories: [] });
+  }
+
+  const existingList = Array.isArray(existingMemories)
+    ? existingMemories
+        .map((m: unknown) => String(m || '').trim())
+        .filter(Boolean)
+        .slice(0, 40)
+    : [];
+
+  const extractionSystemPrompt = [
+    'You are a strict memory extraction engine.',
+    'Analyze the recent conversation and extract ONLY stable, useful personal or project facts about the user (such as name, profession, preferred language, tech stack, ongoing project, or communication preference).',
+    'STRICT SECURITY RULES:',
+    '- NEVER save passwords, API keys, secret tokens, bank/card numbers, national ID/passport numbers, or private medical/health info.',
+    '- NEVER save temporary one-off questions or general knowledge.',
+    '- If a fact updates an existing memory key, use the SAME key name with the updated value so it overwrites instead of duplicating.',
+    '- Output ONLY valid JSON in the exact format: {"memories": [{"key": "Name", "value": "Rahim"}, {"key": "Preferred Stack", "value": "React + TypeScript"}]}',
+    '- If no new or updated stable facts are present, output: {"memories": []}',
+  ].join('\n');
+
+  const extractionUserPrompt = [
+    existingList.length > 0
+      ? `Existing memories:\n${existingList.map((m) => `- ${m}`).join('\n')}\n`
+      : '',
+    'Recent conversation:',
+    ...validMessages.map((m) => `${m.role}: ${m.text}`),
+    '\nReturn JSON only:',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  try {
+    const parsedKeys = String(externalKeys || '')
+      .split(/[\n,;]+/)
+      .map((k: string) => k.trim())
+      .filter(Boolean);
+
+    const aiRes = await callBackendEngine(
+      extractionUserPrompt,
+      extractionSystemPrompt,
+      {
+        maxTokens: 400,
+        preferredProvider: provider,
+        preferredModel: externalModel,
+        externalKeys: parsedKeys,
+        externalBaseUrl,
+        temperature: 0.1,
+      }
+    );
+
+    const parsedItems = aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [];
+    const safeItems = parsedItems.filter(
+      (item) =>
+        !isSensitiveFact(`${item.key}: ${item.value}`) &&
+        !isSensitiveFact(item.value)
+    );
+
+    return res.json({
+      ok: true,
+      memories: safeItems,
+    });
+  } catch {
+    return res.json({
+      ok: true,
+      memories: [],
+    });
+  }
+});
+
+// ============================================================================
+// 5. MESSAGE FEEDBACK ENDPOINT (§8 Bottom Action Row — ভালো উত্তর / খারাপ উত্তর)
+// ============================================================================
+chatRouter.post('/feedback', (req: Request, res: Response) => {
+  const {
+    messageId = '',
+    conversationId = 'default',
+    rating = '',
+    reason = '',
+  } = req.body || {};
+
+  if (rating !== 'up' && rating !== 'down') {
+    return res.status(400).json({
+      ok: false,
+      error: 'rating must be "up" or "down".',
+    });
+  }
+
+  const cleanMessageId =
+    String(messageId || '').trim() || `msg_${Date.now().toString(36)}`;
+  const cleanConvId = String(conversationId || 'default').trim().slice(0, 128);
+  const cleanReason = String(reason || '').trim().slice(0, 500);
+  const userId = String(req.userId || 'anonymous').slice(0, 128);
+
+  try {
+    const engine = getSharedHardenedEngine();
+    const record = engine.storage.saveMessageFeedback({
+      messageId: cleanMessageId,
+      conversationId: cleanConvId,
+      userId,
+      rating,
+      reason: cleanReason,
+    });
+    return res.json({
+      ok: true,
+      feedback: record,
+    });
+  } catch (err: unknown) {
+    return res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to save feedback.',
+    });
+  }
 });
