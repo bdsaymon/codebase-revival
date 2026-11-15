@@ -203,6 +203,10 @@ export function toOpenAICompatiblePayload(params: {
   }
 
   mergeCustomParams(payload, params.customParams);
+  // Prevent customParams from injecting non-OpenAI sampling keys (e.g. top_k on Groq/OpenAI gateways)
+  delete payload.top_k;
+  delete payload.topK;
+  delete payload.thinkingConfig;
   return payload;
 }
 

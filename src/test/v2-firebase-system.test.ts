@@ -27,6 +27,11 @@ import {
   isTransientOfflineError,
   selectRelevantFirestoreMemories,
 } from '../smfta/src/utils/firebaseV2Client';
+import {
+  buildBoundedMessagesPayload,
+  buildConversationDocPayloads,
+  utf8ByteLength,
+} from '../smfta/src/utils/firestorePayloadHelpers';
 import rootFirebaseConfig from '../../firebase-applet-config.json';
 
 describe('V2 Special Firebase AI System', () => {
@@ -273,5 +278,59 @@ describe('V2 Special Firebase AI System', () => {
     expect(isTransientOfflineError({ code: 'permission-denied', message: 'Missing or insufficient permissions.' })).toBe(false);
     expect(isTransientOfflineError(new Error('7 PERMISSION_DENIED: Missing or insufficient permissions.'))).toBe(false);
     expect(rootFirebaseConfig.firestoreDatabaseId).toBeTruthy();
+  });
+
+  it('builds schema-compliant Firestore conversation create/update payloads without mutating createdAt', () => {
+    const payloads = buildConversationDocPayloads(
+      {
+        userId: 'Zn1RcOWeOmc8tFeIvmsC39PLeIj1',
+        sessionId: '1794690826846',
+        title: 'বাংলা চ্যাট '.repeat(30),
+        systemVersion: 'v2',
+        modelId: 'smfta-v5',
+        msgs: [
+          { id: 'm1', role: 'user', text: 'হ্যালো', ts: 100 },
+          { id: 'm2', role: 'ai', text: 'উত্তর', ts: 200 },
+        ],
+      },
+      'SERVER_TS'
+    );
+
+    expect(payloads.path).toBe(
+      'users/Zn1RcOWeOmc8tFeIvmsC39PLeIj1/conversations/conv_1794690826846'
+    );
+    expect(Object.keys(payloads.createData).sort()).toEqual([
+      'conversationId',
+      'createdAt',
+      'messageCount',
+      'messagesPayload',
+      'modelId',
+      'systemVersion',
+      'title',
+      'updatedAt',
+      'userId',
+    ]);
+    expect(Object.keys(payloads.updateData).sort()).toEqual([
+      'messageCount',
+      'messagesPayload',
+      'modelId',
+      'systemVersion',
+      'title',
+      'updatedAt',
+    ]);
+    expect('createdAt' in payloads.updateData).toBe(false);
+    expect(utf8ByteLength(payloads.updateData.title)).toBeLessThanOrEqual(200);
+
+    const largeBn = buildBoundedMessagesPayload(
+      Array.from({ length: 30 }, (_, idx) => ({
+        id: `msg_${idx}`,
+        role: idx % 2 === 0 ? 'user' : 'ai',
+        text: 'বাংলা টেক্সট পরীক্ষা '.repeat(500),
+        ts: idx,
+      }))
+    );
+    expect(largeBn.messagesPayload.length).toBeGreaterThanOrEqual(2);
+    expect(utf8ByteLength(largeBn.messagesPayload)).toBeLessThanOrEqual(250_000);
+    expect(Array.isArray(JSON.parse(largeBn.messagesPayload))).toBe(true);
   });
 });

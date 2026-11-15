@@ -17,6 +17,8 @@ export interface GeneralSectionProps {
 
 export const GeneralSection: React.FC<GeneralSectionProps> = ({
   draft,
+  profileName,
+  onNameChange,
   patch,
 }) => {
   const currentLang =
@@ -31,6 +33,30 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
   return (
     <div className="space-y-3" data-testid="settings-section-general">
       <SettingsCard>
+        {/* Profile / Display Name */}
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Display Name
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              AI আপনাকে যে নামে সম্বোধন করবে (Claude Profile Name)
+            </span>
+          </div>
+          <input
+            type="text"
+            data-testid="general-profile-name-input"
+            value={profileName || draft.displayName || ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              onNameChange(val);
+              patch({ displayName: val, nickname: val });
+            }}
+            placeholder="আপনার নাম লিখুন..."
+            className="cs-input text-xs sm:text-[13px] py-1.5 px-2.5 max-w-[220px]"
+          />
+        </div>
+
         {/* Theme */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
           <span className="text-[13.5px] font-medium text-[var(--ink)]">
@@ -183,7 +209,17 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
           testId="enter-to-send-toggle"
           onChange={(v) => patch({ sendOnEnter: v })}
         />
+
+        {/* Code Highlight & Artifact Preview */}
+        <SettingToggle
+          label="Code Syntax Highlight & Artifact Preview"
+          description="কোড ব্লকে সিনট্যাক্স হাইলাইটিং এবং লাইভ প্রিভিউ ও .zip ডাউনলোড সক্রিয় রাখবে"
+          checked={draft.highlightCode !== false}
+          testId="highlight-code-toggle"
+          onChange={(v) => patch({ highlightCode: v })}
+        />
       </SettingsCard>
     </div>
   );
 };
+

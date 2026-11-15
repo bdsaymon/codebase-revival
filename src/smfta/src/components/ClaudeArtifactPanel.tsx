@@ -261,7 +261,11 @@ function renderMarkdownToHtml(markdown: string): string {
   return html.join('\n');
 }
 
-export function buildArtifactSrcDoc(code: string, lang: string): string {
+export function buildArtifactSrcDoc(
+  code: string,
+  lang: string,
+  bundleFiles?: FileArtifactItem[]
+): string {
   const normalized = (lang || 'html').trim().toLowerCase();
   const trimmed = (code || '').trim();
 
@@ -271,7 +275,41 @@ export function buildArtifactSrcDoc(code: string, lang: string): string {
     trimmed.startsWith('<!DOCTYPE html') ||
     trimmed.startsWith('<html')
   ) {
-    return code;
+    if (!bundleFiles || bundleFiles.length <= 1) {
+      return code;
+    }
+    const cssSiblings = bundleFiles.filter(
+      (f) => f.lang === 'css' || /\.css$/i.test(f.filename)
+    );
+    const jsSiblings = bundleFiles.filter(
+      (f) =>
+        (f.lang === 'javascript' || f.lang === 'js' || /\.m?js$/i.test(f.filename)) &&
+        f.content !== code
+    );
+    let enrichedHtml = code;
+    if (cssSiblings.length > 0) {
+      const combinedCss = cssSiblings.map((c) => `/* ${c.filename} */\n${c.content}`).join('\n\n');
+      if (/<\/head>/i.test(enrichedHtml)) {
+        enrichedHtml = enrichedHtml.replace(
+          /<\/head>/i,
+          `<style>\n${combinedCss}\n</style>\n</head>`
+        );
+      } else {
+        enrichedHtml = `<style>\n${combinedCss}\n</style>\n${enrichedHtml}`;
+      }
+    }
+    if (jsSiblings.length > 0) {
+      const combinedJs = jsSiblings.map((j) => `// ${j.filename}\n${j.content}`).join('\n\n');
+      if (/<\/body>/i.test(enrichedHtml)) {
+        enrichedHtml = enrichedHtml.replace(
+          /<\/body>/i,
+          `<script>\n${combinedJs}\n</script>\n</body>`
+        );
+      } else {
+        enrichedHtml = `${enrichedHtml}\n<script>\n${combinedJs}\n</script>`;
+      }
+    }
+    return enrichedHtml;
   }
 
   if (normalized === 'md' || normalized === 'markdown') {
@@ -494,8 +532,8 @@ export const ClaudeArtifactPanel: React.FC<ClaudeArtifactPanelProps> = ({
 
   if (!artifact) return null;
 
-  const srcDoc = buildArtifactSrcDoc(artifact.code, artifact.lang);
   const bundleFiles = artifact.bundleFiles || [];
+  const srcDoc = buildArtifactSrcDoc(artifact.code, artifact.lang, bundleFiles);
 
   const handleCopy = () => {
     navigator.clipboard?.writeText(artifact.code);

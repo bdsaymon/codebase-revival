@@ -165,20 +165,39 @@ export function extractFileArtifacts(
   );
 
   // 4. Fenced blocks that explicitly specify a filename in the fence header (e.g. ```markdown plan.md)
+  //    or in a first-line filename comment (e.g. // filename: app.js, /* styles.css */, <!-- index.html -->, # main.py)
   working = working.replace(
-    /```([^\n`]+)\r?\n([\s\S]*?)```/g,
+    /```([^\n`]*)\r?\n([\s\S]*?)```/g,
     (full, header: string, body: string) => {
-      const parts = header.trim().split(/\s+/);
-      if (parts.length < 2) return full;
-      const fileToken = parts.slice(1).find((p) => /^[\w./-]+\.[a-z0-9]{1,8}$/i.test(p));
+      const parts = header.trim().split(/\s+/).filter(Boolean);
+      const langHint = parts[0] || 'txt';
+      let fileToken =
+        parts.length >= 2
+          ? parts.slice(1).find((p) => /^[\w./-]+\.[a-z0-9]{1,8}$/i.test(p))
+          : undefined;
+      let cleanBody = String(body || '').replace(/\n$/, '');
+
+      if (!fileToken) {
+        const firstLineMatch = cleanBody.match(
+          /^\s*(?:\/\/|#|<!--|\/\*)\s*(?:file(?:name)?\s*[:=]\s*)?([\w./-]+\.(?:md|markdown|html|htm|svg|css|scss|js|mjs|ts|tsx|jsx|json|py|csv|sql|sh|yaml|yml|xml|txt))\s*(?:-->|\*\/)?\s*\r?\n/i
+        );
+        if (firstLineMatch?.[1]) {
+          fileToken = firstLineMatch[1];
+          cleanBody = cleanBody.slice(firstLineMatch[0].length);
+        }
+      }
+
       if (!fileToken) return full;
-      const filename = sanitizeArtifactFilename(fileToken, defaultExtForLang(parts[0] || 'txt'));
-      const lang = inferLanguageFromFilenameOrType(filename, parts[0]);
+      const filename = sanitizeArtifactFilename(
+        fileToken,
+        defaultExtForLang(langHint)
+      );
+      const lang = inferLanguageFromFilenameOrType(filename, langHint);
       return pushArtifact({
         filename,
         title: filename,
         lang,
-        content: String(body || '').replace(/\n$/, ''),
+        content: cleanBody,
         isStreaming: false,
       });
     }

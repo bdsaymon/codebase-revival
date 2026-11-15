@@ -34,6 +34,8 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
   const currentLength: 'short' | 'medium' | 'detailed' =
     draft.responseLength ??
     (draft.style === 'concise' ? 'short' : 'detailed');
+  const currentStyle = draft.responseStyle || 'normal';
+  const currentMaxTokens = draft.maxOutputTokens || 16384;
 
   const currentSelectValue = `${activeProfile.id}::${
     activeProfile.externalModel || draft.externalModel || 'smfta-flash'
@@ -58,9 +60,14 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
       <SettingsCard>
         {/* Active Model */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
-          <span className="text-[13.5px] font-medium text-[var(--ink)]">
-            Active Model
-          </span>
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Active Model
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              বর্তমানে যে AI মডেল বা কাস্টম প্রোভাইডার চ্যাটে উত্তর দেবে
+            </span>
+          </div>
           <select
             data-testid="current-model-selector"
             aria-label="বর্তমান মডেল সিলেক্টর"
@@ -79,9 +86,10 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
           </select>
         </div>
 
-        {/* Thinking Toggle */}
+        {/* Extended Thinking Toggle */}
         <SettingToggle
-          label="Thinking"
+          label="Extended Thinking (Claude-Style Reasoning)"
+          description="উত্তর দেওয়ার আগে ধাপে ধাপে গভীর চিন্তা ও বিশ্লেষণ করবে"
           checked={thinkingEnabled}
           testId="thinking-enabled-toggle"
           onChange={(enabled) =>
@@ -94,9 +102,14 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
 
         {/* Thinking Level */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
-          <span className="text-[13.5px] font-medium text-[var(--ink)]">
-            Thinking Level
-          </span>
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Thinking Level (Reasoning Effort)
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              Low (দ্রুত) · Medium (ভারসাম্যপূর্ণ) · High (গভীর কোডিং ও বিশ্লেষণ)
+            </span>
+          </div>
           <div className="cs-seg" data-testid="thinking-effort-selector">
             {(['low', 'medium', 'high'] as const).map((level) => (
               <button
@@ -128,17 +141,71 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
 
         {/* Live Thinking */}
         <SettingToggle
-          label="Live Thinking"
+          label="Live Thinking Card Auto-Expand"
+          description="চিন্তা করার সময় লাইভ টাইমার ও ধাপগুলো সরাসরি খোলা দেখাবে"
           checked={draft.liveThinkingSummary !== false}
           testId="live-thinking-toggle"
           onChange={(v) => patch({ liveThinkingSummary: v })}
         />
 
+        {/* Smooth Pen-Like Typewriter Streaming */}
+        <SettingToggle
+          label="Smooth Typewriter Streaming (কলমের মতো লেখা)"
+          description="উত্তর একসাথে না এসে কলমের মতো মসৃণভাবে লাইন বাই লাইন টাইপ হবে"
+          checked={draft.streamingReveal !== false}
+          testId="streaming-reveal-toggle"
+          onChange={(v) => patch({ streamingReveal: v })}
+        />
+
+        {/* Claude Writing Style */}
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Writing Style (Claude Preset)
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              উত্তরের ধরন ও উপস্থাপনার স্টাইল নির্বাচন করুন
+            </span>
+          </div>
+          <div className="cs-seg" data-testid="models-style-selector">
+            {(
+              [
+                { id: 'normal', label: 'Normal' },
+                { id: 'concise', label: 'Concise' },
+                { id: 'explanatory', label: 'Explanatory' },
+                { id: 'formal', label: 'Formal' },
+              ] as const
+            ).map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                data-testid={`models-style-${st.id}`}
+                onClick={() =>
+                  patch({
+                    responseStyle: st.id,
+                    style: st.id === 'concise' ? 'concise' : 'detailed',
+                  })
+                }
+                className={`cs-seg-btn ${
+                  currentStyle === st.id ? 'is-active' : ''
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Response Length */}
-        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
-          <span className="text-[13.5px] font-medium text-[var(--ink)]">
-            Response Length
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Response Length
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              সংক্ষিপ্ত, মাঝারি অথবা সম্পূর্ণ বিস্তারিত উত্তর ও বড় কোড
+            </span>
+          </div>
           <div className="cs-seg" data-testid="response-length-selector">
             <button
               type="button"
@@ -178,7 +245,45 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Max Output Capacity for Large Code & Design */}
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Max Output Capacity (বড় কোড ও ডিজাইন)
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              বড় ওয়েবসাইট, কোড আপডেট বা বিস্তারিত লেখার সর্বোচ্চ টোকেন সীমা
+            </span>
+          </div>
+          <div className="cs-seg" data-testid="max-tokens-selector">
+            {(
+              [
+                { tokens: 4096, label: '4K' },
+                { tokens: 8192, label: '8K' },
+                { tokens: 16384, label: '16K' },
+                { tokens: 32768, label: '32K Max' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.tokens}
+                type="button"
+                data-testid={`max-tokens-${opt.tokens}`}
+                onClick={() => patch({ maxOutputTokens: opt.tokens })}
+                className={`cs-seg-btn ${
+                  currentMaxTokens >= opt.tokens &&
+                  (opt.tokens === 32768 || currentMaxTokens < opt.tokens * 2)
+                    ? 'is-active'
+                    : ''
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </SettingsCard>
     </div>
   );
 };
+

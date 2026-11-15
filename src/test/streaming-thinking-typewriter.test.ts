@@ -6,6 +6,7 @@ import {
   supportsNativeThinking,
 } from '../smfta/src/utils/thinking';
 import { parseProtocolResponse } from '../smfta/server/engine/adapters';
+import { buildContextualThinkingTrace } from '../smfta/server/routes/chat';
 
 describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', () => {
   it('drains finishing text smoothly over multiple frames without dumping big chunks', () => {
@@ -42,6 +43,29 @@ describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', ()
     expect(supportsNativeThinking('openai', 'gpt-4o-mini')).toBe(false);
     expect(isThinkingCapableModel('openai/gpt-oss-120b')).toBe(true);
     expect(isThinkingCapableModel('deepseek-reasoner')).toBe(true);
+  });
+
+  it('builds structured Claude-style contextual thinking traces in Bengali and English across effort levels', () => {
+    const bnTrace = buildContextualThinkingTrace(
+      'একটা সম্পূর্ণ ই-কমার্স ওয়েবসাইট ডিজাইন ও কোড লিখে দাও',
+      'bn',
+      'SMFTA Max',
+      'high'
+    );
+    expect(bnTrace).toContain('১.');
+    expect(bnTrace).toContain('২.');
+    expect(bnTrace).toContain('৩.');
+    expect(bnTrace).toContain('SMFTA Max · HIGH');
+
+    const enTrace = buildContextualThinkingTrace(
+      'Build a responsive React dashboard with Tailwind CSS',
+      'en',
+      'openai/gpt-oss-120b',
+      'medium'
+    );
+    expect(enTrace).toContain('1. Analyzing request intent');
+    expect(enTrace).toContain('2. Structuring complete architecture');
+    expect(enTrace).toContain('openai/gpt-oss-120b · MEDIUM');
   });
 
   it('preserves separate thinking and final text in parseProtocolResponse across OpenAI, Gemini, and Anthropic', () => {
@@ -87,3 +111,4 @@ describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', ()
     expect(anthropicParsed.text).toBe('Final Claude answer');
   });
 });
+

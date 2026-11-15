@@ -33,6 +33,49 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
 
     let cancelled = false;
     let tick = 0;
+    let audioCtx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let mediaStream: MediaStream | null = null;
+    let freqData: Uint8Array<ArrayBuffer> | null = null;
+
+    if (
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === 'function'
+    ) {
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext;
+      if (AudioContextCtor) {
+        navigator.mediaDevices
+          .getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
+          .then((stream) => {
+            if (cancelled) {
+              stream.getTracks().forEach((t) => t.stop());
+              return;
+            }
+            mediaStream = stream;
+            audioCtx = new AudioContextCtor();
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 64;
+            analyser.smoothingTimeConstant = 0.72;
+            source.connect(analyser);
+            freqData = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+          })
+          .catch(() => {
+            // Graceful fallback to speech-activity wave when mic stream is unavailable
+          });
+      }
+    }
 
     const loop = () => {
       if (cancelled) return;
@@ -44,6 +87,10 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
         ? 0.65 + 0.35 * Math.max(0, 1 - msSinceSpeech / 750)
         : 0.28;
 
+      if (analyser && freqData) {
+        analyser.getByteFrequencyData(freqData);
+      }
+
       setLevels(
         Array.from({ length: BAR_COUNT }, (_, idx) => {
           const center =
@@ -52,9 +99,25 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
             0.46 +
             0.34 * Math.sin(tick * (isSpeakingNow ? 2.1 : 1.1) + idx * 0.52) +
             0.2 * Math.cos(tick * (isSpeakingNow ? 3.2 : 1.6) - idx * 0.37);
-          const heightRatio =
+          const syntheticRatio =
             primaryWave * boost * (0.4 + Math.max(0.18, center) * 0.75);
-          return Math.max(0.14, Math.min(1, heightRatio));
+
+          if (freqData && freqData.length > 0) {
+            const binIdx = Math.min(
+              freqData.length - 1,
+              Math.floor((idx / BAR_COUNT) * Math.min(freqData.length, 24))
+            );
+            const micRatio = (freqData[binIdx] || 0) / 255;
+            if (micRatio > 0.04) {
+              const blended = Math.max(
+                syntheticRatio * 0.65,
+                micRatio * (0.55 + center * 0.55)
+              );
+              return Math.max(0.14, Math.min(1, blended));
+            }
+          }
+
+          return Math.max(0.14, Math.min(1, syntheticRatio));
         })
       );
 
@@ -66,6 +129,12 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
     return () => {
       cancelled = true;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+      }
+      if (audioCtx && audioCtx.state !== 'closed') {
+        audioCtx.close().catch(() => {});
+      }
     };
   }, [isListening]);
 

@@ -18,12 +18,10 @@ import {
   initializeFirestore,
   enableNetwork,
   doc,
-  getDoc,
   getDocFromServer,
   getDocs,
-  setDoc,
-  updateDoc,
   deleteDoc,
+  runTransaction,
   collection,
   query,
   where,
@@ -47,6 +45,14 @@ import {
   getRiyadhDateKey,
   ADMIN_EMAILS,
 } from './v2UsageLimits';
+import {
+  sanitizeFirestoreDocId,
+  buildUserProfileCreatePayload,
+  buildConversationDocPayloads,
+  buildSessionDocPayloads,
+  buildSessionMessageDocPayloads,
+  buildMemoryDocPayloads,
+} from './firestorePayloadHelpers';
 
 export enum OperationType {
   CREATE = 'create',
@@ -80,7 +86,24 @@ let authInstance: Auth | null = null;
 let appCheckInstance: AppCheck | null = null;
 let aiInstance: AI | null = null;
 let connectionValidated = false;
-const ensuredProfilePromises = new Map<string, Promise<void>>();
+const ensuredProfilePromises = new Map<string, Promise<boolean>>();
+const ensuredSessionPromises = new Map<string, Promise<boolean>>();
+const pathWriteQueues = new Map<string, Promise<unknown>>();
+
+function enqueueFirestorePathWrite<T>(
+  path: string,
+  task: () => Promise<T>
+): Promise<T> {
+  const prev = pathWriteQueues.get(path) || Promise.resolve();
+  const next = prev.catch(() => undefined).then(task);
+  const tail = next.finally(() => {
+    if (pathWriteQueues.get(path) === tail) {
+      pathWriteQueues.delete(path);
+    }
+  });
+  pathWriteQueues.set(path, tail);
+  return next;
+}
 
 export function isTransientOfflineError(error: unknown): boolean {
   const msg =
@@ -271,61 +294,50 @@ export function observeFirebaseAuth(
   return onAuthStateChanged(auth, callback);
 }
 
-function sanitizeDocId(rawId: string | number): string {
-  const cleaned = String(rawId || 'doc')
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, 120);
-  return cleaned || 'doc_default';
-}
-
 /**
- * Ensures the root `/users/{userId}` document exists so Master Gate subcollections
- * (`conversations`, `sessions`, `memories`, `usage`) pass relational existence checks.
+ * Ensures the root `/users/{userId}` document exists on the server so Master Gate
+ * subcollections (`conversations`, `sessions`, `memories`, `usage`) pass `userExists(userId)`.
+ * Returns `true` only when `/users/{userId}` is confirmed present on Firestore.
  */
 export async function ensureFirestoreUserProfile(
   user: FirebaseUser,
   displayName = 'SMFTA User',
   database?: Firestore
-): Promise<void> {
-  if (!user?.uid || !user.emailVerified) return;
+): Promise<boolean> {
+  if (!user?.uid || !user.emailVerified) return false;
   const db = database || getFirebaseServices().db;
-  const userId = sanitizeDocId(user.uid);
+  const { path, userId, createData } = buildUserProfileCreatePayload(
+    {
+      userId: user.uid,
+      displayName: displayName || user.displayName || 'SMFTA User',
+    },
+    serverTimestamp()
+  );
   const existingTask = ensuredProfilePromises.get(userId);
   if (existingTask) {
     return existingTask;
   }
 
-  const path = `users/${userId}`;
   const ref = doc(db, 'users', userId);
-  const safeName =
-    (displayName || user.displayName || 'SMFTA User').trim().slice(0, 80) ||
-    'SMFTA User';
-
-  const task = (async () => {
+  const task = enqueueFirestorePathWrite(path, async () => {
     try {
       await runWithFirestoreReconnect(db, async () => {
-        const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          await setDoc(ref, {
-            userId,
-            displayName: safeName,
-            testingBypass: false,
-            testingAllowance: 0,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        }
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists()) {
+            tx.set(ref, createData);
+          }
+        });
       });
+      return true;
     } catch (error) {
       ensuredProfilePromises.delete(userId);
       if (isTransientOfflineError(error)) {
-        // Offline / unreachable network should not crash sign-in or spam fatal errors;
-        // future operations will retry automatically once connectivity returns.
-        return;
+        return false;
       }
       handleFirestoreError(error, OperationType.WRITE, path);
     }
-  })();
+  });
 
   ensuredProfilePromises.set(userId, task);
   return task;
@@ -337,44 +349,44 @@ export async function ensureFirestoreSessionDoc(
   title: string,
   systemVersion: 'v1' | 'v2',
   modelId: string
-): Promise<void> {
-  if (!user?.uid || !user.emailVerified) return;
+): Promise<boolean> {
+  if (!user?.uid || !user.emailVerified) return false;
   const { db } = getFirebaseServices();
-  await ensureFirestoreUserProfile(user, user.displayName || 'SMFTA User', db);
+  const profileReady = await ensureFirestoreUserProfile(
+    user,
+    user.displayName || 'SMFTA User',
+    db
+  );
+  if (!profileReady) return false;
 
-  const userId = sanitizeDocId(user.uid);
-  const cleanSessionId = sanitizeDocId(`sess_${sessionId}`);
-  const path = `users/${userId}/sessions/${cleanSessionId}`;
-  const ref = doc(db, 'users', userId, 'sessions', cleanSessionId);
-  const safeTitle = (title || 'Conversation').trim().slice(0, 200) || 'Conversation';
-  const safeModelId = (modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
+  const payloads = buildSessionDocPayloads(
+    { userId: user.uid, sessionId, title, systemVersion, modelId },
+    serverTimestamp()
+  );
+  const ref = doc(db, 'users', payloads.userId, 'sessions', payloads.sessionId);
 
-  try {
-    await runWithFirestoreReconnect(db, async () => {
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          userId,
-          sessionId: cleanSessionId,
-          title: safeTitle,
-          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-          modelId: safeModelId,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+  const task = enqueueFirestorePathWrite(payloads.path, async () => {
+    try {
+      await runWithFirestoreReconnect(db, async () => {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists()) {
+            tx.set(ref, payloads.createData);
+          } else {
+            tx.update(ref, payloads.updateData);
+          }
         });
-      } else {
-        await updateDoc(ref, {
-          title: safeTitle,
-          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-          modelId: safeModelId,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    });
-  } catch (error) {
-    if (isTransientOfflineError(error)) return;
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+      });
+      return true;
+    } catch (error) {
+      ensuredSessionPromises.delete(payloads.path);
+      if (isTransientOfflineError(error)) return false;
+      handleFirestoreError(error, OperationType.WRITE, payloads.path);
+    }
+  });
+
+  ensuredSessionPromises.set(payloads.path, task);
+  return task;
 }
 
 export async function saveSessionMessageToFirestore(params: {
@@ -388,56 +400,56 @@ export async function saveSessionMessageToFirestore(params: {
   systemVersion: 'v1' | 'v2';
 }): Promise<void> {
   if (!params.user?.uid || !params.user.emailVerified) return;
-  const cleanText = String(params.text || '').trim().slice(0, 32_000);
-  if (!cleanText) return;
+  const payloads = buildSessionMessageDocPayloads(
+    {
+      userId: params.user.uid,
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      role: params.role,
+      text: params.text,
+      modelId: params.modelId,
+    },
+    serverTimestamp()
+  );
+  if (!payloads.cleanText) return;
 
   const { db } = getFirebaseServices();
-  await ensureFirestoreSessionDoc(
+  const sessionReady = await ensureFirestoreSessionDoc(
     params.user,
     params.sessionId,
     params.sessionTitle,
     params.systemVersion,
     params.modelId
   );
+  if (!sessionReady) return;
 
-  const userId = sanitizeDocId(params.user.uid);
-  const cleanSessionId = sanitizeDocId(`sess_${params.sessionId}`);
-  const cleanMsgId = sanitizeDocId(params.messageId);
-  const path = `users/${userId}/sessions/${cleanSessionId}/messages/${cleanMsgId}`;
   const ref = doc(
     db,
     'users',
-    userId,
+    payloads.userId,
     'sessions',
-    cleanSessionId,
+    payloads.sessionId,
     'messages',
-    cleanMsgId
+    payloads.messageId
   );
 
-  try {
-    await runWithFirestoreReconnect(db, async () => {
-      const existingSnap = await getDoc(ref);
-      if (!existingSnap.exists()) {
-        await setDoc(ref, {
-          userId,
-          sessionId: cleanSessionId,
-          messageId: cleanMsgId,
-          role: params.role === 'user' ? 'user' : 'ai',
-          text: cleanText,
-          modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
-          createdAt: serverTimestamp(),
+  await enqueueFirestorePathWrite(payloads.path, async () => {
+    try {
+      await runWithFirestoreReconnect(db, async () => {
+        await runTransaction(db, async (tx) => {
+          const existingSnap = await tx.get(ref);
+          if (!existingSnap.exists()) {
+            tx.set(ref, payloads.createData);
+          } else {
+            tx.update(ref, payloads.updateData);
+          }
         });
-      } else {
-        await updateDoc(ref, {
-          text: cleanText,
-          modelId: (params.modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5',
-        });
-      }
-    });
-  } catch (error) {
-    if (isTransientOfflineError(error)) return;
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+      });
+    } catch (error) {
+      if (isTransientOfflineError(error)) return;
+      handleFirestoreError(error, OperationType.WRITE, payloads.path);
+    }
+  });
 }
 
 export async function syncConversationToFirestore(
@@ -448,56 +460,49 @@ export async function syncConversationToFirestore(
 ): Promise<void> {
   if (!user?.uid || !user.emailVerified || !session.msgs.length) return;
   const { db } = getFirebaseServices();
-  await ensureFirestoreUserProfile(user, user.displayName || 'SMFTA User', db);
+  const profileReady = await ensureFirestoreUserProfile(
+    user,
+    user.displayName || 'SMFTA User',
+    db
+  );
+  if (!profileReady) return;
 
-  const userId = sanitizeDocId(user.uid);
-  const conversationId = sanitizeDocId(`conv_${session.id}`);
-  const path = `users/${userId}/conversations/${conversationId}`;
-  const ref = doc(db, 'users', userId, 'conversations', conversationId);
+  const payloads = buildConversationDocPayloads(
+    {
+      userId: user.uid,
+      sessionId: session.id,
+      title: session.title,
+      systemVersion,
+      modelId,
+      msgs: session.msgs,
+    },
+    serverTimestamp()
+  );
+  const ref = doc(
+    db,
+    'users',
+    payloads.userId,
+    'conversations',
+    payloads.conversationId
+  );
 
-  const compactMsgs = session.msgs.slice(-80).map((m) => ({
-    id: m.id,
-    role: m.role,
-    text: String(m.text || '').slice(0, 12_000),
-    thinking: m.thinking ? String(m.thinking).slice(0, 4_000) : undefined,
-    v2ModelId: m.v2ModelId,
-    ts: m.ts,
-  }));
-  const messagesPayload = JSON.stringify(compactMsgs).slice(0, 240_000);
-  const safeTitle =
-    (session.title || 'Conversation').trim().slice(0, 200) || 'Conversation';
-  const safeModelId = (modelId || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
-
-  try {
-    await runWithFirestoreReconnect(db, async () => {
-      const existingSnap = await getDoc(ref);
-      if (!existingSnap.exists()) {
-        await setDoc(ref, {
-          userId,
-          conversationId,
-          title: safeTitle,
-          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-          modelId: safeModelId,
-          messagesPayload,
-          messageCount: compactMsgs.length,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+  await enqueueFirestorePathWrite(payloads.path, async () => {
+    try {
+      await runWithFirestoreReconnect(db, async () => {
+        await runTransaction(db, async (tx) => {
+          const existingSnap = await tx.get(ref);
+          if (!existingSnap.exists()) {
+            tx.set(ref, payloads.createData);
+          } else {
+            tx.update(ref, payloads.updateData);
+          }
         });
-      } else {
-        await updateDoc(ref, {
-          title: safeTitle,
-          systemVersion: systemVersion === 'v2' ? 'v2' : 'v1',
-          modelId: safeModelId,
-          messagesPayload,
-          messageCount: compactMsgs.length,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    });
-  } catch (error) {
-    if (isTransientOfflineError(error)) return;
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+      });
+    } catch (error) {
+      if (isTransientOfflineError(error)) return;
+      handleFirestoreError(error, OperationType.WRITE, payloads.path);
+    }
+  });
 }
 
 export function subscribeToFirestoreConversations(
@@ -505,7 +510,7 @@ export function subscribeToFirestoreConversations(
   onConversations: (sessions: ChatSession[]) => void
 ): Unsubscribe {
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
+  const userId = sanitizeFirestoreDocId(user.uid);
   const path = `users/${userId}/conversations`;
   const colRef = collection(db, 'users', userId, 'conversations');
   const q = query(colRef, where('userId', '==', userId));
@@ -554,9 +559,9 @@ export async function deleteConversationFromFirestore(
 ): Promise<void> {
   if (!user?.uid || !user.emailVerified) return;
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
-  const conversationId = sanitizeDocId(`conv_${sessionId}`);
-  const cleanSessionId = sanitizeDocId(`sess_${sessionId}`);
+  const userId = sanitizeFirestoreDocId(user.uid);
+  const conversationId = sanitizeFirestoreDocId(`conv_${sessionId}`);
+  const cleanSessionId = sanitizeFirestoreDocId(`sess_${sessionId}`);
   const convRef = doc(db, 'users', userId, 'conversations', conversationId);
   const sessRef = doc(db, 'users', userId, 'sessions', cleanSessionId);
 
@@ -583,7 +588,7 @@ export async function clearAllFirestoreConversations(
 ): Promise<void> {
   if (!user?.uid || !user.emailVerified) return;
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
+  const userId = sanitizeFirestoreDocId(user.uid);
 
   try {
     await runWithFirestoreReconnect(db, async () => {
@@ -623,46 +628,46 @@ export async function saveMemoryFactToFirestore(
   sourceModel = 'smfta-v5'
 ): Promise<void> {
   if (!user?.uid || !user.emailVerified) return;
-  const cleanFact = (fact || '').trim().slice(0, 1000);
-  if (!cleanFact) return;
+  const rawMemoryId = hashMemoryFactId(String(fact || ''));
+  const payloads = buildMemoryDocPayloads(
+    {
+      userId: user.uid,
+      memoryId: rawMemoryId,
+      fact,
+      topic,
+      sourceModel,
+    },
+    serverTimestamp()
+  );
+  if (!payloads.cleanFact) return;
 
   const { db } = getFirebaseServices();
-  await ensureFirestoreUserProfile(user, user.displayName || 'SMFTA User', db);
+  const profileReady = await ensureFirestoreUserProfile(
+    user,
+    user.displayName || 'SMFTA User',
+    db
+  );
+  if (!profileReady) return;
 
-  const userId = sanitizeDocId(user.uid);
-  const memoryId = sanitizeDocId(hashMemoryFactId(cleanFact));
-  const path = `users/${userId}/memories/${memoryId}`;
-  const ref = doc(db, 'users', userId, 'memories', memoryId);
-  const safeTopic = (topic || 'general').trim().slice(0, 80) || 'general';
-  const safeModel =
-    (sourceModel || 'smfta-v5').trim().slice(0, 64) || 'smfta-v5';
+  const ref = doc(db, 'users', payloads.userId, 'memories', payloads.memoryId);
 
-  try {
-    await runWithFirestoreReconnect(db, async () => {
-      const snap = await getDoc(ref);
-      if (!snap.exists()) {
-        await setDoc(ref, {
-          userId,
-          memoryId,
-          fact: cleanFact,
-          topic: safeTopic,
-          sourceModel: safeModel,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+  await enqueueFirestorePathWrite(payloads.path, async () => {
+    try {
+      await runWithFirestoreReconnect(db, async () => {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists()) {
+            tx.set(ref, payloads.createData);
+          } else {
+            tx.update(ref, payloads.updateData);
+          }
         });
-      } else {
-        await updateDoc(ref, {
-          fact: cleanFact,
-          topic: safeTopic,
-          sourceModel: safeModel,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    });
-  } catch (error) {
-    if (isTransientOfflineError(error)) return;
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+      });
+    } catch (error) {
+      if (isTransientOfflineError(error)) return;
+      handleFirestoreError(error, OperationType.WRITE, payloads.path);
+    }
+  });
 }
 
 export function subscribeToFirestoreMemories(
@@ -670,7 +675,7 @@ export function subscribeToFirestoreMemories(
   onMemories: (facts: string[], meta?: { fromCache: boolean }) => void
 ): Unsubscribe {
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
+  const userId = sanitizeFirestoreDocId(user.uid);
   const path = `users/${userId}/memories`;
   const colRef = collection(db, 'users', userId, 'memories');
   const q = query(colRef, where('userId', '==', userId));
@@ -766,7 +771,7 @@ export async function clearAllFirestoreMemories(
 ): Promise<void> {
   if (!user?.uid || !user.emailVerified) return;
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
+  const userId = sanitizeFirestoreDocId(user.uid);
   const path = `users/${userId}/memories`;
   try {
     await runWithFirestoreReconnect(db, async () => {
@@ -795,7 +800,7 @@ export function subscribeToFirestoreV2Usage(
   onUsageUpdate: (snapshot: FirestoreUsageSnapshot) => void
 ): Unsubscribe {
   const { db } = getFirebaseServices();
-  const userId = sanitizeDocId(user.uid);
+  const userId = sanitizeFirestoreDocId(user.uid);
   const path = `users/${userId}/usage`;
   const colRef = collection(db, 'users', userId, 'usage');
   const q = query(colRef, where('userId', '==', userId));

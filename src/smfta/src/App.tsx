@@ -48,6 +48,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   EyeOff,
+  Brain,
 } from 'lucide-react';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -346,6 +347,7 @@ import {
   signInWithFirebaseGoogle,
   signOutFromFirebase,
   observeFirebaseAuth,
+  ensureFirestoreUserProfile,
   syncConversationToFirestore,
   subscribeToFirestoreConversations,
   saveMemoryFactToFirestore,
@@ -360,6 +362,7 @@ import {
   deleteConversationFromFirestore,
   clearAllFirestoreConversations,
 } from './utils/firebaseV2Client';
+import { buildFirestoreChatSyncSignature } from './utils/firestorePayloadHelpers';
 import {
   bilingualSpeechPlayer,
   isSpeechRecognitionSupported,
@@ -843,6 +846,10 @@ export default function App() {
       unsubUsage = null;
 
       if (user && user.emailVerified) {
+        void ensureFirestoreUserProfile(
+          user,
+          user.displayName || 'SMFTA User'
+        ).catch(() => {});
         unsubConvs = subscribeToFirestoreConversations(user, (remoteSessions) => {
           setChats((prev) => {
             const deletedIds = new Set(loadDeletedChatIds());
@@ -920,8 +927,7 @@ export default function App() {
       for (const session of chats) {
         if (!session.msgs || session.msgs.length === 0) continue;
         if (session.incognito || deletedIds.has(session.id)) continue;
-        const lastMsg = session.msgs[session.msgs.length - 1];
-        const sig = `${session.title}:${session.msgs.length}:${lastMsg?.id || ''}:${(lastMsg?.text || '').length}`;
+        const sig = buildFirestoreChatSyncSignature(session);
         if (firestoreSyncedChatSigsRef.current.get(session.id) === sig) continue;
         firestoreSyncedChatSigsRef.current.set(session.id, sig);
         const hasV2 = session.msgs.some((m) => Boolean(m.v2ModelId));
@@ -4581,12 +4587,19 @@ export default function App() {
               modelId: sessionModelTag,
               systemVersion: sessionVersionTag,
             });
+            const syncedSessionSnapshot = {
+              ...(targetSession || { id: chatId, title: 'SMFTA Chat' }),
+              id: targetSession?.id ?? chatId,
+              title: targetSession?.title || 'SMFTA Chat',
+              msgs: [...historyMsgs, finalCompletedMsg],
+            };
+            firestoreSyncedChatSigsRef.current.set(
+              syncedSessionSnapshot.id,
+              buildFirestoreChatSyncSignature(syncedSessionSnapshot)
+            );
             await syncConversationToFirestore(
               firebaseUser,
-              {
-                ...targetSession,
-                msgs: [...historyMsgs, finalCompletedMsg],
-              },
+              syncedSessionSnapshot,
               sessionVersionTag,
               sessionModelTag
             );
@@ -6615,10 +6628,54 @@ export default function App() {
                               setBottomModelMenuOpen((v) => !v);
                             }}
                             className="composer-model"
-                            title="Select Model"
+                            title="Select Model & Reasoning"
                           >
                             <span className="truncate">{activeModelLabel}</span>
                             <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                          </button>
+
+                          <button
+                            type="button"
+                            data-testid="composer-thinking-toggle"
+                            onClick={() => {
+                              const currentlyOn =
+                                settings.thinkingEnabled !== false &&
+                                settings.thinkingMode !== 'off';
+                              const nextEnabled = !currentlyOn;
+                              const nextEffort =
+                                settings.thinkingMode === 'low' ||
+                                settings.thinkingMode === 'medium' ||
+                                settings.thinkingMode === 'high'
+                                  ? settings.thinkingMode
+                                  : 'medium';
+                              setSettings((prev) =>
+                                sanitizeSettings({
+                                  ...prev,
+                                  thinkingEnabled: nextEnabled,
+                                  thinkingMode: nextEnabled ? nextEffort : 'off',
+                                })
+                              );
+                              showToast(
+                                nextEnabled
+                                  ? `Extended Thinking ON (${nextEffort.toUpperCase()})`
+                                  : 'Extended Thinking OFF'
+                              );
+                            }}
+                            className={`composer-icon composer-icon-web ${
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                                ? 'is-on'
+                                : ''
+                            }`}
+                            title={
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                                ? `Extended Thinking active (${settings.thinkingMode || 'medium'})`
+                                : 'Enable Extended Thinking'
+                            }
+                            aria-label="Toggle Extended Thinking"
+                          >
+                            <Brain className="w-4 h-4" />
                           </button>
 
                           <button
@@ -6734,9 +6791,14 @@ export default function App() {
                                 }}
                                 className="ref-sheet-row"
                               >
-                                <span className="ref-sheet-row-title truncate">
-                                  {spec.label}
-                                </span>
+                                <div className="flex flex-col items-start min-w-0 text-left">
+                                  <span className="ref-sheet-row-title truncate">
+                                    {spec.label}
+                                  </span>
+                                  <span className="text-[11.5px] text-[var(--ink-dim)] truncate max-w-[260px]">
+                                    {spec.tagline}
+                                  </span>
+                                </div>
                                 {isSelectedV2 && (
                                   <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
                                 )}
@@ -6745,8 +6807,56 @@ export default function App() {
                           })}
                       </div>
 
-                      {/* Effort / Processing Mode Row */}
+                      {/* Claude-Style Extended Thinking & Effort Controls */}
                       <div className="ref-sheet-group">
+                        <button
+                          type="button"
+                          data-testid="sheet-thinking-toggle"
+                          onClick={() => {
+                            const currentlyOn =
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off';
+                            const nextEnabled = !currentlyOn;
+                            const nextEffort =
+                              settings.thinkingMode === 'low' ||
+                              settings.thinkingMode === 'medium' ||
+                              settings.thinkingMode === 'high'
+                                ? settings.thinkingMode
+                                : 'medium';
+                            setSettings((prev) =>
+                              sanitizeSettings({
+                                ...prev,
+                                thinkingEnabled: nextEnabled,
+                                thinkingMode: nextEnabled ? nextEffort : 'off',
+                              })
+                            );
+                          }}
+                          className="ref-sheet-row"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Brain className="w-4 h-4 text-[var(--primary)] shrink-0" />
+                            <div className="flex flex-col items-start text-left">
+                              <span className="ref-sheet-row-title">Extended Thinking</span>
+                              <span className="text-[11px] text-[var(--ink-dim)]">
+                                উত্তর দেওয়ার আগে ধাপে ধাপে গভীর চিন্তা করবে
+                              </span>
+                            </div>
+                          </div>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-xs font-semibold ${
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                                ? 'bg-[var(--primary)] text-white'
+                                : 'bg-[var(--surface-2)] text-[var(--ink-dim)]'
+                            }`}
+                          >
+                            {settings.thinkingEnabled !== false &&
+                            settings.thinkingMode !== 'off'
+                              ? 'ON'
+                              : 'OFF'}
+                          </span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => {
@@ -6754,8 +6864,19 @@ export default function App() {
                             const nextMode =
                               order[(order.indexOf(settings.mode) + 1) % order.length] ||
                               'balanced';
+                            const nextThinkLevel =
+                              nextMode === 'fast'
+                                ? 'low'
+                                : nextMode === 'power'
+                                  ? 'high'
+                                  : 'medium';
                             setSettings((prev) => {
-                              const next = sanitizeSettings({ ...prev, mode: nextMode });
+                              const next = sanitizeSettings({
+                                ...prev,
+                                mode: nextMode,
+                                thinkingEnabled: true,
+                                thinkingMode: nextThinkLevel,
+                              });
                               if (activeIsBuiltin && !activeIsV2) {
                                 next.externalModel = builtinTierForModel(
                                   null,
@@ -6778,7 +6899,7 @@ export default function App() {
                               );
                             }
                           }}
-                          className="ref-sheet-row"
+                          className="ref-sheet-row border-t border-[var(--border)]"
                         >
                           <span className="ref-sheet-row-title">Effort</span>
                           <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)]">
@@ -6789,6 +6910,36 @@ export default function App() {
                                   ? 'High'
                                   : 'Medium'}
                             </span>
+                            <ChevronRight className="w-4 h-4" />
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          data-testid="sheet-style-selector"
+                          onClick={() => {
+                            const styles: Array<NonNullable<AppSettings['responseStyle']>> = [
+                              'normal',
+                              'concise',
+                              'explanatory',
+                              'formal',
+                            ];
+                            const cur = settings.responseStyle || 'normal';
+                            const nextStyle =
+                              styles[(styles.indexOf(cur) + 1) % styles.length] || 'normal';
+                            setSettings((prev) =>
+                              sanitizeSettings({
+                                ...prev,
+                                responseStyle: nextStyle,
+                                style: nextStyle === 'concise' ? 'concise' : 'detailed',
+                              })
+                            );
+                          }}
+                          className="ref-sheet-row border-t border-[var(--border)]"
+                        >
+                          <span className="ref-sheet-row-title">Writing Style</span>
+                          <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)] capitalize">
+                            <span>{settings.responseStyle || 'normal'}</span>
                             <ChevronRight className="w-4 h-4" />
                           </div>
                         </button>
@@ -6891,6 +7042,22 @@ export default function App() {
                                   </div>
                                 );
                               })}
+
+                            <button
+                              type="button"
+                              data-testid="sheet-manage-providers-btn"
+                              onClick={() => {
+                                setBottomModelMenuOpen(false);
+                                setSettingsTab('providers_api');
+                                setSettingsOpen(true);
+                              }}
+                              className="ref-sheet-row border-t border-[var(--border)] text-[var(--primary)] font-medium"
+                            >
+                              <span className="text-[13.5px]">
+                                + Add or Manage Custom Providers
+                              </span>
+                              <Settings className="w-4 h-4 shrink-0" />
+                            </button>
                           </div>
                         )}
                       </div>

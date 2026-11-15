@@ -124,15 +124,71 @@ export function getOrCreateSessionUid(
   return fresh;
 }
 
+export function buildContextualThinkingTrace(
+  userText: string,
+  replyLang: string = 'auto',
+  modelLabel: string = 'SMFTA AI Pro',
+  effort: 'low' | 'medium' | 'high' = 'medium'
+): string {
+  const clean = String(userText || '')
+    .replace(/⟦FILE:[^\n⟧]+⟧[\s\S]*?⟦\/FILE⟧/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const snippet = clean.length > 90 ? `${clean.slice(0, 87).trimEnd()}...` : clean || 'Request';
+  const hasBengali = /[\u0980-\u09FF]/.test(clean) || replyLang === 'bn';
+  const isCodeOrDesign =
+    /\b(code|html|css|js|javascript|typescript|react|tailwind|python|api|bug|fix|error|ui|design|website|app|component|function|database|sql)\b|কোড|ডিজাইন|ওয়েবসাইট|অ্যাপ|বাগ|আপডেট|তৈরি/i.test(
+      clean
+    );
+
+  if (hasBengali) {
+    const steps = [
+      `১. ব্যবহারকারীর অনুরোধ বিশ্লেষণ করছি: "${snippet}"`,
+      isCodeOrDesign
+        ? `২. সম্পূর্ণ আর্কিটেকচার, কোড স্ট্রাকচার এবং প্রোডাকশন-রেডি ডিজাইন পরিকল্পনা সাজাচ্ছি (${modelLabel} · ${effort.toUpperCase()})।`
+        : `২. প্রাসঙ্গিক তথ্য, মূল পয়েন্ট এবং যুক্তিগুলো ধাপে ধাপে যাচাই করছি (${modelLabel} · ${effort.toUpperCase()})।`,
+    ];
+    if (effort === 'high' || isCodeOrDesign) {
+      steps.push(
+        '৩. কোনো অংশ যেন বাদ না পড়ে তা নিশ্চিত করে স্পষ্ট, নির্ভুল ও সম্পূর্ণ উত্তর প্রস্তুত করছি।'
+      );
+    }
+    return steps.join('\n');
+  }
+
+  const steps = [
+    `1. Analyzing request intent & constraints: "${snippet}"`,
+    isCodeOrDesign
+      ? `2. Structuring complete architecture, edge cases, and production-grade implementation (${modelLabel} · ${effort.toUpperCase()}).`
+      : `2. Synthesizing key facts, logical structure, and clear explanation (${modelLabel} · ${effort.toUpperCase()}).`,
+  ];
+  if (effort === 'high' || isCodeOrDesign) {
+    steps.push(
+      '3. Verifying completeness and formatting a thorough, well-structured response.'
+    );
+  }
+  return steps.join('\n');
+}
+
 async function streamFromXrahat(
   systemInstruction: string,
   history: Array<{ role: string; content: string }>,
   uid: string,
   signal: AbortSignal,
-  emitDelta: (delta: string) => void
+  emitDelta: (delta: string) => void,
+  emitChunked?: (fullText: string) => Promise<void>
 ): Promise<boolean> {
   const promptText = buildXrahatPrompt(systemInstruction, history);
   if (!promptText) return false;
+
+  const deliverChunked = async (text: string) => {
+    if (!text) return;
+    if (emitChunked) {
+      await emitChunked(text);
+    } else {
+      emitDelta(text);
+    }
+  };
 
   const streamUrl = buildXrahatUrl(promptText, uid, true);
   let emitted = false;
@@ -151,7 +207,7 @@ async function streamFromXrahat(
         const json = await res.json().catch(() => null);
         const reply = extractXrahatReply(json);
         if (reply) {
-          emitDelta(reply);
+          await deliverChunked(reply);
           return true;
         }
       } else {
@@ -176,7 +232,11 @@ async function streamFromXrahat(
             if (dataStr === '[DONE]') break;
             const evt = parseXrahatSseEvent(dataStr);
             if (evt.delta) {
-              emitDelta(evt.delta);
+              if (evt.delta.length > 90 && emitChunked) {
+                await emitChunked(evt.delta);
+              } else {
+                emitDelta(evt.delta);
+              }
               emitted = true;
             } else if (evt.reset) {
               fallbackResetText = evt.reset;
@@ -191,7 +251,11 @@ async function streamFromXrahat(
             if (dataStr === '[DONE]') break;
             const evt = parseXrahatSseEvent(dataStr);
             if (evt.delta) {
-              emitDelta(evt.delta);
+              if (evt.delta.length > 90 && emitChunked) {
+                await emitChunked(evt.delta);
+              } else {
+                emitDelta(evt.delta);
+              }
               emitted = true;
             } else if (evt.reset) {
               fallbackResetText = evt.reset;
@@ -199,7 +263,7 @@ async function streamFromXrahat(
           }
         }
         if (!emitted && fallbackResetText) {
-          emitDelta(fallbackResetText);
+          await deliverChunked(fallbackResetText);
           emitted = true;
         }
         if (emitted) return true;
@@ -221,7 +285,7 @@ async function streamFromXrahat(
         const data = await res.json().catch(() => null);
         const reply = extractXrahatReply(data);
         if (reply) {
-          emitDelta(reply);
+          await deliverChunked(reply);
           return true;
         }
       }
@@ -869,6 +933,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       ? requestedThinkingMode
       : 'off';
 
+  let hasEmittedAnyThinking = false;
   const emitThinking = (thinkingChunk: string) => {
     if (
       !thinkingChunk ||
@@ -880,6 +945,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     }
     const cleanThinking = sanitizeProprietaryOutput(thinkingChunk);
     if (!cleanThinking) return;
+    hasEmittedAnyThinking = true;
     if (firstTokenPerf === null) {
       firstTokenPerf = performance.now();
     }
@@ -948,6 +1014,23 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   const isCustomProviderActive =
     parsedKeys.length > 0 ||
     (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud');
+
+  const ensurePreResponseThinking = (modelLabelOverride?: string) => {
+    if (
+      requestedThinkingMode === 'off' ||
+      hasEmittedAnyThinking ||
+      INSTANT_GREETING_REGEX.test(lastUserText)
+    ) {
+      return;
+    }
+    const trace = buildContextualThinkingTrace(
+      lastUserText,
+      replyLang,
+      modelLabelOverride || activeCustomModelName || effectiveProvider,
+      requestedThinkingMode
+    );
+    emitThinking(trace);
+  };
 
   emitEvent({
     type: 'meta',
@@ -1047,6 +1130,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         activeV2SystemLabel
       );
       if (identityReply) {
+        ensurePreResponseThinking(activeV2SystemLabel);
         await emitChunkedDelta(identityReply);
         finishStream({
           type: 'done',
@@ -1107,6 +1191,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         typeof projectContext === 'string' ? projectContext.slice(0, 60_000) : '',
     });
 
+    if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
+      ensurePreResponseThinking(v2Spec.label);
+    }
+
     const v2StreamRes = await streamV2FirebaseModel({
       modelId: v2ModelId,
       systemInstruction: v2SystemInstruction,
@@ -1123,9 +1211,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       signal: upstreamAbortController.signal,
       emitDelta,
       emitThinking,
-      thinkingEnabled: effectiveThinkingMode !== 'off',
+      thinkingEnabled: requestedThinkingMode !== 'off',
       thinkingEffort:
-        effectiveThinkingMode === 'off' ? 'low' : effectiveThinkingMode,
+        requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
     });
 
     if (!v2StreamRes.ok && !clientClosed) {
@@ -1186,6 +1274,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       activeSystemLabel
     );
     if (identityReply) {
+      ensurePreResponseThinking(activeSystemLabel);
       await emitChunkedDelta(identityReply);
       finishStream({
         type: 'done',
@@ -1203,6 +1292,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   // 1. Custom trained Q&A weight match (scoped per user - P0-03)
   const trainedMatch = matchTrainedWeights(lastUserText, scopedUserId);
   if (trainedMatch.exactReply && lastUserImgs.length === 0 && !isCustomProviderActive) {
+    ensurePreResponseThinking(activeSystemLabel);
     await emitChunkedDelta(trainedMatch.exactReply);
     finishStream({
       type: 'done',
@@ -1423,6 +1513,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       scopedUserId
     );
     if (cachedHit) {
+      ensurePreResponseThinking(activeCustomModelName || activeSystemLabel);
       await emitChunkedDelta(cachedHit);
       finishStream({
         type: 'done',
@@ -1501,6 +1592,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     step: 'routing',
     detail: `Routing to ${effectiveProvider}${activeCustomModelName ? ` · ${activeCustomModelName}` : ''}`,
   });
+
+  if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
+    ensurePreResponseThinking(activeCustomModelName || activeSystemLabel);
+  }
 
   // 4. Route through HardenedAIEngine.stream() when provider/server-key candidates exist
   const shouldTryEngineCandidates =
@@ -1716,7 +1811,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         : [{ role: 'user', content: lastUserText }],
       uid,
       upstreamAbortController.signal,
-      emitDelta
+      emitDelta,
+      emitChunkedDelta
     );
     if (streamSucceeded) {
       actualProviderUsed = 'xrahat';

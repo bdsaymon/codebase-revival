@@ -895,41 +895,63 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
         </div>
       )}
 
-      {/* Claude-Style Minimal Collapsible Thinking Row */}
+      {/* Claude.ai-Style Extended Thinking Card */}
       {(Boolean(thinkingText) || isThinkingActive) && (
         <div
           data-testid="thinking-accordion"
-          className="my-1.5"
+          className={`my-2 rounded-xl border transition-all ${
+            isReasoningNow
+              ? 'border-[var(--primary)]/40 bg-[var(--surface)]/90 shadow-sm'
+              : 'border-[var(--border)] bg-[var(--surface)]/65 hover:border-[var(--border-strong,var(--border))]'
+          } px-3.5 py-2`}
         >
           <button
             type="button"
             data-testid="thinking-accordion-toggle"
             aria-expanded={isThinkingExpanded}
             onClick={() => setUserToggledThinking(!isThinkingExpanded)}
-            className="inline-flex items-center gap-1.5 py-1 text-[13px] font-medium text-[var(--ink-dim)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+            className="w-full flex items-center justify-between gap-2 py-0.5 text-[13px] font-medium text-[var(--ink-dim)] hover:text-[var(--ink)] transition-colors cursor-pointer text-left"
           >
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`inline-flex items-center justify-center w-5 h-5 rounded-md shrink-0 ${
+                  isReasoningNow
+                    ? 'bg-[var(--primary)]/15 text-[var(--primary)] animate-pulse'
+                    : 'bg-[var(--surface-2)] text-[var(--ink-dim)]'
+                }`}
+              >
+                <Brain className="w-3.5 h-3.5" />
+              </span>
+              <span
+                data-testid="thinking-accordion-headline"
+                className={`shrink-0 font-semibold ${
+                  isReasoningNow ? 'text-[var(--ink)] animate-pulse' : 'text-[var(--ink-dim)]'
+                }`}
+              >
+                {thinkingHeadline}
+              </span>
+              {thinkingText && (
+                <span className="text-[12px] text-[var(--text-3)] truncate hidden sm:inline">
+                  · {extractThinkingTopic(thinkingText)}
+                </span>
+              )}
+              {statusSteps.length > 0 && (
+                <span className="text-[12px] text-[var(--text-3)] truncate">
+                  · {statusSteps[statusSteps.length - 1]}
+                </span>
+              )}
+            </div>
             <ChevronRight
-              className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${
+              className={`w-4 h-4 shrink-0 text-[var(--ink-dim)] transition-transform duration-150 ${
                 isThinkingExpanded ? 'rotate-90' : ''
               }`}
             />
-            <span
-              data-testid="thinking-accordion-headline"
-              className={isReasoningNow ? 'animate-pulse' : ''}
-            >
-              {thinkingHeadline}
-            </span>
-            {statusSteps.length > 0 && (
-              <span className="text-[12px] text-[var(--text-3)] truncate">
-                · {statusSteps[statusSteps.length - 1]}
-              </span>
-            )}
           </button>
 
           {isThinkingExpanded && (
             <div
               data-testid="thinking-accordion-content"
-              className="mt-1 mb-2 pl-3.5 border-l-2 border-[var(--border)] text-[13px] leading-relaxed text-[var(--ink-dim)] font-normal max-h-60 overflow-y-auto whitespace-pre-wrap"
+              className="mt-2 pt-2 border-t border-[var(--border)]/60 pl-3 border-l-2 border-l-[var(--primary)]/50 text-[13px] leading-relaxed text-[var(--ink-dim)] font-normal max-h-64 overflow-y-auto whitespace-pre-wrap"
             >
               {thinkingText || 'ভাবছি…'}
             </div>
