@@ -110,5 +110,27 @@ describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', ()
     expect(anthropicParsed.thinking).toBe('Claude chain of thought');
     expect(anthropicParsed.text).toBe('Final Claude answer');
   });
+
+  it('streams thinking and text SSE events from POST /api/chat/stream without runtime errors', async () => {
+    const { dispatchToLegacyApp } = await import('../smfta/server/runtime/dispatch');
+    const req = new Request('http://localhost:3000/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', text: 'তুমি কে এবং তোমাকে কে তৈরি করেছে?' }],
+        provider: 'xrahat',
+        externalModel: 'smfta-v2-pro',
+        thinkingMode: 'high',
+      }),
+    });
+    const res = await dispatchToLegacyApp(req);
+    expect(res.status).toBe(200);
+    const bodyText = await res.text();
+    expect(bodyText).not.toContain('STREAM_EXCEPTION');
+    expect(bodyText).toContain('"type":"thinking"');
+    expect(bodyText).toContain('"type":"text"');
+    expect(bodyText).toContain('"type":"done"');
+  });
 });
+
 

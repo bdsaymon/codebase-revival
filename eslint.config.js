@@ -1,6 +1,5 @@
 import js from "@eslint/js";
 import firebaseRulesPlugin from "@firebase/eslint-plugin-security-rules";
-import eslintPluginPrettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
@@ -43,12 +42,6 @@ export default tseslint.config(
       "prefer-const": "warn",
       "no-misleading-character-class": "warn",
       "no-control-regex": "warn",
-    },
-  },
-  eslintPluginPrettier,
-  {
-    rules: {
-      "prettier/prettier": "off",
     },
   },
 );

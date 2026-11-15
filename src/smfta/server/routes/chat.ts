@@ -21,6 +21,7 @@ import {
   hasUnclosedArtifactTag,
   hasUnclosedCodeFence,
   hasUnclosedHtmlDocument,
+  INSTANT_GREETING_REGEX,
   interceptIdentityQuery,
   isLongCodeOrWritingRequest,
   matchTrainedWeights,

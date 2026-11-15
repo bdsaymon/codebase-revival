@@ -2683,7 +2683,11 @@ export default function App() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const r = new SR();
-    r.lang = resolveRecognitionLanguage(voiceLangMode, settings.appLanguage);
+    const effectiveLang = resolveRecognitionLanguage(
+      settings.vlang === 'bn-BD' || settings.vlang === 'en-US' ? (settings.vlang as any) : voiceLangMode,
+      settings.appLanguage
+    );
+    r.lang = effectiveLang;
     r.interimResults = true;
     r.continuous = true;
     voiceDraftRef.current = '';
@@ -2704,17 +2708,18 @@ export default function App() {
       let acc = '';
       const results = e?.results || [];
       for (let i = 0; i < results.length; i++) {
-        const seg = String(results[i]?.[0]?.transcript || '').trim();
+        const alt = results[i]?.[0];
+        const seg = String(alt?.transcript || '').trim();
         if (!seg) continue;
-        if (acc && seg.toLowerCase().startsWith(acc.toLowerCase())) {
-          acc = seg;
+        if (results[i].isFinal) {
+          acc = acc ? `${acc} ${seg}` : seg;
         } else {
           acc = acc ? `${acc} ${seg}` : seg;
         }
       }
       const clean = acc.replace(/\s+/g, ' ').trim();
-      voiceDraftRef.current = clean;
-      setVoiceLiveText(clean);
+      voiceDraftRef.current = clean || voiceDraftRef.current;
+      setVoiceLiveText(clean || voiceDraftRef.current);
       setVoiceActivityAt(Date.now());
     };
 
@@ -2754,17 +2759,20 @@ export default function App() {
       }
       if (code === 'no-speech') {
         if (!voiceDraftRef.current.trim()) {
-          showToast('কোনো কথা শোনা যায়নি — আবার চেষ্টা করুন');
+          showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনে পরিষ্কার বলুন');
         }
         return;
       }
       setIsListening(false);
       if (code === 'not-allowed' || code === 'service-not-allowed') {
-        showToast('মাইক্রোফোন পারমিশন চালু করুন');
+        showToast('মাইক্রোফোন পারমিশন ব্লক করা আছে — ব্রাউজার সেটিংসে অনুমতি দিন');
       } else if (code === 'audio-capture') {
-        showToast('মাইক্রোফোন পাওয়া যায়নি');
+        showToast('কোনো মাইক্রোফোন পাওয়া যায়নি');
       } else if (code === 'network') {
-        showToast('নেটওয়ার্ক সমস্যার কারণে ভয়েস শনাক্ত করা যায়নি');
+        // Fallback or tolerant message for network STT error
+        showToast('ভয়েস রিকগনিশন সার্ভারে সংযোগ বিচ্ছিন্ন — পুনরায় চেষ্টা করুন');
+      } else if (code) {
+        showToast(`ভয়েস ত্রুটি: ${code}`);
       }
     };
 

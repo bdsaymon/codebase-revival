@@ -68,6 +68,7 @@ import { ModelsSection } from './settings/ModelsSection';
 import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
 import { ConnectionsSection } from './settings/ConnectionsSection';
 import { ProvidersApiSection } from './settings/ProvidersApiSection';
+import { VoiceAudioSection } from './settings/VoiceAudioSection';
 
 export type SettingsTabId =
   | 'general'
@@ -110,7 +111,8 @@ export type SectionId =
   | 'memory'
   | 'projects'
   | 'connections'
-  | 'data';
+  | 'data'
+  | 'voice';
 
 interface CategoryDescriptor {
   id: SectionId;
@@ -122,6 +124,11 @@ const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
   {
     id: 'general',
     label: 'General',
+    icon: Sliders,
+  },
+  {
+    id: 'voice',
+    label: 'Voice & Audio',
     icon: Sliders,
   },
   {
@@ -1351,6 +1358,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             connections={connections}
             onUpdateConnections={onUpdateConnections}
             notify={notify}
+          />
+        );
+      case 'voice':
+        return (
+          <VoiceAudioSection
+            settings={draft}
+            onUpdate={patch}
           />
         );
     }

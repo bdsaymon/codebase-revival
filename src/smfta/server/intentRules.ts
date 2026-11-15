@@ -288,7 +288,7 @@ export type PromptComplexity = 'instant' | 'standard' | 'deep';
 const DEEP_REASONING_REGEX =
   /(কোড|প্রোগ্রাম|অ্যালগরিদম|বিস্তারিত|বিশ্লেষণ|তুলনা|ব্যাখ্যা|রচনা|গল্প|উপন্যাস|প্রবন্ধ|নিবন্ধ|স্ক্রিপ্ট|টিউটোরিয়াল|টিউটোরিয়াল|অ্যাপ|ওয়েবসাইট|ওয়েবসাইট|ডাটাবেস|আর্কিটেকচার|ডিবাগ|ফিক্স|ডিজাইন|নকশা|ইউআই|লেআউট|থিম|ড্যাশবোর্ড|ল্যান্ডিং|পোর্টফোলিও|আপডেট|পরিবর্তন|তৈরি|বানাও|বানাতে|লিখে দাও|তথ্য|গাইড|প্ল্যান|রিপোর্ট|ডকুমেন্টেশন|সম্পূর্ণ|পূর্ণাঙ্গ|বড়|বড়|দীর্ঘ|code|program|algorithm|analyze|analysis|compare|explain|architecture|refactor|debug|implement|update|upgrade|modify|redesign|design|layout|ui|ux|theme|dashboard|landing|portfolio|create|build|develop|generate|typescript|javascript|python|react|nextjs|tailwind|sql|html|css|full|complete|detailed|comprehensive|large|extensive|in[- ]depth|essay|story|article|guide|tutorial|report|plan|documentation|information|details|step by step|why|how does)/i;
 
-const INSTANT_GREETING_REGEX =
+export const INSTANT_GREETING_REGEX =
   /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|হ্যালো|হাই|সালাম|আসসালামু আলাইকুম|নমস্কার|ধন্যবাদ|কেমন আছো|কেমন আছেন|কি খবর|কী খবর|শুভ সকাল|শুভ রাত্রি)[?!.\s]*$/i;
 
 export const LONG_CODE_OR_WRITING_REGEX =
