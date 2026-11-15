@@ -6,10 +6,13 @@ import {
   Cpu,
   FileText,
   FolderKanban,
+  Gauge,
+  Mic,
   Plug,
   Shield,
   Sliders,
   Sparkles,
+  Wrench,
   X,
 } from 'lucide-react';
 import {
@@ -69,6 +72,8 @@ import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
 import { ConnectionsSection } from './settings/ConnectionsSection';
 import { ProvidersApiSection } from './settings/ProvidersApiSection';
 import { VoiceAudioSection } from './settings/VoiceAudioSection';
+import { PerformanceAdvancedSection } from './settings/PerformanceAdvancedSection';
+import { ToolsCapabilitiesSection } from './settings/ToolsCapabilitiesSection';
 
 export type SettingsTabId =
   | 'general'
@@ -79,6 +84,7 @@ export type SettingsTabId =
   | 'models'
   | 'data'
   | 'connections'
+  | 'voice'
   // Legacy aliases preserved for backward compatibility
   | 'mcp'
   | 'database'
@@ -107,6 +113,8 @@ export type SectionId =
   | 'general'
   | 'providers'
   | 'models'
+  | 'tools'
+  | 'performance'
   | 'instructions'
   | 'memory'
   | 'projects'
@@ -127,19 +135,29 @@ const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
     icon: Sliders,
   },
   {
+    id: 'models',
+    label: 'AI & Thinking',
+    icon: Sparkles,
+  },
+  {
+    id: 'tools',
+    label: 'Tools & Capabilities',
+    icon: Wrench,
+  },
+  {
+    id: 'performance',
+    label: 'Performance & Advanced',
+    icon: Gauge,
+  },
+  {
     id: 'voice',
     label: 'Voice & Audio',
-    icon: Sliders,
+    icon: Mic,
   },
   {
     id: 'providers',
     label: 'Custom Providers',
     icon: Cpu,
-  },
-  {
-    id: 'models',
-    label: 'AI & Thinking',
-    icon: Sparkles,
   },
   {
     id: 'instructions',
@@ -183,11 +201,13 @@ function normalizeTab(t?: SettingsTabId): SectionId {
       return 'memory';
     case 'projects':
       return 'projects';
+    case 'tools':
+      return 'tools';
+    case 'performance':
+      return 'performance';
     case 'models':
     case 'ai':
     case 'responses':
-    case 'performance':
-    case 'tools':
       return 'models';
     case 'data':
     case 'security':
@@ -200,6 +220,8 @@ function normalizeTab(t?: SettingsTabId): SectionId {
     case 'integrations':
     case 'self':
       return 'connections';
+    case 'voice':
+      return 'voice';
     case 'general':
     case 'appearance':
     case 'account':
@@ -270,6 +292,7 @@ export interface SettingsModalProps {
   cloudUserEmail?: string;
   activeProjectId?: string;
   onSelectActiveProject?: (projectId: string | undefined) => void;
+  onOpenSimpleEntryModal?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -319,6 +342,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   cloudUserEmail,
   activeProjectId,
   onSelectActiveProject,
+  onOpenSimpleEntryModal,
 }) => {
   const isInline = variant === 'inline';
   const [tab, setTab] = useState<SectionId>(() => normalizeTab(initialTab));
@@ -648,7 +672,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const k = (apiKey || '').toLowerCase();
     if (u.includes('codecraft') || k.startsWith('cc_')) {
       return [
-        'gemini-3.7-flash',
+        'gemini-3.8-flash',
         'deepseek-v4-flash-0731',
         'claude-sonnet-5',
         'claude-opus-4.8',
@@ -662,12 +686,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
     if (u.includes('openrouter')) {
       return [
-        'google/gemini-2.5-flash',
+        'google/gemini-3.8-flash',
         'meta-llama/llama-3.3-70b-instruct',
         'deepseek/deepseek-chat',
       ];
     }
-    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-2.5-flash'];
+    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-3.8-flash'];
   };
 
   const handleFetchNewModels = async (
@@ -1200,6 +1224,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             onNameChange={handleNameChange}
             patch={patch}
             notify={notify}
+            onOpenSimpleEntryModal={onOpenSimpleEntryModal}
           />
         );
       case 'instructions':
@@ -1365,6 +1390,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <VoiceAudioSection
             settings={draft}
             onUpdate={patch}
+            notify={notify}
+          />
+        );
+      case 'tools':
+        return (
+          <ToolsCapabilitiesSection
+            draft={draft}
+            patch={patch}
+          />
+        );
+      case 'performance':
+        return (
+          <PerformanceAdvancedSection
+            draft={draft}
+            patch={patch}
+            telemetryLogs={effectiveTelemetryLogs}
+            onClearTelemetryLogs={handleClearLogs}
+            notify={notify}
           />
         );
     }

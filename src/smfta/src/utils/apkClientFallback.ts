@@ -253,7 +253,7 @@ export async function runStandaloneClientSideAI(params: {
       throw new Error('Gemini API key is missing. Add your key in AI Providers.');
     }
     const geminiModel =
-      model.startsWith('gemini-') ? model : 'gemini-2.5-flash';
+      model.startsWith('gemini-') ? model : 'gemini-3.8-flash';
 
     let lastGemError: Error | null = null;
     for (const candidateKey of keyPool) {

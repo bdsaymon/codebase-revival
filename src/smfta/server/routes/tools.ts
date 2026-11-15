@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import { GoogleGenAI } from '@google/genai';
 import { Router, Request, Response } from '../runtime/express';
 import { callBackendEngine, sanitizeErrorMsg } from '../aiClient';
 import { sanitizeProprietaryOutput } from '../providers';
+import { getV2GeminiApiKey } from '../v2FirebaseAi';
 import { getNeuralStatus, retrainModelWeights } from '../intentRules';
 import {
   getResponseCacheSize,
@@ -426,11 +428,146 @@ toolsRouter.post('/generate-image', async (req: Request, res: Response) => {
       ? `, ${req.body.style.trim().slice(0, 60)} style`
       : '';
   const finalPrompt = `${rawPrompt}${styleHint}`;
+  const geminiKey = getV2GeminiApiKey();
+  if (geminiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const imgResp = await ai.models.generateContent({
+        model: 'gemini-nano-banana-2.1',
+        contents: finalPrompt,
+        config: {
+          responseModalities: ['IMAGE'],
+        },
+      });
+      const parts = imgResp.candidates?.[0]?.content?.parts || [];
+      for (const p of parts as Array<{ inlineData?: { mimeType?: string; data?: string } }>) {
+        if (p?.inlineData?.data) {
+          const mime = p.inlineData.mimeType || 'image/png';
+          return res.json({
+            url: `data:${mime};base64,${p.inlineData.data}`,
+            prompt: rawPrompt,
+            size,
+            modelUsed: 'gemini-nano-banana-2.1',
+          });
+        }
+      }
+    } catch {
+      // Fall through to keyless fallback if image endpoint is busy or rejects prompt
+    }
+  }
   const seed = crypto.randomInt(1, 1_000_000_000);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
     finalPrompt
   )}?width=${size}&height=${size}&seed=${seed}&nologo=true`;
-  return res.json({ url, prompt: rawPrompt, size });
+  return res.json({ url, prompt: rawPrompt, size, modelUsed: 'smfta-image-fallback' });
+});
+
+// ============================================================================
+// 3B. SERVER VOICE AUDIO TRANSCRIPTION (gemini-3.5-transcribe + fallback)
+// ============================================================================
+const ALLOWED_AUDIO_MIME_PREFIXES = [
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg',
+  'audio/wav',
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/aac',
+  'audio/x-m4a',
+];
+
+export function sanitizeAudioMimeType(raw?: string): string {
+  const clean = String(raw || '').split(';')[0].trim().toLowerCase();
+  if (ALLOWED_AUDIO_MIME_PREFIXES.includes(clean)) {
+    return clean === 'audio/mp3' ? 'audio/mpeg' : clean === 'audio/x-m4a' ? 'audio/mp4' : clean;
+  }
+  return 'audio/webm';
+}
+
+export function cleanVoiceTranscriptResponse(raw: string): string {
+  const s = String(raw || '')
+    .replace(/^```[\s\S]*?\n|```$/g, '')
+    .trim();
+  if (
+    !s ||
+    /^(?:\[?(?:silence|inaudible|no\s*speech|empty|none)\]?)$/i.test(s)
+  ) {
+    return '';
+  }
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
+  const rawAudio = typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+  if (!rawAudio) {
+    return res.status(400).json({ ok: false, error: 'audioBase64 is required' });
+  }
+  const strippedBase64 = rawAudio.replace(/^data:[^;]+;base64,/i, '').trim();
+  if (!strippedBase64 || strippedBase64.length > 16_000_000) {
+    return res.status(400).json({ ok: false, error: 'Invalid or oversized audio payload' });
+  }
+  const mimeType = sanitizeAudioMimeType(
+    typeof req.body?.mimeType === 'string' ? req.body.mimeType : undefined
+  );
+  const languageHint =
+    typeof req.body?.language === 'string' && req.body.language.trim()
+      ? req.body.language.trim()
+      : 'bn-BD / en-US';
+
+  const geminiKey = getV2GeminiApiKey();
+  if (!geminiKey) {
+    return res.status(503).json({
+      ok: false,
+      error: 'Voice transcription service key is not configured on the server.',
+    });
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey: geminiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+
+  const instruction =
+    `Transcribe the spoken audio accurately verbatim in its original spoken language (${languageHint}, supporting Bengali, English, and mixed Banglish). ` +
+    'Output ONLY the transcribed words with natural punctuation and no explanation or labels. If there is only silence or background noise, return an empty string.';
+
+  const candidateModels = ['gemini-3.5-transcribe', 'gemini-3.5-flash-lite'];
+  let lastError = 'Transcription failed';
+
+  for (const model of candidateModels) {
+    try {
+      const resp = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: instruction },
+              {
+                inlineData: {
+                  mimeType,
+                  data: strippedBase64,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const text = cleanVoiceTranscriptResponse(resp.text || '');
+      return res.json({
+        ok: true,
+        text,
+        modelUsed: model,
+      });
+    } catch (err) {
+      lastError = sanitizeErrorMsg(err);
+    }
+  }
+
+  return res.status(502).json({
+    ok: false,
+    error: lastError,
+  });
 });
 
 // ============================================================================

@@ -86,8 +86,8 @@ function getCuratedFallbackModels(provider: string): string[] {
       'deepseek-r1',
       'gpt-4o',
       'claude-3.5-sonnet',
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
       'qwen-2.5-coder',
       'llama-3.3-70b',
     ];
@@ -101,8 +101,8 @@ function getCuratedFallbackModels(provider: string): string[] {
   return [
     'gpt-4o-mini',
     'gpt-4o',
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
     'deepseek-chat',
     'llama-3.3-70b-versatile',
   ];
@@ -636,7 +636,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
         'deepseek-chat',
         'gpt-4o-mini',
         'llama-3.3-70b-versatile',
-        'gemini-2.5-flash',
+        'gemini-3.8-flash',
         'claude-3-haiku',
         'default',
       ])
@@ -831,7 +831,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     availableModelsForGateway.length > 0
       ? ` সাপোর্টেড মডেলসমূহ: ${availableModelsForGateway.slice(0, 6).join(', ')}।`
       : /mercury/i.test(effectiveProbeModel)
-      ? ' নোট: CodeCraft / OpenAI গেটওয়েতে "mercury-3" মডেলটি নেই (CodeCraft মডেল: gemini-3.7-flash, claude-sonnet-5, deepseek-v4-flash-0731; অথবা Inception Labs API-এর জন্য Base URL: https://api.inceptionlabs.ai/v1 ও মডেল: mercury / mercury-coder ব্যবহার করুন)।'
+      ? ' নোট: CodeCraft / OpenAI গেটওয়েতে "mercury-3" মডেলটি নেই (CodeCraft মডেল: gemini-3.8-flash, claude-sonnet-5, deepseek-v4-flash-0731; অথবা Inception Labs API-এর জন্য Base URL: https://api.inceptionlabs.ai/v1 ও মডেল: mercury / mercury-coder ব্যবহার করুন)।'
       : '';
 
   let detailedFailReason = '';

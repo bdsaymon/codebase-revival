@@ -43,7 +43,13 @@ import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from '../engine/defaults';
 import { sanitizeChatBody } from '../engine/requestGuard';
 import type { CanonicalMessage } from '../engine/context';
 import { supportsNativeThinking } from '../engine/thinking';
-import { looksTruncated, mergeContinuationText } from '../../src/utils/streamGuard';
+import {
+  continuationDirective,
+  createIdleWatchdog,
+  looksTruncated,
+  mergeContinuationText,
+  MAX_AUTO_CONTINUATIONS,
+} from '../../src/utils/streamGuard';
 import { parseExtractedMemoriesJson, isSensitiveFact } from '../../src/utils/memoryBank';
 import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
 import {
@@ -59,6 +65,10 @@ import {
   streamV2FirebaseModel,
   updateServerV2QuotaConfig,
 } from '../v2FirebaseAi';
+import {
+  retrieveRelevantV2Memories,
+  retrieveV2RagContext,
+} from '../v2Rag';
 
 export const chatRouter = Router();
 
@@ -191,21 +201,33 @@ async function streamFromXrahat(
     }
   };
 
+  const XRAHAT_IDLE_TIMEOUT_MS = 20_000;
+  const localAbort = new AbortController();
+  const onParentAbort = () => localAbort.abort(signal.reason);
+  signal.addEventListener('abort', onParentAbort, { once: true });
+  const watchdog = createIdleWatchdog(() => {
+    if (!localAbort.signal.aborted) {
+      localAbort.abort(new Error('Xrahat stream timed out'));
+    }
+  }, XRAHAT_IDLE_TIMEOUT_MS);
+
   const streamUrl = buildXrahatUrl(promptText, uid, true);
   let emitted = false;
   let fallbackResetText = '';
 
   try {
+    watchdog.arm();
     const res = await fetch(streamUrl, {
       method: 'GET',
       headers: { Accept: 'text/event-stream, application/json' },
-      signal,
+      signal: localAbort.signal,
     });
 
     if (res.ok && res.body) {
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
       if (contentType.includes('application/json')) {
         const json = await res.json().catch(() => null);
+        watchdog.disarm();
         const reply = extractXrahatReply(json);
         if (reply) {
           await deliverChunked(reply);
@@ -217,11 +239,13 @@ async function streamFromXrahat(
         let buffer = '';
 
         while (true) {
+          watchdog.arm();
           const { done, value } = await reader.read();
           if (done) {
             buffer += decoder.decode();
             break;
           }
+          watchdog.arm();
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || '';
@@ -244,6 +268,7 @@ async function streamFromXrahat(
             }
           }
         }
+        watchdog.disarm();
         if (buffer.trim()) {
           for (const line of buffer.split(/\r?\n/)) {
             const trimmed = line.trim();
@@ -271,16 +296,26 @@ async function streamFromXrahat(
       }
     }
   } catch {
-    if (signal.aborted) return emitted;
+    if (signal.aborted) {
+      watchdog.disarm();
+      signal.removeEventListener('abort', onParentAbort);
+      return emitted;
+    }
+  } finally {
+    watchdog.disarm();
   }
 
   if (!emitted && !signal.aborted) {
+    const jsonCtrl = new AbortController();
+    const onJsonParentAbort = () => jsonCtrl.abort(signal.reason);
+    signal.addEventListener('abort', onJsonParentAbort, { once: true });
+    const jsonTimer = setTimeout(() => jsonCtrl.abort(), XRAHAT_IDLE_TIMEOUT_MS);
     try {
       const jsonUrl = buildXrahatUrl(promptText, uid, false);
       const res = await fetch(jsonUrl, {
         method: 'GET',
         headers: { Accept: 'application/json' },
-        signal,
+        signal: jsonCtrl.signal,
       });
       if (res.ok) {
         const data = await res.json().catch(() => null);
@@ -292,9 +327,13 @@ async function streamFromXrahat(
       }
     } catch {
       // Ignore fallback error
+    } finally {
+      clearTimeout(jsonTimer);
+      signal.removeEventListener('abort', onJsonParentAbort);
     }
   }
 
+  signal.removeEventListener('abort', onParentAbort);
   return emitted;
 }
 
@@ -1066,7 +1105,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           .slice(0, 12)
       : [];
 
-    const quotaCheck = checkAndConsumeServerV2Quota({
+    const quotaCheck = await checkAndConsumeServerV2Quota({
       userId: v2ScopedUserId,
       userEmail:
         typeof firebaseUserEmail === 'string' ? firebaseUserEmail : undefined,
@@ -1075,7 +1114,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       configOverride: effectiveV2Config,
     });
 
-    const allQuotaSnapshot = getAllV2ModelStatusesForUser({
+    const allQuotaSnapshot = await getAllV2ModelStatusesForUser({
       userId: v2ScopedUserId,
       userEmail:
         typeof firebaseUserEmail === 'string' ? firebaseUserEmail : undefined,
@@ -1148,6 +1187,57 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       }
     }
 
+    let v2ProjectContext =
+      typeof projectContext === 'string' ? projectContext.slice(0, 60_000) : '';
+    let v2MemoryList = memList;
+    const ragCitations: Array<{ title: string; uri: string }> = [];
+
+    if (!incognito) {
+      const [ragRes, dbV2Memories] = await Promise.all([
+        retrieveV2RagContext({
+          userId: v2ScopedUserId,
+          query: lastUserText,
+          topK: 5,
+        }).catch(() => null),
+        !memoryPaused
+          ? retrieveRelevantV2Memories({
+              userId: v2ScopedUserId,
+              query: lastUserText,
+              topK: 6,
+            }).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+
+      if (dbV2Memories.length > 0) {
+        const seenMem = new Set(v2MemoryList.map((m) => m.trim().toLowerCase()));
+        for (const m of dbV2Memories) {
+          const cleanM = m.trim();
+          if (cleanM && !seenMem.has(cleanM.toLowerCase())) {
+            seenMem.add(cleanM.toLowerCase());
+            v2MemoryList = [cleanM, ...v2MemoryList];
+          }
+        }
+      }
+
+      if (ragRes) {
+        if (ragRes.matched && ragRes.contextBlock) {
+          v2ProjectContext = v2ProjectContext
+            ? `${v2ProjectContext}\n\n${ragRes.contextBlock}`
+            : ragRes.contextBlock;
+          for (const cit of ragRes.citations) {
+            ragCitations.push({
+              title: `${cit.fileName} (chunk #${cit.chunkIndex + 1})`,
+              uri: `rag://${encodeURIComponent(cit.docId)}#${cit.chunkIndex + 1}`,
+            });
+          }
+        } else if (ragRes.hasDocuments && ragRes.emptyNotice) {
+          v2ProjectContext = v2ProjectContext
+            ? `${v2ProjectContext}\n\n[V2 RAG STATUS]: ${ragRes.emptyNotice}`
+            : `[V2 RAG STATUS]: ${ragRes.emptyNotice}`;
+        }
+      }
+    }
+
     const v2SystemInstruction = buildSystemInstruction({
       mode: mode as 'fast' | 'balanced' | 'power',
       style: style as 'concise' | 'detailed',
@@ -1157,7 +1247,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       customInst,
       responseTone,
       codingPrefs,
-      memory: memList,
+      memory: v2MemoryList,
       autoMemory: Boolean(autoMemory),
       memoryPaused: Boolean(memoryPaused),
       incognito: Boolean(incognito),
@@ -1188,27 +1278,29 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           ? responseLength
           : undefined,
       chatHistorySummary: effectiveHistorySummary,
-      projectContext:
-        typeof projectContext === 'string' ? projectContext.slice(0, 60_000) : '',
+      recentTranscript: normalizedHistory,
+      projectContext: v2ProjectContext.slice(0, 60_000),
     });
 
     if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
-      ensurePreResponseThinking(v2Spec.label);
+      emitStatus('চিন্তা করছি…', 'thinking', 'Deep reasoning in progress');
     }
 
-    const v2StreamRes = await streamV2FirebaseModel({
+    const baseV2History =
+      normalizedHistory.length > 0
+        ? normalizedHistory
+        : [
+            {
+              role: 'user',
+              content: lastUserText || 'Hello',
+              imgs: lastUserImgs,
+            },
+          ];
+
+    let v2StreamRes = await streamV2FirebaseModel({
       modelId: v2ModelId,
       systemInstruction: v2SystemInstruction,
-      history:
-        normalizedHistory.length > 0
-          ? normalizedHistory
-          : [
-              {
-                role: 'user',
-                content: lastUserText || 'Hello',
-                imgs: lastUserImgs,
-              },
-            ],
+      history: baseV2History,
       signal: upstreamAbortController.signal,
       emitDelta,
       emitThinking,
@@ -1236,13 +1328,76 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       return;
     }
 
-    if (v2StreamRes.sources && v2StreamRes.sources.length > 0) {
+    // Section 8A: Auto-continuation for V2 (strictly stays on the V2 model chain)
+    const isLongV2Task = isLongCodeOrWritingRequest(lastUserText);
+    const v2NeedsContinuation = (acc: string) =>
+      hasUnclosedCodeFence(acc) ||
+      hasUnclosedArtifactTag(acc) ||
+      hasUnclosedHtmlDocument(acc) ||
+      (isLongV2Task && acc.length > 400 && looksTruncated(acc));
+
+    let v2LastTruncated = Boolean(v2StreamRes.truncated);
+    for (
+      let v2ContRound = 0;
+      v2ContRound < MAX_AUTO_CONTINUATIONS &&
+      v2StreamRes.ok &&
+      !clientClosed &&
+      (v2LastTruncated || v2NeedsContinuation(fullReplyAccumulator));
+      v2ContRound++
+    ) {
+      const baseBeforeV2Cont = fullReplyAccumulator;
+      let contBuffer = '';
+      const v2ContRes = await streamV2FirebaseModel({
+        modelId: v2ModelId,
+        systemInstruction: v2SystemInstruction,
+        history: [
+          ...baseV2History,
+          { role: 'assistant', content: baseBeforeV2Cont.slice(-3000) },
+          { role: 'user', content: continuationDirective(baseBeforeV2Cont) },
+        ],
+        signal: upstreamAbortController.signal,
+        emitDelta: (chunk) => {
+          contBuffer += chunk;
+        },
+        thinkingEnabled: false,
+        thinkingEffort: 'low',
+      });
+      if (!v2ContRes.ok || !contBuffer.trim()) {
+        v2LastTruncated = v2LastTruncated || Boolean(v2ContRes.truncated);
+        break;
+      }
+      const mergedV2 = mergeContinuationText(baseBeforeV2Cont, contBuffer);
+      if (!mergedV2.deltaToAppend.trim()) {
+        v2LastTruncated = Boolean(v2ContRes.truncated);
+        break;
+      }
+      emitDelta(mergedV2.deltaToAppend);
+      v2LastTruncated = Boolean(v2ContRes.truncated);
+      v2StreamRes = {
+        ...v2StreamRes,
+        modelUsed: v2ContRes.modelUsed || v2StreamRes.modelUsed,
+        fallbackUsed: v2StreamRes.fallbackUsed || v2ContRes.fallbackUsed,
+        fallbackNotice: v2StreamRes.fallbackNotice || v2ContRes.fallbackNotice,
+        truncated: v2LastTruncated,
+        sources:
+          v2ContRes.sources && v2ContRes.sources.length > 0
+            ? [...(v2StreamRes.sources || []), ...v2ContRes.sources]
+            : v2StreamRes.sources,
+      };
+    }
+
+    const mergedV2Sources = [
+      ...(v2StreamRes.sources || []),
+      ...ragCitations,
+    ];
+    if (mergedV2Sources.length > 0) {
       emitEvent({
         type: 'sources',
-        sources: v2StreamRes.sources,
+        sources: mergedV2Sources,
       });
     }
 
+    const v2StillTruncated = v2LastTruncated || v2NeedsContinuation(fullReplyAccumulator);
     finishStream({
       type: 'done',
       ok: true,
@@ -1250,8 +1405,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       requestedProvider: 'firebase_v2',
       requestedModel: v2ModelId,
       providerUsed: 'firebase_v2',
-      modelUsed: v2ModelId,
-      sources: v2StreamRes.sources,
+      modelUsed: v2StreamRes.modelUsed || v2Spec.serverGeminiModel || v2ModelId,
+      fallbackUsed: Boolean(v2StreamRes.fallbackUsed),
+      fallbackNotice: v2StreamRes.fallbackNotice,
+      truncated: v2StillTruncated,
+      resumedAfterDrop: Boolean(v2StreamRes.resumedAfterDrop),
+      sources: mergedV2Sources.length > 0 ? mergedV2Sources : undefined,
       attemptCount: 1,
       ttftMs:
         firstTokenPerf !== null
@@ -1548,6 +1707,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   }
 
   let streamSucceeded = false;
+  let streamTruncated = false;
+  let gatewayFallbackNotice: string | undefined;
   let lastErrorMessage = '';
   let actualProviderUsed = effectiveProvider;
   let actualModelUsed = activeCustomModelName || 'default';
@@ -1595,7 +1756,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   });
 
   if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
-    ensurePreResponseThinking(activeCustomModelName || activeSystemLabel);
+    emitStatus('চিন্তা করছি…', 'thinking', 'Reasoning in progress');
   }
 
   // 4. Route through HardenedAIEngine.stream() when provider/server-key candidates exist
@@ -1617,7 +1778,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai'
         ? activeCustomModelName
           ? normalizeGeminiModelName(activeCustomModelName)
-          : 'gemini-3-flash-preview'
+          : 'gemini-3.8-flash'
+        : built.adHocProviders[0]?.provider.provider_id === 'gemini_server'
+        ? built.adHocProviders[0].provider.models[0]?.model_id || 'gemini-3.8-flash'
         : activeCustomModelName || undefined;
 
     // 4a. Use SSE streaming when supportsStreaming !== false
@@ -1675,6 +1838,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
       if (streamRes.ok && fullReplyAccumulator.trim()) {
         streamSucceeded = true;
+        streamTruncated = Boolean(streamRes.truncated);
         actualProviderUsed = streamRes.providerId || effectiveProvider;
         actualModelUsed = streamRes.modelId || activeCustomModelName || 'default';
       } else if (
@@ -1786,12 +1950,17 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       signal: upstreamAbortController.signal,
       emitDelta,
       emitThinking,
+      thinkingEffort: requestedThinkingMode,
       maxTokens: effectiveMaxOutputTokens,
     });
     if (gw.ok) {
       streamSucceeded = true;
+      streamTruncated = Boolean(gw.truncated);
       actualProviderUsed = 'smfta_cloud';
-      actualModelUsed = activeCustomModelName || 'smfta-flash';
+      actualModelUsed = gw.modelUsed || gw.model || activeCustomModelName || 'smfta-flash';
+      if (gw.fallbackNotice) {
+        gatewayFallbackNotice = gw.fallbackNotice;
+      }
     } else if (fullReplyAccumulator.length > 0) {
       emitReset();
     }
@@ -1817,11 +1986,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     );
     if (streamSucceeded) {
       actualProviderUsed = 'xrahat';
-      actualModelUsed = 'smfta-core';
+      actualModelUsed = 'SMFTA cloud fallback';
     }
   }
 
-  // 6. Auto-continuation if a long code fence, <smfta_artifact>, HTML document, or long answer was cut off
+  // 6. Auto-continuation if truncated (MAX_TOKENS/LENGTH) or cut mid-block/mid-sentence
   const isLongTask = isLongCodeOrWritingRequest(lastUserText);
   const needsContinuation = (acc: string) =>
     hasUnclosedCodeFence(acc) ||
@@ -1829,12 +1998,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     hasUnclosedHtmlDocument(acc) ||
     (isLongTask && acc.length > 400 && looksTruncated(acc));
 
+  let contFailedOrStillTruncated = false;
   for (
     let contRound = 0;
-    contRound < 4 &&
+    contRound < MAX_AUTO_CONTINUATIONS &&
     streamSucceeded &&
     !clientClosed &&
-    needsContinuation(fullReplyAccumulator);
+    (streamTruncated || needsContinuation(fullReplyAccumulator));
     contRound++
   ) {
     const tailSnippet = fullReplyAccumulator.slice(-900);
@@ -1855,15 +2025,27 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       temperature: algoDecision.temperature,
       topP: algoDecision.topP,
     });
-    if (!contRes.ok || !contRes.text) break;
+    if (!contRes.ok || !contRes.text) {
+      contFailedOrStillTruncated = true;
+      break;
+    }
     const mergedCont = mergeContinuationText(fullReplyAccumulator, contRes.text);
-    if (!mergedCont.deltaToAppend) break;
+    if (!mergedCont.deltaToAppend) {
+      contFailedOrStillTruncated = false;
+      streamTruncated = false;
+      break;
+    }
     emitDelta(mergedCont.deltaToAppend);
+    streamTruncated = false;
   }
 
-  // 7. Store successful single-turn reply in user-scoped sha256 response cache
+  const finalV1Truncated =
+    contFailedOrStillTruncated || streamTruncated || needsContinuation(fullReplyAccumulator);
+
+  // 7. Store successful non-truncated single-turn reply in user-scoped sha256 response cache
   if (
     streamSucceeded &&
+    !finalV1Truncated &&
     memoryCache !== false &&
     normalizedHistory.length <= 2 &&
     lastUserImgs.length === 0 &&
@@ -2001,6 +2183,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     !(
       (effectiveProvider === 'smfta_cloud' || effectiveProvider === 'xrahat') &&
       (actualProviderUsed === 'xrahat' ||
+        actualProviderUsed === 'gemini' ||
         actualProviderUsed === 'server_gemini' ||
         actualProviderUsed === 'gemini_server' ||
         actualProviderUsed === 'smfta_cloud')
@@ -2017,10 +2200,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       !activeCustomModelName.startsWith('smfta-') &&
       actualModelUsed !== activeCustomModelName
   );
-  const fallbackUsed = providerSwitched || modelSwitched;
-  const fallbackNotice = fallbackUsed
-    ? `Switched from ${effectiveProvider}${activeCustomModelName ? `/${activeCustomModelName}` : ''} to ${actualProviderUsed}/${actualModelUsed}`
-    : undefined;
+  const fallbackUsed = providerSwitched || modelSwitched || Boolean(gatewayFallbackNotice);
+  const fallbackNotice =
+    gatewayFallbackNotice ||
+    (providerSwitched || modelSwitched
+      ? `Switched from ${effectiveProvider}${activeCustomModelName ? `/${activeCustomModelName}` : ''} to ${actualProviderUsed}/${actualModelUsed}`
+      : undefined);
 
   finishStream({
     type: 'done',
@@ -2032,6 +2217,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     modelUsed: actualModelUsed,
     fallbackUsed,
     fallbackNotice,
+    truncated: finalV1Truncated,
     attemptCount: Math.max(1, allAttempts.length),
     ttftMs:
       firstTokenPerf !== null
@@ -2185,14 +2371,14 @@ chatRouter.post('/battle', async (req: Request, res: Response) => {
 // ============================================================================
 // 3. V2 – SPECIAL (FIREBASE AI) QUOTA & TESTING ENDPOINTS
 // ============================================================================
-chatRouter.get('/v2/quota', (req: Request, res: Response) => {
+chatRouter.get('/v2/quota', async (req: Request, res: Response) => {
   const userId = String(
     req.query?.userId || req.userId || 'default-user'
   ).slice(0, 128);
   const userEmail = String(req.query?.userEmail || '').slice(0, 128);
   const emailVerified = req.query?.emailVerified === 'true';
 
-  const snapshot = getAllV2ModelStatusesForUser({
+  const snapshot = await getAllV2ModelStatusesForUser({
     userId,
     userEmail: userEmail || undefined,
     emailVerified,
@@ -2204,7 +2390,7 @@ chatRouter.get('/v2/quota', (req: Request, res: Response) => {
   });
 });
 
-chatRouter.post('/v2/quota/config', (req: Request, res: Response) => {
+chatRouter.post('/v2/quota/config', async (req: Request, res: Response) => {
   const {
     userId = 'default-user',
     userEmail = '',
@@ -2228,14 +2414,14 @@ chatRouter.post('/v2/quota/config', (req: Request, res: Response) => {
     });
   }
 
-  const updated = updateServerV2QuotaConfig(String(userId), {
+  const updated = await updateServerV2QuotaConfig(String(userId), {
     v5Limit,
     proLimit,
     maxLimit,
     testingAllowance,
     testingBypassEnabled,
   });
-  const snapshot = getAllV2ModelStatusesForUser({
+  const snapshot = await getAllV2ModelStatusesForUser({
     userId: String(userId),
     userEmail: typeof userEmail === 'string' ? userEmail : undefined,
     emailVerified: Boolean(emailVerified),
@@ -2244,7 +2430,7 @@ chatRouter.post('/v2/quota/config', (req: Request, res: Response) => {
   return res.json({ ok: true, ...snapshot });
 });
 
-chatRouter.post('/v2/quota/simulate', (req: Request, res: Response) => {
+chatRouter.post('/v2/quota/simulate', async (req: Request, res: Response) => {
   const {
     userId = 'default-user',
     userEmail = '',
@@ -2266,7 +2452,7 @@ chatRouter.post('/v2/quota/simulate', (req: Request, res: Response) => {
     });
   }
 
-  const status = setServerV2UsageCountForTesting({
+  const status = await setServerV2UsageCountForTesting({
     userId: String(userId),
     userEmail: typeof userEmail === 'string' ? userEmail : undefined,
     modelId,
@@ -2274,7 +2460,7 @@ chatRouter.post('/v2/quota/simulate', (req: Request, res: Response) => {
     testingUsedCount:
       typeof testingUsedCount === 'number' ? testingUsedCount : undefined,
   });
-  const snapshot = getAllV2ModelStatusesForUser({
+  const snapshot = await getAllV2ModelStatusesForUser({
     userId: String(userId),
     userEmail: typeof userEmail === 'string' ? userEmail : undefined,
     emailVerified: Boolean(emailVerified),

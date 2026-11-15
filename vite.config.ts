@@ -13,9 +13,14 @@ export default defineConfig({
     server: { entry: "server" },
   },
   vite: {
+    optimizeDeps: {
+      entries: ["src/router.tsx", "src/smfta/AppEntry.tsx"],
+      exclude: ["pdfjs-dist"],
+    },
     server: {
       host: "0.0.0.0",
       port: 3000,
     },
   },
 });
+

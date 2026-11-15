@@ -36,7 +36,7 @@ const PRESET_CHAT_URLS: Record<string, string> = {
   unorouter: 'https://api.unorouter.com/v1/chat/completions',
   codecraft: 'https://codecraftapi.com/v1/chat/completions',
   gemini_custom:
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
   gemini_openai:
     'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
   anthropic: 'https://api.anthropic.com/v1/messages',

@@ -148,6 +148,24 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
           onChange={(v) => patch({ liveThinkingSummary: v })}
         />
 
+        {/* Thinking Subject Preview Up Front */}
+        <SettingToggle
+          label="Show Thinking Subject Up Front (শুরুতেই বিষয় দেখানো)"
+          description="থিংকিং শুরুতেই কোন বিষয়ে ভাবছে তা হেডার ও কার্ডের শুরুতে দেখাবে"
+          checked={draft.showThinkingTopic !== false}
+          testId="show-thinking-topic-toggle"
+          onChange={(v) => patch({ showThinkingTopic: v })}
+        />
+
+        {/* Auto-collapse Thinking on Final Answer */}
+        <SettingToggle
+          label="Auto-Collapse Thinking on Reply"
+          description="মূল উত্তর শুরু হলে থিংকিং কার্ড স্বয়ংক্রিয়ভাবে ভাঁজ হয়ে পরিষ্কার দেখাবে"
+          checked={draft.autoCollapseThinking !== false}
+          testId="auto-collapse-thinking-toggle"
+          onChange={(v) => patch({ autoCollapseThinking: v })}
+        />
+
         {/* Smooth Pen-Like Typewriter Streaming */}
         <SettingToggle
           label="Smooth Typewriter Streaming (কলমের মতো লেখা)"
@@ -243,6 +261,56 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
             >
               বিস্তারিত
             </button>
+          </div>
+        </div>
+
+        {/* Cross-Model Context Memory Carryover */}
+        <SettingToggle
+          label="Cross-Model Memory Carryover (মডেল চেঞ্জ করলেও আগের কথা মনে রাখা)"
+          description="একই পেজে বা চ্যাটে মডেল পরিবর্তন করলেও আগের সব কথোপকথন ও প্রেক্ষাপট নতুন মডেলে অক্ষুণ্ণ রাখবে"
+          checked={draft.crossModelMemoryCarryover !== false}
+          testId="cross-model-memory-toggle"
+          onChange={(v) => patch({ crossModelMemoryCarryover: v, includeHistory: true })}
+        />
+
+        {/* Conversation History Memory Depth */}
+        <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
+          <div>
+            <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+              Conversation Memory Depth (কতগুলো মেসেজ মনে রাখবে)
+            </span>
+            <span className="text-[11.5px] text-[var(--ink-dim)]">
+              একই চ্যাটে মডেল চেঞ্জ বা দীর্ঘ আলোচনায় যতগুলো আগের মেসেজ সরাসরি মনে রাখবে
+            </span>
+          </div>
+          <div className="cs-seg" data-testid="history-depth-selector">
+            {(
+              [
+                { count: 12, label: '12 Turns' },
+                { count: 24, label: '24 Turns' },
+                { count: 40, label: '40 Max' },
+              ] as const
+            ).map((opt) => {
+              const curDepth = draft.maxHistoryMessages ?? 24;
+              return (
+                <button
+                  key={opt.count}
+                  type="button"
+                  data-testid={`history-depth-${opt.count}`}
+                  onClick={() =>
+                    patch({
+                      includeHistory: true,
+                      maxHistoryMessages: opt.count,
+                    })
+                  }
+                  className={`cs-seg-btn ${
+                    curDepth === opt.count ? 'is-active' : ''
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 

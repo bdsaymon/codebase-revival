@@ -25,7 +25,7 @@ export const CODECRAFT_BASE_URL = 'https://codecraftapi.com/v1';
 export const CODECRAFT_CHAT_URL = `${CODECRAFT_BASE_URL}/chat/completions`;
 export const CODECRAFT_MODELS_URL = `${CODECRAFT_BASE_URL}/models`;
 export const CODECRAFT_FALLBACK_MODELS = [
-  'gemini-3.7-flash',
+  'gemini-3.8-flash',
   'deepseek-v4-flash-0731',
   'claude-sonnet-5',
   'claude-opus-4.8',
@@ -43,21 +43,21 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     id: 'unorouter',
     name: 'UnoRouter',
     url: 'https://api.unorouter.com/v1/chat/completions',
-    defaultModel: 'google/gemini-2.5-flash',
+    defaultModel: 'google/gemini-3.8-flash',
     fallbackModels: ['openai/gpt-4o-mini', 'deepseek/deepseek-chat'],
   },
   codecraft: {
     id: 'codecraft',
     name: 'CodeCraft API',
     url: CODECRAFT_CHAT_URL,
-    defaultModel: 'gemini-3.7-flash',
+    defaultModel: 'gemini-3.8-flash',
     fallbackModels: [...CODECRAFT_FALLBACK_MODELS],
   },
   openrouter: {
     id: 'openrouter',
     name: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1/chat/completions',
-    defaultModel: 'google/gemini-2.5-flash',
+    defaultModel: 'google/gemini-3.8-flash',
     fallbackModels: ['openai/gpt-4o-mini', 'deepseek/deepseek-chat'],
     headers: {
       'HTTP-Referer': 'https://smfta.local',
@@ -97,16 +97,16 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     id: 'gemini_custom',
     name: 'Google Gemini (Native)',
     url: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-2.5-flash',
-    fallbackModels: ['gemini-2.5-pro', 'gemini-2.5-flash-lite'],
+    defaultModel: 'gemini-3.8-flash',
+    fallbackModels: ['gemini-3.8-flash', 'gemini-3.5-flash-lite'],
     protocol: 'gemini_native',
   },
   gemini_openai: {
     id: 'gemini_openai',
     name: 'Google Gemini (OpenAI Endpoint)',
     url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    defaultModel: 'gemini-2.5-flash',
-    fallbackModels: ['gemini-2.5-pro', 'gemini-2.5-flash-lite'],
+    defaultModel: 'gemini-3.8-flash',
+    fallbackModels: ['gemini-3.8-flash', 'gemini-3.5-flash-lite'],
   },
   mistral: {
     id: 'mistral',
@@ -372,7 +372,7 @@ function compactXrahatSystemHeader(rawSystemInstruction: string): string {
   }
 
   const lines: string[] = [
-    `System: You are the active SMFTA AI Pro system, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party AI vendors as your creator/model. NEVER print phone digits or Telegram usernames/links (t.me/..., @...). For creator/contact questions include ${CONTACT_BUTTONS_TOKEN}. For ANY hacking-related question reply ONLY: "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন। ${CONTACT_BUTTONS_TOKEN}". For designs, apps, code updates, writing, and information requests, deliver complete, rich, thorough output without truncation. You do NOT have live web browsing abilities.`,
+    `System: You are the active SMFTA AI Pro system, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party AI vendors as your creator/model. NEVER print phone digits or Telegram/WhatsApp usernames/links. For ANY hacking-related question reply ONLY: "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।". For designs, apps, code updates, writing, and information requests, deliver complete, rich, thorough output without truncation. You do NOT have live web browsing abilities.`,
   ];
   if (/ONLY in natural, fluent Bengali/i.test(raw)) {
     lines.push('Reply in Bengali.');
@@ -450,22 +450,28 @@ export function buildXrahatPrompt(
   const cleanHistory = history.filter((m) => (m.content || '').trim());
   if (cleanHistory.length === 0) return '';
 
-  const header = compactXrahatSystemHeader(systemInstruction);
+  const rawHeader = compactXrahatSystemHeader(systemInstruction);
   const lastTurn = cleanHistory[cleanHistory.length - 1];
   const priorTurns = cleanHistory.slice(0, -1).slice(-6);
 
+  // When prior conversation turns exist, cap the header so it never starves
+  // conversation history during mid-session model switches.
+  const header =
+    priorTurns.length > 0 && rawHeader.length > 360
+      ? `${rawHeader.slice(0, 360)}…`
+      : rawHeader;
+
   const maxPerPriorTurn = charBudget > 1800 ? 600 : 280;
-  const maxEncodedUrlLen = 3500;
+  const maxEncodedUrlLen = 6500;
 
   let latestContent = lastTurn.content.trim();
-  if (latestContent.length > charBudget) {
-    const budget = Math.max(240, charBudget - 200);
-    const headLen = Math.floor(budget * 0.7);
-    const tailLen = Math.max(60, budget - headLen - 20);
+  const latestReserve = priorTurns.length > 0 ? Math.max(220, Math.floor(charBudget * 0.45)) : Math.max(240, charBudget - 200);
+  if (latestContent.length > latestReserve) {
+    const headLen = Math.floor(latestReserve * 0.7);
+    const tailLen = Math.max(50, latestReserve - headLen - 20);
     latestContent = `${latestContent.slice(0, headLen)}\n…\n${latestContent.slice(-tailLen)}`;
   }
 
-  // Ensure the base prompt (header + latest user turn) fits inside the 3,500-char encoded URL limit
   const buildWithLines = (middleLines: string[], currentLatest: string) => {
     const transcript = [...middleLines, `User: ${currentLatest}`].join('\n');
     return header ? `${header}\n\n${transcript}` : transcript;
@@ -487,13 +493,21 @@ export function buildXrahatPrompt(
   for (let i = priorTurns.length - 1; i >= 0; i--) {
     const m = priorTurns[i];
     const tag = m.role === 'user' ? 'User' : 'Assistant';
-    const clipped =
+    let clipped =
       m.content.trim().length > maxPerPriorTurn
         ? `${m.content.trim().slice(0, maxPerPriorTurn)}…`
         : m.content.trim();
-    const line = `${tag}: ${clipped}`;
-    const candidateLines = [line, ...selectedPriorLines];
-    const candidatePrompt = buildWithLines(candidateLines, latestContent);
+    let line = `${tag}: ${clipped}`;
+    let candidateLines = [line, ...selectedPriorLines];
+    let candidatePrompt = buildWithLines(candidateLines, latestContent);
+
+    // If full prior turn exceeds charBudget, try a compact 120-char summary of the turn before giving up
+    if (candidatePrompt.length > charBudget && m.content.trim().length > 100) {
+      clipped = `${m.content.trim().slice(0, 110)}…`;
+      line = `${tag}: ${clipped}`;
+      candidateLines = [line, ...selectedPriorLines];
+      candidatePrompt = buildWithLines(candidateLines, latestContent);
+    }
 
     if (candidatePrompt.length > charBudget) {
       break;
@@ -632,7 +646,7 @@ export function extractXrahatReply(payload: unknown): string {
 }
 
 export const ROUTER_FALLBACK_MODELS = [
-  'google/gemini-2.5-flash',
+  'google/gemini-3.8-flash',
   'openai/gpt-4o-mini',
   'deepseek/deepseek-chat',
 ];
@@ -759,13 +773,13 @@ export function normalizeEndpointUrl(
 export function inferModelForCustomBaseUrl(baseUrl?: string): string {
   if (!baseUrl) return 'gpt-4o-mini';
   const u = baseUrl.toLowerCase();
-  if (u.includes('codecraft')) return 'gemini-3.7-flash';
+  if (u.includes('codecraft')) return 'gemini-3.8-flash';
   if (u.includes('inceptionlabs') || u.includes('mercury')) return 'mercury-3';
-  if (u.includes('generativelanguage.googleapis.com')) return 'gemini-2.5-flash';
+  if (u.includes('generativelanguage.googleapis.com')) return 'gemini-3.8-flash';
   if (u.includes('groq.com')) return 'llama-3.3-70b-versatile';
   if (u.includes('deepseek.com')) return 'deepseek-chat';
   if (u.includes('anthropic.com')) return 'claude-sonnet-4-20250514';
-  if (u.includes('openrouter.ai')) return 'google/gemini-2.5-flash';
+  if (u.includes('openrouter.ai')) return 'google/gemini-3.8-flash';
   if (u.includes('cerebras.ai')) return 'llama-3.3-70b';
   if (u.includes('mistral.ai')) return 'mistral-small-latest';
   if (u.includes('together.xyz') || u.includes('together.ai')) return 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
@@ -895,7 +909,8 @@ export function buildProviderModelCandidates(
 
     // Add popular OpenAI-compatible models as fallback only when no explicit model or discovered models exist
     for (const fallback of [
-      'gemini-3.7-flash',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
       'deepseek-v4-flash-0731',
       'claude-sonnet-5',
       'gpt-4o-mini',

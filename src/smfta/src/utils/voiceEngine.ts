@@ -93,6 +93,183 @@ export function isSpeechRecognitionSupported(): boolean {
   return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
 }
 
+export function isMediaRecorderSupported(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof MediaRecorder !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function')
+  );
+}
+
+export function isVoiceInputSupported(): boolean {
+  return isSpeechRecognitionSupported() || isMediaRecorderSupported();
+}
+
+export function pickSupportedAudioMimeType(): string {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return '';
+  }
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ];
+  for (const mime of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(mime)) return mime;
+    } catch {
+      // Ignore probe error
+    }
+  }
+  return '';
+}
+
+export interface SpeechResultLike {
+  isFinal?: boolean;
+  0?: { transcript?: string };
+}
+
+/**
+ * Accumulates SpeechRecognition results cleanly without losing already-finalized
+ * prefix text when recognition restarts after pauses.
+ */
+export function accumulateSpeechResults(
+  results: ArrayLike<SpeechResultLike> | undefined | null,
+  previousFinalPrefix = ''
+): { finalPrefix: string; liveTranscript: string } {
+  const prefix = String(previousFinalPrefix || '').trim();
+  if (!results || results.length === 0) {
+    return { finalPrefix: prefix, liveTranscript: prefix };
+  }
+  let sessionFinal = '';
+  let sessionInterim = '';
+  for (let i = 0; i < results.length; i++) {
+    const item = results[i];
+    const seg = String(item?.[0]?.transcript || '').trim();
+    if (!seg) continue;
+    if (item?.isFinal) {
+      sessionFinal = sessionFinal ? `${sessionFinal} ${seg}` : seg;
+    } else {
+      sessionInterim = sessionInterim ? `${sessionInterim} ${seg}` : seg;
+    }
+  }
+  const combinedFinal = [prefix, sessionFinal]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const liveTranscript = [combinedFinal, sessionInterim]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return {
+    finalPrefix: combinedFinal,
+    liveTranscript,
+  };
+}
+
+export async function blobToBase64Data(blob: Blob): Promise<string> {
+  if (typeof blob.arrayBuffer === 'function') {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Audio read failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function requestServerVoiceTranscription(params: {
+  audioBase64: string;
+  mimeType: string;
+  language?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<{ ok: boolean; text: string; modelUsed?: string; error?: string }> {
+  const fetcher = params.fetchImpl || fetch;
+  try {
+    const res = await fetcher('/api/voice/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audioBase64: params.audioBase64,
+        mimeType: params.mimeType,
+        language: params.language,
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      text?: string;
+      modelUsed?: string;
+      error?: string;
+    };
+    if (!res.ok || data.ok === false) {
+      return {
+        ok: false,
+        text: '',
+        error: data.error || `HTTP ${res.status}`,
+      };
+    }
+    return {
+      ok: true,
+      text: String(data.text || '').trim(),
+      modelUsed: data.modelUsed,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      text: '',
+      error: err instanceof Error ? err.message : 'Transcription request failed',
+    };
+  }
+}
+
+/**
+ * Chooses the freshest live caption text for the above-waveform display:
+ * prefers real-time Web Speech API interim/final output whenever active,
+ * falling back cleanly to rolling server transcription captions when Web Speech
+ * is unavailable or silent (desktop/iframe/Android WebView).
+ */
+export function mergeVoiceLiveTranscript(
+  speechText: string,
+  rollingServerText: string
+): string {
+  const s = String(speechText || '').replace(/\s+/g, ' ').trim();
+  const r = String(rollingServerText || '').replace(/\s+/g, ' ').trim();
+  if (s && r) {
+    return s.length >= r.length * 0.4 ? s : r;
+  }
+  return s || r;
+}
+
+export function shouldPollRollingVoiceTranscript(params: {
+  isListening: boolean;
+  hasWebSpeechText: boolean;
+  totalChunkBytes: number;
+  inFlight: boolean;
+  liveCaptionsEnabled?: boolean;
+}): boolean {
+  if (!params.isListening) return false;
+  if (params.liveCaptionsEnabled === false) return false;
+  if (params.hasWebSpeechText) return false;
+  if (params.inFlight) return false;
+  return params.totalChunkBytes >= 800;
+}
+
 export function isSpeechSynthesisSupported(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -158,6 +335,7 @@ class BilingualSpeechPlayer {
     text: string;
     msgId?: string;
     preferredLang?: VoiceLangMode;
+    voiceProfile?: 'default' | 'bengali_female' | 'bengali_male' | 'english_us_female' | 'english_us_male';
     rate?: number;
     onDone?: () => void;
   }): void {
@@ -177,7 +355,9 @@ class BilingualSpeechPlayer {
     this.currentMsgId = params.msgId || 'tts_active';
 
     const defaultSegLang: 'bn-BD' | 'en-US' =
-      params.preferredLang === 'en-US' ? 'en-US' : 'bn-BD';
+      params.preferredLang === 'en-US' || params.voiceProfile?.startsWith('english')
+        ? 'en-US'
+        : 'bn-BD';
     const segments = detectLanguageSegments(params.text, defaultSegLang);
     if (segments.length === 0) {
       this.stop();
@@ -188,9 +368,26 @@ class BilingualSpeechPlayer {
     const voices = window.speechSynthesis.getVoices() || [];
     const pickVoice = (targetLang: 'bn-BD' | 'en-US') => {
       const prefix = targetLang.slice(0, 2);
+      const profile = params.voiceProfile || 'default';
+      const wantFemale = profile.endsWith('female');
+      const wantMale = profile.endsWith('male');
+      const pool = voices.filter(
+        (v) =>
+          v.lang?.toLowerCase() === targetLang.toLowerCase() ||
+          v.lang?.toLowerCase().startsWith(prefix)
+      );
+      if (pool.length > 0 && (wantFemale || wantMale)) {
+        const gendered = pool.find((v) => {
+          const n = (v.name || '').toLowerCase();
+          return wantFemale
+            ? /female|woman|srabani|tanisha|ava|samantha|victoria|zira|aria|jenny|natasha|google/.test(n)
+            : /\bmale\b|\bman\b|tanvir|pradeep|andrew|david|guy|mark|daniel/.test(n);
+        });
+        if (gendered) return gendered;
+      }
       return (
-        voices.find((v) => v.lang?.toLowerCase() === targetLang.toLowerCase()) ||
-        voices.find((v) => v.lang?.toLowerCase().startsWith(prefix)) ||
+        pool.find((v) => v.lang?.toLowerCase() === targetLang.toLowerCase()) ||
+        pool[0] ||
         null
       );
     };

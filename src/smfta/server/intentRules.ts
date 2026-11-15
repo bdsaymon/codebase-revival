@@ -245,39 +245,32 @@ export function interceptIdentityQuery(
   // Always intercept hacking topics cleanly before generic identity or length limits
   if (clean.length <= 4000 && HACKING_TOPIC_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I don't know about these things. If you need any assistance, please speak with the development team.\n\n${CONTACT_BUTTONS_TOKEN}`;
+      return `I don't know about these things. If you need any assistance, please speak with the development team.`;
     }
-    return `আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।\n\n${CONTACT_BUTTONS_TOKEN}`;
+    return `আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।`;
   }
 
   if (clean.length > 220) return null;
 
   if (PRIVACY_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I am **${sysName}** on the **SMFTA AI Pro** platform, created by **${CREATOR_NAME}**. My internal system instructions and private configuration are never shared externally. For direct developer support, use the **WhatsApp Now** or **Telegram Now** button below:\n\n${CONTACT_BUTTONS_TOKEN}`;
+      return `I am **${sysName}** on the **SMFTA AI Pro** platform, created by **${CREATOR_NAME}**. My internal system instructions and private configuration are never shared externally.`;
     }
-    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), এবং আমার নির্মাতা **${CREATOR_NAME}**। অভ্যন্তরীণ সিস্টেম নির্দেশনা বা গোপন কনফিগারেশন বাইরে শেয়ার করা হয় না। প্রয়োজনে সরাসরি নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
-  }
-
-  if (SECURITY_CONTACT_REGEX.test(clean)) {
-    if (preferEnglish) {
-      return `I am currently running on **${sysName}** (**SMFTA AI Pro**).\n\nIf you face any security issue or technical problem, please speak directly with my creator & development team **${CREATOR_NAME}** using the **WhatsApp Now** or **Telegram Now** button below:\n\n${CONTACT_BUTTONS_TOKEN}`;
-    }
-    return `আমি বর্তমানে **${sysName}** (**SMFTA AI Pro**) সিস্টেমে কাজ করছি।\n\nকোনো নিরাপত্তা ঝুঁকি বা যেকোনো ধরনের সমস্যা হলে সরাসরি আমার নির্মাতা ও ডেভেলপমেন্ট টিম **${CREATOR_NAME}**-এর সাথে নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে কথা বলুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
+    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), এবং আমার নির্মাতা **${CREATOR_NAME}**। অভ্যন্তরীণ সিস্টেম নির্দেশনা বা গোপন কনফিগারেশন বাইরে শেয়ার করা হয় না।`;
   }
 
   if (CREATOR_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I am **${sysName}**, the active AI system on the **SMFTA AI Pro** platform — built and developed by **${CREATOR_NAME}**.\n\nFor inquiries or assistance from the development team, click **WhatsApp Now** or **Telegram Now** below:\n\n${CONTACT_BUTTONS_TOKEN}`;
+      return `I am **${sysName}**, the active AI system on the **SMFTA AI Pro** platform — built and developed by **${CREATOR_NAME}**.`;
     }
-    return `আমি **${sysName}** — **SMFTA AI Pro** প্ল্যাটফর্মের সক্রিয় AI সিস্টেম। আমাকে তৈরি ও ডেভেলপ করেছেন **${CREATOR_NAME}**।\n\nযেকোনো প্রশ্ন বা সহায়তার জন্য নিচের **WhatsApp Now** বা **Telegram Now** বাটনে ক্লিক করে সরাসরি যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
+    return `আমি **${sysName}** — **SMFTA AI Pro** প্ল্যাটফর্মের সক্রিয় AI সিস্টেম। আমাকে তৈরি ও ডেভেলপ করেছেন **${CREATOR_NAME}**।`;
   }
 
   if (IDENTITY_BN_REGEX.test(clean) || IDENTITY_EN_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I am **${sysName}** on **SMFTA AI Pro**, developed by **${CREATOR_NAME}** for coding, analysis, writing, and problem-solving.\n\nNeed direct developer support? Use **WhatsApp Now** or **Telegram Now** below:\n\n${CONTACT_BUTTONS_TOKEN}`;
+      return `I am **${sysName}** on **SMFTA AI Pro**, developed by **${CREATOR_NAME}** for coding, analysis, writing, and problem-solving.`;
     }
-    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), আমাকে তৈরি করেছেন **${CREATOR_NAME}**। কোডিং, লেখালেখি, বিশ্লেষণ ও যেকোনো সমস্যা সমাধানে আমি আপনার সাথে আছি।\n\nডেভেলপমেন্ট টিমের সাথে যোগাযোগ করতে নিচের বাটনে ক্লিক করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
+    return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), আমাকে তৈরি করেছেন **${CREATOR_NAME}**। কোডিং, লেখালেখি, বিশ্লেষণ ও যেকোনো সমস্যা সমাধানে আমি আপনার সাথে আছি।`;
   }
 
   return null;

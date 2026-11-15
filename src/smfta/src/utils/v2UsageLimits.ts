@@ -24,7 +24,7 @@ export interface V2ModelSpec {
   /** Direct client-side Firebase AI Logic (firebase/ai) lightweight model ID. */
   firebaseAiModel: string;
   temperature: number;
-  thinkingLevel: 'MINIMAL' | 'LOW' | 'HIGH';
+  thinkingLevel: 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH';
   maxOutputTokens: number;
   contextWindow: number;
   useSearchGrounding: boolean;
@@ -40,7 +40,7 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     desc: 'Fast everyday Q&A, smart chat & bilingual voice',
     defaultDailyLimit: 100,
     serverGeminiModel: 'gemini-3.5-flash-lite',
-    firebaseAiModel: 'gemini-2.5-flash-lite',
+    firebaseAiModel: 'gemini-3.5-flash-lite',
     temperature: 0.7,
     thinkingLevel: 'MINIMAL',
     maxOutputTokens: 8192,
@@ -61,8 +61,8 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     badge: 'Coding · Structured',
     desc: 'Coding, architecture & structured problem-solving',
     defaultDailyLimit: 40,
-    serverGeminiModel: 'gemini-3-flash-preview',
-    firebaseAiModel: 'gemini-2.5-flash',
+    serverGeminiModel: 'gemini-3.8-flash',
+    firebaseAiModel: 'gemini-3.8-flash',
     temperature: 0.4,
     thinkingLevel: 'LOW',
     maxOutputTokens: 16384,
@@ -83,10 +83,10 @@ export const V2_SPECIAL_MODELS: V2ModelSpec[] = [
     badge: 'Deep Analysis · Search',
     desc: 'Deep multi-step analysis & search-grounded answers',
     defaultDailyLimit: 15,
-    serverGeminiModel: 'gemini-3.8-flash',
-    firebaseAiModel: 'gemini-2.5-flash',
+    serverGeminiModel: 'gemini-4-hydrogen',
+    firebaseAiModel: 'gemini-4-hydrogen',
     temperature: 0.2,
-    thinkingLevel: 'HIGH',
+    thinkingLevel: 'MEDIUM',
     maxOutputTokens: 32768,
     contextWindow: 1_000_000,
     useSearchGrounding: true,
@@ -127,6 +127,20 @@ export function getV2ModelSpec(model?: string | null): V2ModelSpec {
 
 export function getV2ModelLabel(model?: string | null): string {
   return getV2ModelSpec(model).label;
+}
+
+export const V2_FLASH_FIRST_ORDER: Record<V2ModelId, number> = {
+  'smfta-v5': 0,
+  'smfta-v2-pro': 1,
+  'smfta-max': 2,
+};
+
+export function sortV2ModelsFlashFirst<T extends { id: string }>(models: readonly T[]): T[] {
+  return [...models].sort(
+    (a, b) =>
+      (V2_FLASH_FIRST_ORDER[a.id as V2ModelId] ?? 9) -
+      (V2_FLASH_FIRST_ORDER[b.id as V2ModelId] ?? 9)
+  );
 }
 
 /**

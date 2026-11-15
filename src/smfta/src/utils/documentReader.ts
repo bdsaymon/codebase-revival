@@ -139,7 +139,7 @@ function extractTextFromPdfStream(streamText: string): string {
   return parts.join(' ');
 }
 
-/** Extracts text from PDF bytes via stream decompression. */
+/** Extracts text from PDF bytes via synchronous stream decompression fallback. */
 export function extractTextFromPdf(bytes: Uint8Array): string {
   const decoder = new TextDecoder('latin1');
   const rawStr = decoder.decode(bytes);
@@ -200,6 +200,50 @@ export function extractTextFromPdf(bytes: Uint8Array): string {
   return '';
 }
 
+/**
+ * Extracts text from PDF bytes using `pdfjs-dist` when running in browser/Node DOM
+ * environments, falling back cleanly to `extractTextFromPdf` in workerless edge runtimes.
+ */
+export async function extractTextFromPdfAsync(bytes: Uint8Array): Promise<string> {
+  try {
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs').catch(() =>
+      import('pdfjs-dist')
+    );
+    const getDocument = pdfjs?.getDocument;
+    if (typeof getDocument === 'function') {
+      const loadingTask = getDocument({
+        data: bytes,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: false,
+      } as Parameters<typeof getDocument>[0]);
+      const doc = await loadingTask.promise;
+      const pages: string[] = [];
+      const limit = Math.min(doc.numPages || 0, 200);
+      for (let pageNo = 1; pageNo <= limit; pageNo += 1) {
+        const page = await doc.getPage(pageNo);
+        const content = await page.getTextContent();
+        const line = (content.items || [])
+          .map((item) =>
+            item && typeof item === 'object' && 'str' in item
+              ? String((item as { str?: string }).str || '')
+              : ''
+          )
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        if (line) pages.push(`--- Page ${pageNo} ---\n${line}`);
+      }
+      if (pages.length > 0) {
+        return pages.join('\n\n');
+      }
+    }
+  } catch (err) {
+    console.warn('[extractTextFromPdfAsync] pdfjs-dist fallback to stream parser:', err);
+  }
+  return extractTextFromPdf(bytes);
+}
+
 /** Extracts text from a .docx file buffer. */
 export function extractTextFromDocx(bytes: Uint8Array): string {
   try {
@@ -229,6 +273,26 @@ export function extractTextFromDocx(bytes: Uint8Array): string {
     console.warn('[extractTextFromDocx] Failed:', err);
     return '';
   }
+}
+
+/** Extracts clean text from a .docx buffer using `mammoth` with XML fallback. */
+export async function extractTextFromDocxAsync(bytes: Uint8Array): Promise<string> {
+  try {
+    const mammothMod = await import('mammoth');
+    const mammoth = mammothMod.default || mammothMod;
+    if (typeof mammoth?.extractRawText === 'function') {
+      const arrayBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      ) as ArrayBuffer;
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      const text = String(result?.value || '').trim();
+      if (text) return text;
+    }
+  } catch (err) {
+    console.warn('[extractTextFromDocxAsync] mammoth fallback:', err);
+  }
+  return extractTextFromDocx(bytes);
 }
 
 /** Extracts text from an .xlsx file buffer across all worksheets. */
@@ -301,6 +365,31 @@ export function extractTextFromXlsx(bytes: Uint8Array): string {
     console.warn('[extractTextFromXlsx] Failed:', err);
     return '';
   }
+}
+
+/** Extracts text from .xlsx/.xls workbooks using SheetJS (`xlsx`) with XML fallback. */
+export async function extractTextFromXlsxAsync(bytes: Uint8Array): Promise<string> {
+  try {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.read(bytes, { type: 'array' });
+    const sheets: string[] = [];
+    for (const sheetName of wb.SheetNames || []) {
+      const sheet = wb.Sheets?.[sheetName];
+      if (!sheet) continue;
+      const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim();
+      if (csv) {
+        sheets.push(
+          wb.SheetNames.length > 1
+            ? `=== Worksheet: ${sheetName} ===\n${csv}`
+            : csv
+        );
+      }
+    }
+    if (sheets.length > 0) return sheets.join('\n\n');
+  } catch (err) {
+    console.warn('[extractTextFromXlsxAsync] xlsx fallback:', err);
+  }
+  return extractTextFromXlsx(bytes);
 }
 
 /** Extracts text from PowerPoint (.pptx), OpenDocument (.odt/.ods/.odp), or EPUB (.epub) archives. */
@@ -819,19 +908,19 @@ export async function readDocumentFile(
       const sliceBlob = sizeBytes > 25 * 1024 * 1024 ? file.slice(0, 25 * 1024 * 1024) : file;
       const arrayBuffer = await sliceBlob.arrayBuffer();
       const pdfBytes = new Uint8Array(arrayBuffer);
-      extractedText = extractTextFromPdf(pdfBytes);
+      extractedText = await extractTextFromPdfAsync(pdfBytes);
       if (!extractedText.trim()) {
         extractedText = extractReadableFromBinary(pdfBytes, name, sizeBytes);
       }
       formatType = 'PDF Document';
     } else if (ext === 'docx') {
       const arrayBuffer = await file.arrayBuffer();
-      extractedText = extractTextFromDocx(new Uint8Array(arrayBuffer));
+      extractedText = await extractTextFromDocxAsync(new Uint8Array(arrayBuffer));
       formatType = 'Word Document (.docx)';
-    } else if (ext === 'xlsx') {
+    } else if (ext === 'xlsx' || ext === 'xls') {
       const arrayBuffer = await file.arrayBuffer();
-      extractedText = extractTextFromXlsx(new Uint8Array(arrayBuffer));
-      formatType = 'Excel Spreadsheet (.xlsx)';
+      extractedText = await extractTextFromXlsxAsync(new Uint8Array(arrayBuffer));
+      formatType = `Excel Spreadsheet (.${ext})`;
     } else if (ext === 'pptx' || ext === 'odt' || ext === 'ods' || ext === 'odp' || ext === 'epub' || ext === 'zip' || ext === 'jar' || ext === 'apk') {
       if (sizeBytes <= 60 * 1024 * 1024) {
         const arrayBuffer = await file.arrayBuffer();

@@ -657,7 +657,26 @@ export interface AppSettings {
   responseLength?: 'short' | 'medium' | 'detailed';
   /** Simple projects list (id, name, instructions) */
   projects?: ChatProject[];
+  /** TTS Voice profile identifier (separate from externalModel so changing voice never alters the chat AI model). */
+  ttsVoice?: 'default' | 'bengali_female' | 'bengali_male' | 'english_us_female' | 'english_us_male';
+  /** Show real-time live captions above the voice waveform bar while speaking. */
+  voiceLiveCaptions?: boolean;
+  /** Show compact starter prompt chips on the empty home screen. */
+  showHomeStarters?: boolean;
+  /** Lead Thinking UI with the active subject/topic right from the first moment. */
+  showThinkingTopic?: boolean;
+  /** Automatically collapse Thinking accordion once the final answer begins. */
+  autoCollapseThinking?: boolean;
+  /** Automatically open the side-by-side Live Preview panel when previewable HTML/React/UI code completes. */
+  autoOpenLivePreview?: boolean;
+  /** Preserve and inject full conversation context across mid-thread model or provider switches. */
+  crossModelMemoryCarryover?: boolean;
+  /** Require Simple Name + Password entry gate when opening a fresh session. */
+  simpleEntryRequireOnLoad?: boolean;
+  /** Optional local passcode hint/state for Simple Name + Password lock. */
+  simpleEntryPasscode?: string;
 }
+
 
 
 

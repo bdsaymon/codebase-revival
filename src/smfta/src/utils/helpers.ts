@@ -459,9 +459,9 @@ export function tryFastDecisionResponse(
 
   if (isBnIdentity || isEnIdentity) {
     const bnReply =
-      `আমি **SMFTA Pro** (**SMFTA AI Pro** প্ল্যাটফর্ম v${APP_VERSION}), এবং আমাকে তৈরি করেছেন **${CREATOR_NAME}**। যেকোনো প্রশ্ন, হ্যাকিং বা কোনো সমস্যা হলে সরাসরি নিচের **WhatsApp Now** বাটনে ক্লিক করে বা Telegram (**${CREATOR_TELEGRAM_HANDLE}**)-এ যোগাযোগ করুন:\n\n${CONTACT_BUTTONS_TOKEN}`;
+      `আমি **SMFTA Pro** (**SMFTA AI Pro** প্ল্যাটফর্ম v${APP_VERSION}), এবং আমাকে তৈরি করেছেন **${CREATOR_NAME}**।`;
     const enReply =
-      `I am **SMFTA Pro** on the **SMFTA AI Pro** platform (v${APP_VERSION}), developed by **${CREATOR_NAME}**. For inquiries, security concerns, or any issue, reach out via WhatsApp or Telegram (**${CREATOR_TELEGRAM_HANDLE}**):\n\n${CONTACT_BUTTONS_TOKEN}`;
+      `I am **SMFTA Pro** on the **SMFTA AI Pro** platform (v${APP_VERSION}), developed by **${CREATOR_NAME}**.`;
     if (replyLang === 'bn') return bnReply;
     if (replyLang === 'en') return enReply;
     const hasBn = /[\u0980-\u09FF]/.test(clean) || isBnIdentity;

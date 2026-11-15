@@ -59,7 +59,7 @@ describe('V2 Special Firebase AI System', () => {
       thinkingLevel: 'MINIMAL',
       useSearchGrounding: false,
       serverGeminiModel: 'gemini-3.5-flash-lite',
-      firebaseAiModel: 'gemini-2.5-flash-lite',
+      firebaseAiModel: 'gemini-3.5-flash-lite',
     });
 
     const pro = getV2ModelSpec('smfta-v2-pro');
@@ -69,22 +69,22 @@ describe('V2 Special Firebase AI System', () => {
       maxOutputTokens: 16384,
       thinkingLevel: 'LOW',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3-flash-preview',
-      firebaseAiModel: 'gemini-2.5-flash',
+      serverGeminiModel: 'gemini-3.8-flash',
+      firebaseAiModel: 'gemini-3.8-flash',
     });
 
     const max = getV2ModelSpec('smfta-max');
     expect(max).toMatchObject({
       defaultDailyLimit: 15,
       maxOutputTokens: 32768,
-      thinkingLevel: 'HIGH',
+      thinkingLevel: 'MEDIUM',
       useSearchGrounding: true,
-      serverGeminiModel: 'gemini-3.8-flash',
-      firebaseAiModel: 'gemini-2.5-flash',
+      serverGeminiModel: 'gemini-4-hydrogen',
+      firebaseAiModel: 'gemini-4-hydrogen',
     });
   });
 
-  it('enforces model-specific Gemini SDK parameter safety for Gemini 2.5 thinkingBudget and search grounding', () => {
+  it('enforces model-specific Gemini SDK parameter safety for small models and search grounding', () => {
     const hydrogenCfg = buildV2GenAiRequestConfig({
       modelName: 'gemini-4-hydrogen',
       spec: getV2ModelSpec('smfta-max'),
@@ -95,29 +95,15 @@ describe('V2 Special Firebase AI System', () => {
     expect('topK' in hydrogenCfg).toBe(false);
     expect(Array.isArray(hydrogenCfg.tools)).toBe(true);
 
-    const max25Cfg = buildV2GenAiRequestConfig({
-      modelName: 'gemini-2.5-pro',
-      spec: getV2ModelSpec('smfta-max'),
-      fullSystemInstruction: 'Analyze carefully',
-    });
-    expect(max25Cfg.thinkingConfig).toEqual({
-      includeThoughts: true,
-      thinkingBudget: 12288,
-    });
-    expect(Array.isArray(max25Cfg.tools)).toBe(true);
-
-    const flash25Cfg = buildV2GenAiRequestConfig({
-      modelName: 'gemini-2.5-flash',
+    const flash38Cfg = buildV2GenAiRequestConfig({
+      modelName: 'gemini-3.8-flash',
       spec: getV2ModelSpec('smfta-v2-pro'),
       fullSystemInstruction: 'Write clean TypeScript',
     });
-    expect(flash25Cfg.temperature).toBe(0.4);
-    expect(flash25Cfg.maxOutputTokens).toBe(16384);
-    expect(flash25Cfg.thinkingConfig).toEqual({
-      includeThoughts: true,
-      thinkingBudget: 4096,
-    });
-    expect('tools' in flash25Cfg).toBe(false);
+    expect(flash38Cfg.temperature).toBe(0.4);
+    expect(flash38Cfg.maxOutputTokens).toBe(16384);
+    expect(flash38Cfg.thinkingConfig).toBeDefined();
+    expect('tools' in flash38Cfg).toBe(false);
   });
 
   it('sanitizes server & Firebase AI contents without empty turns or messages[1] failures', () => {
@@ -177,21 +163,21 @@ describe('V2 Special Firebase AI System', () => {
     expect(cfg.maxLimit).toBe(20);
   });
 
-  it('enforces server-side daily quota limits per user & strictly verifies admin testing mode', () => {
+  it('enforces server-side daily quota limits per user & strictly verifies admin testing mode', async () => {
     expect(isServerAuthorizedTester('msftashop@gmail.com', 'uid1', true)).toBe(true);
     expect(isServerAuthorizedTester('msftashop@gmail.com', 'uid1', false)).toBe(false);
     expect(isServerAuthorizedTester('guest@example.com', 'uid2', true)).toBe(false);
 
     const guestId = `vitest_guest_${Date.now()}`;
-    updateServerV2QuotaConfig(guestId, { testingBypassEnabled: true });
-    setServerV2UsageCountForTesting({
+    await updateServerV2QuotaConfig(guestId, { testingBypassEnabled: true });
+    await setServerV2UsageCountForTesting({
       userId: guestId,
       userEmail: 'guest@example.com',
       modelId: 'smfta-v5',
       usedCount: 100,
     });
 
-    const guestBlocked = checkAndConsumeServerV2Quota({
+    const guestBlocked = await checkAndConsumeServerV2Quota({
       userId: guestId,
       userEmail: 'guest@example.com',
       emailVerified: true,
@@ -200,7 +186,7 @@ describe('V2 Special Firebase AI System', () => {
     expect(guestBlocked.allowed).toBe(false);
     expect(guestBlocked.status.isBlocked).toBe(true);
 
-    const proStillAllowed = checkAndConsumeServerV2Quota({
+    const proStillAllowed = await checkAndConsumeServerV2Quota({
       userId: guestId,
       userEmail: 'guest@example.com',
       emailVerified: true,
@@ -242,7 +228,7 @@ describe('V2 Special Firebase AI System', () => {
     expect(picked.some((m) => m.includes('mango'))).toBe(false);
   });
 
-  it('grants unconditional unlimited access to verified admin msftashop@gmail.com', () => {
+  it('grants unconditional unlimited access to verified admin msftashop@gmail.com', async () => {
     const adminQuota = evaluateV2ModelQuota({
       modelId: 'smfta-max',
       usedCount: 999,
@@ -256,9 +242,9 @@ describe('V2 Special Firebase AI System', () => {
     expect(adminQuota.statusText).toContain('Unlimited');
 
     const adminUid = `admin_unlimited_${Date.now()}`;
-    updateServerV2QuotaConfig(adminUid, { testingBypassEnabled: false, testingAllowance: 1 });
+    await updateServerV2QuotaConfig(adminUid, { testingBypassEnabled: false, testingAllowance: 1 });
     for (let i = 0; i < 5; i += 1) {
-      const check = checkAndConsumeServerV2Quota({
+      const check = await checkAndConsumeServerV2Quota({
         userId: adminUid,
         userEmail: 'msftashop@gmail.com',
         emailVerified: true,

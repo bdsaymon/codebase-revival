@@ -160,7 +160,7 @@ export const ToolsCapabilitiesSection: React.FC<ToolsCapabilitiesSectionProps> =
         <div className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--border)] bg-[var(--bg)] text-xs text-[var(--text-2)]">
           <Video className="w-4 h-4 text-[var(--primary)] shrink-0 mt-0.5" />
           <div>
-            <strong>Video Understanding:</strong> Available when an active Gemini multimodal profile (`gemini-2.5-flash` / `gemini-2.5-pro`) is selected.
+            <strong>Video Understanding:</strong> Available when an active Gemini multimodal profile (`gemini-3.8-flash` / `gemini-4-hydrogen`) is selected.
           </div>
         </div>
       </SettingsCard>

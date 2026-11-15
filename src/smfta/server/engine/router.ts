@@ -192,6 +192,7 @@ export type StreamChunkItem =
   | {
       thinking?: string;
       text?: string;
+      finishReason?: string;
     };
 
 export interface HttpResponseLike {
@@ -330,7 +331,7 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
               }
               if (trimmed.startsWith('data:')) {
                 const extracted = extractSseEventsFromLine(trimmed.slice(5));
-                if (extracted.thinking || extracted.text) {
+                if (extracted.thinking || extracted.text || extracted.finishReason) {
                   yield extracted;
                 }
               }
@@ -341,7 +342,7 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
         }
         if (detectedSse && sseBuffer.trim().startsWith('data:')) {
           const extracted = extractSseEventsFromLine(sseBuffer.trim().slice(5));
-          if (extracted.thinking || extracted.text) {
+          if (extracted.thinking || extracted.text || extracted.finishReason) {
             yield extracted;
           }
         }
@@ -420,7 +421,7 @@ const defaultHttpTransport: HttpTransportFn = async (params) => {
           const t = line.trim();
           if (t.startsWith('data:')) {
             const ev = extractSseEventsFromLine(t.slice(5));
-            if (ev.thinking || ev.text) {
+            if (ev.thinking || ev.text || ev.finishReason) {
               yield ev;
             } else {
               const tok = extractTokenFromSseDataLine(t.slice(5));
@@ -2435,6 +2436,8 @@ export class HardenedAIEngine {
     messageId: string;
     status: 'complete' | 'interrupted' | 'failed';
     text: string;
+    truncated?: boolean;
+    finishReason?: string;
     providerUsed?: string;
     providerId?: string;
     modelUsed?: string;
@@ -2496,6 +2499,8 @@ export class HardenedAIEngine {
 
     const attempts: AttemptRecord[] = [];
     let firstTokenEmitted = false;
+    let firstActivitySeen = false;
+    let streamFinishReason = '';
     let lockedToProvider = false;
     let accumulatedText = '';
 
@@ -2566,12 +2571,14 @@ export class HardenedAIEngine {
       const attemptStart = this.storage.now();
       const upstreamAbort = new AbortController();
       firstTokenEmitted = false;
+      firstActivitySeen = false;
+      streamFinishReason = '';
       accumulatedText = '';
 
-      // S2: First token within 12 seconds
+      // S2: First activity (thinking or answer) within timeout
       let firstTokenTimer: ReturnType<typeof setTimeout> | null = setTimeout(
         () => {
-          if (!firstTokenEmitted && !upstreamAbort.signal.aborted) {
+          if (!firstActivitySeen && !firstTokenEmitted && !upstreamAbort.signal.aborted) {
             upstreamAbort.abort(new Error('FirstTokenTimeoutError'));
           }
         },
@@ -2722,12 +2729,20 @@ export class HardenedAIEngine {
               : typeof rawChunk === 'object' && rawChunk !== null
               ? rawChunk.text || ''
               : '';
+          if (
+            typeof rawChunk === 'object' &&
+            rawChunk !== null &&
+            typeof rawChunk.finishReason === 'string' &&
+            rawChunk.finishReason
+          ) {
+            streamFinishReason = rawChunk.finishReason;
+          }
 
           if (rawThinking) {
             const cleanThinking = sanitizeModelTextOutput(rawThinking, [apiKey]);
             if (cleanThinking) {
-              if (!firstTokenEmitted) {
-                firstTokenEmitted = true;
+              if (!firstActivitySeen) {
+                firstActivitySeen = true;
                 if (firstTokenTimer) {
                   clearTimeout(firstTokenTimer);
                   firstTokenTimer = null;
@@ -2742,6 +2757,7 @@ export class HardenedAIEngine {
           if (cleanToken) {
             if (!firstTokenEmitted) {
               firstTokenEmitted = true;
+              firstActivitySeen = true;
               if (firstTokenTimer) {
                 clearTimeout(firstTokenTimer);
                 firstTokenTimer = null;
@@ -2760,8 +2776,8 @@ export class HardenedAIEngine {
         if (firstTokenTimer) clearTimeout(firstTokenTimer);
         if (nextChunkTimer) clearTimeout(nextChunkTimer);
 
-        if (!firstTokenEmitted) {
-          // Empty stream with 0 tokens -> BAD_RESPONSE, fallback allowed
+        if (!firstTokenEmitted || !accumulatedText.trim()) {
+          // Empty answer stream (0 answer tokens or thinking-only stall) -> BAD_RESPONSE, fallback allowed
           const latencyMs = Math.max(0, this.storage.now() - attemptStart);
           this.ledger.finalizeReservation({
             reservationId: reservation.reservationId,
@@ -2792,7 +2808,9 @@ export class HardenedAIEngine {
             class: 'BAD_RESPONSE',
             http_status: resp.status,
             latency_ms: latencyMs,
-            error_message: 'SSE stream closed with 0 tokens emitted',
+            error_message: firstActivitySeen
+              ? 'SSE stream closed after thinking with 0 answer tokens'
+              : 'SSE stream closed with 0 tokens emitted',
           });
           continue;
         }
@@ -2835,6 +2853,7 @@ export class HardenedAIEngine {
           latency_ms: latencyMs,
         });
 
+        const isTruncated = /^(?:MAX_TOKENS|LENGTH)$/i.test(streamFinishReason);
         updateStoredMessage(accumulatedText, 'complete');
         callbacks.onComplete?.(accumulatedText);
         return {
@@ -2842,6 +2861,8 @@ export class HardenedAIEngine {
           messageId,
           status: 'complete',
           text: accumulatedText,
+          truncated: isTruncated,
+          finishReason: streamFinishReason || undefined,
           providerUsed: provider.provider_id,
           providerId: provider.provider_id,
           modelUsed: model.model_id,

@@ -5,14 +5,10 @@ export type GeminiModelThinkingStyle = 'gemini25_budget' | 'gemini3_level' | 'no
 export function detectGeminiThinkingStyle(modelId: string): GeminiModelThinkingStyle {
   const m = String(modelId || '').toLowerCase().trim();
   if (!m) return 'none';
-  if (/gemini-3/i.test(m)) {
+  if (/gemini-[34]|smfta-v5|smfta-v2-pro|smfta-max/i.test(m)) {
     return 'gemini3_level';
   }
-  if (
-    /gemini-2\.5|smfta-flash|smfta-pro|smfta-ultra|smfta-v5|smfta-v2-pro|smfta-max/i.test(
-      m
-    )
-  ) {
+  if (/gemini-2\.5|smfta-flash|smfta-pro|smfta-ultra/i.test(m)) {
     return 'gemini25_budget';
   }
   return 'none';
@@ -40,7 +36,7 @@ export function supportsNativeThinking(
       p === 'gemini_openai' ||
       p === 'gemini_server' ||
       p === 'firebase_v2') &&
-    (!m || /gemini-2\.5|gemini-3|smfta-/i.test(m))
+    (!m || /gemini-2\.5|gemini-[34]|smfta-/i.test(m))
   ) {
     return true;
   }
@@ -63,7 +59,7 @@ export function resolveGemini3ThinkingLevel(
   effort: ThinkingEffortLevel | undefined,
   thinkingEnabled = true
 ): 'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH' | null {
-  if (!thinkingEnabled || effort === 'off') return 'MINIMAL';
+  if (!thinkingEnabled || effort === 'off') return null;
   if (effort === 'low') return 'LOW';
   if (effort === 'high') return 'HIGH';
   return 'MEDIUM';
@@ -108,7 +104,14 @@ export function buildGeminiThinkingConfig(
     };
   }
 
-  const level = resolveGemini3ThinkingLevel(thinkingMode, true);
+  let level = resolveGemini3ThinkingLevel(thinkingMode, true);
+  const lower = modelId.toLowerCase();
+  if (level === 'MINIMAL' && /gemini-3\.8|gemini-4/.test(lower)) {
+    level = /gemini-4/.test(lower) ? 'MEDIUM' : 'LOW';
+  }
+  if (!level && /gemini-4-hydrogen/.test(lower)) {
+    level = 'MEDIUM';
+  }
   return {
     ...(level ? { thinkingLevel: level } : {}),
     includeThoughts: true,
@@ -118,6 +121,7 @@ export function buildGeminiThinkingConfig(
 export function extractSseEventsFromLine(rawPayload: string): {
   thinking: string;
   text: string;
+  finishReason?: string;
 } {
   const payload = String(rawPayload || '').trim();
   if (!payload || payload === '[DONE]') {
@@ -127,16 +131,21 @@ export function extractSseEventsFromLine(rawPayload: string): {
     const parsed = JSON.parse(payload) as Record<string, unknown>;
     let thinking = '';
     let text = '';
+    let finishReason: string | undefined;
 
     // 1. Gemini candidates[0].content.parts (check part.thought === true)
     const candidates = parsed.candidates as
       | Array<{
+          finishReason?: string;
           content?: {
             parts?: Array<{ text?: string; thought?: boolean }>;
           };
         }>
       | undefined;
     if (Array.isArray(candidates) && candidates.length > 0) {
+      if (typeof candidates[0]?.finishReason === 'string' && candidates[0].finishReason) {
+        finishReason = candidates[0].finishReason;
+      }
       const parts = candidates[0]?.content?.parts;
       if (Array.isArray(parts)) {
         for (const p of parts) {
@@ -148,13 +157,14 @@ export function extractSseEventsFromLine(rawPayload: string): {
             }
           }
         }
-        return { thinking, text };
+        return { thinking, text, ...(finishReason ? { finishReason } : {}) };
       }
     }
 
     // 2. OpenAI / DeepSeek / OpenRouter / Lovable Gateway choices[0].delta
     const choices = parsed.choices as
       | Array<{
+          finish_reason?: string | null;
           delta?: {
             content?: string;
             reasoning_content?: string;
@@ -168,6 +178,9 @@ export function extractSseEventsFromLine(rawPayload: string): {
         }>
       | undefined;
     if (Array.isArray(choices) && choices.length > 0) {
+      if (typeof choices[0]?.finish_reason === 'string' && choices[0].finish_reason) {
+        finishReason = choices[0].finish_reason;
+      }
       const delta = choices[0]?.delta;
       if (delta) {
         const r =
@@ -176,7 +189,7 @@ export function extractSseEventsFromLine(rawPayload: string): {
         if (typeof delta.content === 'string' && delta.content) {
           text += delta.content;
         }
-        return { thinking, text };
+        return { thinking, text, ...(finishReason ? { finishReason } : {}) };
       }
     }
 
@@ -258,3 +271,116 @@ export function resolveActiveStatusEvents(params: {
   }
   return statuses;
 }
+
+export interface ThinkingStepBlock {
+  title?: string;
+  body: string;
+}
+
+/**
+ * Formats raw model reasoning text into clean step sections without raw
+ * `**heading**` or `###` markdown syntax cluttering the Thinking panel.
+ */
+export function formatThinkingParagraphs(thinkingText: string): ThinkingStepBlock[] {
+  const raw = String(thinkingText || '').trim();
+  if (!raw) return [];
+
+  const blocks = raw
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  const result: ThinkingStepBlock[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) continue;
+
+    let title: string | undefined;
+    let bodyLines = lines;
+
+    const first = lines[0]!;
+    const boldHeadingMatch = first.match(/^(?:[-*•]\s*)?\*\*([^*]{2,90})\*\*\s*:?$/);
+    const mdHeadingMatch = first.match(/^#{1,4}\s+(.{2,90})$/);
+    if (boldHeadingMatch) {
+      title = boldHeadingMatch[1]!.trim();
+      bodyLines = lines.slice(1);
+    } else if (mdHeadingMatch) {
+      title = mdHeadingMatch[1]!.replace(/\*\*/g, '').trim();
+      bodyLines = lines.slice(1);
+    }
+
+    const cleanedBody = bodyLines
+      .map((line) =>
+        line
+          .replace(/^(?:[-*•]\s+)/, '• ')
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/__(.+?)__/g, '$1')
+      )
+      .join('\n')
+      .trim();
+
+    if (title || cleanedBody) {
+      result.push({
+        ...(title ? { title } : {}),
+        body: cleanedBody,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Extracts a concise, meaningful subject/topic from the user's prompt so the
+ * Thinking card can show *what* the AI is thinking about right from t = 0.
+ */
+export function deriveInitialThinkingTopic(userPrompt: string): string {
+  const withoutFiles = String(userPrompt || '')
+    .replace(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g, ' $1 ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/[*_`>#\[\]()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!withoutFiles) return 'আপনার প্রশ্ন';
+
+  const strippedLead = withoutFiles
+    .replace(
+      /^(?:please|pls|can you|could you|help me(?: to)?|write|explain|create|make|build|tell me(?: about)?|what is|how to|দয়া করে|দয়া করে|প্লিজ|আমাকে|আমার জন্য|বলো তো|একটা|একটি)\s+/i,
+      ''
+    )
+    .trim();
+
+  const candidate = strippedLead.length >= 3 ? strippedLead : withoutFiles;
+  const firstClause =
+    candidate.split(/(?<=[.!?।])\s+|\r?\n/)[0]?.trim() || candidate;
+  const clean = firstClause.replace(/[,:;.\-]+$/, '').trim();
+  if (!clean) return 'আপনার প্রশ্ন';
+  if (clean.length > 44) {
+    return `${clean.slice(0, 41).trimEnd()}…`;
+  }
+  return clean;
+}
+
+/**
+ * Builds a topic-first headline so the subject appears up front both while
+ * thinking and after completion.
+ */
+export function formatThinkingTopicLead(
+  subject: string,
+  elapsedSec: number,
+  isCompleted = false
+): string {
+  const cleanSubject = String(subject || '').trim() || 'আপনার প্রশ্ন';
+  const safeSec = Math.max(0, Math.round(Number(elapsedSec) || 0));
+  if (!isCompleted) {
+    if (safeSec <= 0) return `${cleanSubject} নিয়ে ভাবছি…`;
+    return `${cleanSubject} নিয়ে ভাবছি (${toBengaliDigits(safeSec)} সে.)`;
+  }
+  const finalSec = Math.max(1, safeSec);
+  return `${cleanSubject} · ${toBengaliDigits(finalSec)} সেকেন্ড ভেবেছি`;
+}
+
+

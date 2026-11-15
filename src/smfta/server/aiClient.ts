@@ -55,7 +55,7 @@ export function getServerGeminiKey(): string {
 
 export function normalizeGeminiModelName(requestedModel?: string): string {
   const raw = (requestedModel || '').trim();
-  if (!raw) return 'gemini-2.5-flash';
+  if (!raw) return 'gemini-3.8-flash';
   const bare = raw.includes('/') ? raw.split('/').pop() || raw : raw;
   const lower = bare.toLowerCase();
 
@@ -75,9 +75,9 @@ export function normalizeGeminiModelName(requestedModel?: string): string {
     lower.includes('72b') ||
     lower.includes('405b')
   ) {
-    return 'gemini-2.5-pro';
+    return 'gemini-3.8-flash';
   }
-  return 'gemini-2.5-flash';
+  return 'gemini-3.5-flash-lite';
 }
 
 export function mapKeylessModelAlias(requestedModel?: string): string[] {
@@ -216,7 +216,7 @@ export function buildAdHocProviderConfig(params: {
     const defaultModel =
       preset?.defaultModel ||
       (protocol === 'gemini_native'
-        ? 'gemini-2.5-flash'
+        ? 'gemini-3.8-flash'
         : protocol === 'anthropic_native'
         ? 'claude-sonnet-4-20250514'
         : effectiveProvider === 'custom'
@@ -231,12 +231,9 @@ export function buildAdHocProviderConfig(params: {
               new Set([
                 ...(params.externalModel ? [normalizeGeminiModelName(params.externalModel)] : []),
                 ...(params.discoveredModels || []).map((m) => normalizeGeminiModelName(m)),
-                'gemini-3-flash-preview',
                 'gemini-3.8-flash',
                 'gemini-3.5-flash-lite',
-                'gemini-2.5-flash',
-                'gemini-2.5-flash-lite',
-                'gemini-2.5-pro',
+                'gemini-4-hydrogen',
               ])
             )
         : buildProviderModelCandidates(
@@ -297,15 +294,13 @@ export function buildAdHocProviderConfig(params: {
   // Server Gemini key if available and either smfta_cloud or fallback
   const serverGemKey = getServerGeminiKey();
   if (serverGemKey && isExplicitKeyless) {
-    // Map built-in SMFTA tier ids cleanly to real, fast Gemini 2.5 models.
+    // Map built-in SMFTA tier ids cleanly to small Gemini models.
     const rawExt = (params.externalModel || '').trim().toLowerCase();
     const mappedTierModel =
       rawExt === 'smfta-flash'
         ? 'gemini-3.5-flash-lite'
-        : rawExt === 'smfta-ultra'
+        : rawExt === 'smfta-ultra' || rawExt === 'smfta-pro'
         ? 'gemini-3.8-flash'
-        : rawExt === 'smfta-pro'
-        ? 'gemini-3-flash-preview'
         : rawExt &&
           !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt)
         ? normalizeGeminiModelName(params.externalModel)
@@ -313,12 +308,8 @@ export function buildAdHocProviderConfig(params: {
     const gemModels = Array.from(
       new Set([
         ...(mappedTierModel ? [mappedTierModel] : []),
-        'gemini-3-flash-preview',
         'gemini-3.8-flash',
         'gemini-3.5-flash-lite',
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite',
-        'gemini-2.5-pro',
       ])
     ).map((m) => ({
       model_id: m,

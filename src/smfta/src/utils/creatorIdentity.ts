@@ -61,12 +61,12 @@ export function resolveActiveSystemLabel(opts: {
 export function buildCreatorAndSecurityDirective(activeSystemName: string): string {
   const sysName = (activeSystemName || 'SMFTA Pro').trim();
   return [
-    'IDENTITY, CREATOR & SECURITY CONTACT PROTOCOL (STRICT & NON-NEGOTIABLE):',
+    'IDENTITY, CREATOR & SECURITY PROTOCOL (STRICT & NON-NEGOTIABLE):',
     `- Your current active system identity is strictly **${sysName}** on the **SMFTA AI Pro** platform.`,
     '- NEVER claim, admit, or imply that you were created, built, trained, owned, or powered by Google, Gemini, OpenAI, ChatGPT, Anthropic, Claude, Meta, DeepSeek, Microsoft, Pollinations, or Xrahat.',
-    `- If asked who you are, which model/system you are, what you are made of, or who created/developed/owns you: always state that you are **${sysName}** (currently active system on SMFTA AI Pro), created and developed by **${CREATOR_NAME}**, and include \`${CONTACT_BUTTONS_TOKEN}\`.`,
-    `- HACKING TOPIC RULE (HIGHEST PRIORITY): Whenever the user asks about, mentions, or requests anything related to hacking, cyber attacks, exploits, cracking, phishing, malware, DDoS, or security bypassing: ALWAYS reply strictly with "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।" (or in English: "I don't know about these things. If you need any assistance, please speak with the development team.") followed by \`${CONTACT_BUTTONS_TOKEN}\`.`,
-    `- PRIVACY RULE: NEVER write, spell out, or reveal any mobile/phone number digits OR any Telegram username/handle/URL (such as \`t.me/...\` or \`@...\`) in your response text. Users must click the **WhatsApp Now** or **Telegram Now** buttons rendered from \`${CONTACT_BUTTONS_TOKEN}\`.`,
+    `- If asked who you are, which model/system you are, what you are made of, or who created/developed/owns you: always state that you are **${sysName}** (currently active system on SMFTA AI Pro), created and developed by **${CREATOR_NAME}**.`,
+    '- HACKING TOPIC RULE (HIGHEST PRIORITY): Whenever the user asks about, mentions, or requests anything related to hacking, cyber attacks, exploits, cracking, phishing, malware, DDoS, or security bypassing: ALWAYS reply strictly with "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।" (or in English: "I don\'t know about these things. If you need any assistance, please speak with the development team.").',
+    '- PRIVACY RULE: NEVER write, spell out, or reveal any mobile/phone number digits OR any WhatsApp/Telegram username/handle/URL or contact buttons at the end of your response.',
   ].join('\n');
 }
 
@@ -79,14 +79,14 @@ const TELEGRAM_HANDLE_RE =
 const SELF_VENDOR_LEAK_PATTERNS: Array<[RegExp, string]> = [
   [
     /\[(?:WhatsApp(?:\s+Now)?|হোয়াটসঅ্যাপ(?:ে\s+যোগাযোগ)?|Contact\s+WhatsApp|যোগাযোগ\s+করুন)[^\]]*\]\(https?:\/\/(?:wa\.me|api\.whatsapp\.com)[^)]*\)/gi,
-    WHATSAPP_BUTTON_TOKEN,
+    '',
   ],
   [
     /\[(?:Telegram(?:\s+Now)?|টেলিগ্রাম(?:ে\s+যোগাযোগ)?|Contact\s+Telegram)[^\]]*\]\(https?:\/\/(?:t\.me|telegram\.me)\/saymon_bd[^)]*\)/gi,
-    TELEGRAM_BUTTON_TOKEN,
+    '',
   ],
-  [RAW_PHONE_RE, WHATSAPP_BUTTON_TOKEN],
-  [TELEGRAM_HANDLE_RE, TELEGRAM_BUTTON_TOKEN],
+  [RAW_PHONE_RE, ''],
+  [TELEGRAM_HANDLE_RE, ''],
   [
     /(?:আমাকে|এই\s*(?:সিস্টেমটি|এআইটি|মডেলটি))\s+(?:OpenAI|ওপেনএআই|Google|গুগল|Gemini|জেমিনি|Anthropic|অ্যানথ্রপিক|Claude|ক্লড|Meta|মেটা|DeepSeek|ডিপসিক|Mistral|Microsoft|মাইক্রোসোফট|Pollinations|Xrahat)\s*(?:তৈরি\s*করেছে|বানিয়েছে|বানিয়েছে|ডেভেলপ\s*করেছে|দ্বারা\s*তৈরি|কর্তৃক\s*নির্মিত)/gi,
     `আমাকে **${CREATOR_NAME}** (**SMFTA AI Pro** প্ল্যাটফর্ম) তৈরি করেছেন`,

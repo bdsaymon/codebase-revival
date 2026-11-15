@@ -143,6 +143,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   thinkingEnabled: true,
   responseLength: 'medium',
   projects: [],
+  ttsVoice: 'default',
+  voiceLiveCaptions: true,
+  showHomeStarters: false,
+  showThinkingTopic: true,
+  autoCollapseThinking: false,
+  autoOpenLivePreview: true,
+  crossModelMemoryCarryover: true,
+  simpleEntryRequireOnLoad: false,
+  simpleEntryPasscode: '',
 };
 
 
@@ -216,7 +225,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
 
   let externalModel = str(raw.externalModel, '').trim().slice(0, 200);
   if (/^gemini-1\.5/i.test(externalModel)) {
-    externalModel = 'gemini-2.5-flash';
+    externalModel = 'gemini-3.8-flash';
   }
 
   // Clamp (and round) instead of rejecting: an outdated/corrupt stored value
@@ -488,6 +497,25 @@ export function sanitizeSettings(input: unknown): AppSettings {
       raw.style === 'concise' ? 'short' : raw.style === 'detailed' ? 'detailed' : 'medium'
     ),
     projects: sanitizeProjects(raw.projects),
+    ttsVoice: oneOf(
+      raw.ttsVoice,
+      ['default', 'bengali_female', 'bengali_male', 'english_us_female', 'english_us_male'] as const,
+      DEFAULT_SETTINGS.ttsVoice ?? 'default'
+    ),
+    voiceLiveCaptions: bool(raw.voiceLiveCaptions, DEFAULT_SETTINGS.voiceLiveCaptions ?? true),
+    showHomeStarters: bool(raw.showHomeStarters, DEFAULT_SETTINGS.showHomeStarters ?? false),
+    showThinkingTopic: bool(raw.showThinkingTopic, DEFAULT_SETTINGS.showThinkingTopic ?? true),
+    autoCollapseThinking: bool(raw.autoCollapseThinking, DEFAULT_SETTINGS.autoCollapseThinking ?? false),
+    autoOpenLivePreview: bool(raw.autoOpenLivePreview, DEFAULT_SETTINGS.autoOpenLivePreview ?? true),
+    crossModelMemoryCarryover: bool(
+      raw.crossModelMemoryCarryover,
+      DEFAULT_SETTINGS.crossModelMemoryCarryover ?? true
+    ),
+    simpleEntryRequireOnLoad: bool(
+      raw.simpleEntryRequireOnLoad,
+      DEFAULT_SETTINGS.simpleEntryRequireOnLoad ?? false
+    ),
+    simpleEntryPasscode: str(raw.simpleEntryPasscode, '').trim().slice(0, 80),
   };
 }
 

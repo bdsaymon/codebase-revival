@@ -47,8 +47,10 @@ import {
   Volume2,
   ThumbsUp,
   ThumbsDown,
+  Eye,
   EyeOff,
   Brain,
+  KeyRound,
 } from 'lucide-react';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -146,6 +148,16 @@ import {
   ClaudeArtifactPanel,
   ArtifactPayload,
 } from './components/ClaudeArtifactPanel';
+import {
+  extractFileArtifacts,
+  FileArtifactItem,
+} from './utils/fileArtifacts';
+import { SimpleEntryModal } from './components/SimpleEntryModal';
+import {
+  loadSimpleEntryCredentials,
+  SIMPLE_ENTRY_UNLOCKED_SESSION_KEY,
+  SimpleEntryCredentials,
+} from './utils/simpleEntryAuth';
 import { VoiceWaveformBar } from './components/VoiceWaveformBar';
 import {
   Project,
@@ -357,18 +369,27 @@ import {
   saveSessionMessageToFirestore,
   selectRelevantFirestoreMemories,
   isAuthorizedTestingUser,
-  tryStreamViaFirebaseAiLogic,
   FirestoreUsageSnapshot,
   deleteConversationFromFirestore,
   clearAllFirestoreConversations,
 } from './utils/firebaseV2Client';
+import { sortV2ModelsFlashFirst } from './utils/v2UsageLimits';
 import { buildFirestoreChatSyncSignature } from './utils/firestorePayloadHelpers';
 import {
+  accumulateSpeechResults,
   bilingualSpeechPlayer,
+  blobToBase64Data,
+  isMediaRecorderSupported,
   isSpeechRecognitionSupported,
+  isVoiceInputSupported,
+  mergeVoiceLiveTranscript,
+  pickSupportedAudioMimeType,
+  requestServerVoiceTranscription,
   resolveRecognitionLanguage,
+  shouldPollRollingVoiceTranscript,
   VoiceLangMode,
 } from './utils/voiceEngine';
+import { deriveInitialThinkingTopic } from './utils/thinking';
 import {
   cleanupStaleLocalStorage,
   runSystemDiagnostics,
@@ -555,6 +576,27 @@ export default function App() {
   const [activeArtifact, setActiveArtifact] = useState<ArtifactPayload | null>(
     null
   );
+  const [simpleEntryCreds, setSimpleEntryCreds] =
+    useState<SimpleEntryCredentials | null>(() => loadSimpleEntryCredentials());
+  const [simpleEntryModalOpen, setSimpleEntryModalOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autostart') === '1') return false;
+    if (params.get('entry') === '1') return true;
+    try {
+      const unlocked =
+        sessionStorage.getItem(SIMPLE_ENTRY_UNLOCKED_SESSION_KEY) === '1';
+      if (unlocked) return false;
+      const rawSettings = localStorage.getItem(LS_KEYS.settings);
+      if (rawSettings) {
+        const parsed = JSON.parse(rawSettings);
+        if (parsed?.simpleEntryRequireOnLoad === true) return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  });
   const [skills, setSkills] = useState<SelfSkill[]>(() => loadSkills());
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => loadAutonomy());
   const [activeWidgetModal, setActiveWidgetModal] =
@@ -711,6 +753,8 @@ export default function App() {
   const [voiceLangMode, setVoiceLangMode] = useState<VoiceLangMode>('auto');
   const [voiceLiveText, setVoiceLiveText] = useState('');
   const [voiceActivityAt, setVoiceActivityAt] = useState(0);
+  const [isTranscribingVoice, setIsTranscribingVoice] = useState(false);
+  const [voiceAudioStream, setVoiceAudioStream] = useState<MediaStream | null>(null);
 
   // V2 – Special (Firebase AI) Auth, Firestore Memory Sync & Quota State
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
@@ -733,8 +777,19 @@ export default function App() {
 
   const abortRef = useRef<AbortController | null>(null);
   const voiceDraftRef = useRef<string>('');
+  const voiceFinalPrefixRef = useRef<string>('');
+  const voiceSessionFinalRef = useRef<string>('');
   const voiceCancelledRef = useRef<boolean>(false);
   const voiceCommittedRef = useRef<boolean>(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceMimeRef = useRef<string>('audio/webm');
+  const voiceRollingTimerRef = useRef<number | null>(null);
+  const voiceRollingInFlightRef = useRef<boolean>(false);
+  const voiceListeningRef = useRef<boolean>(false);
+  const voiceWebSpeechTextRef = useRef<string>('');
+  const voiceRollingTextRef = useRef<string>('');
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef<boolean>(false);
   const touchStartYRef = useRef<number | null>(null);
@@ -951,7 +1006,8 @@ export default function App() {
     let cancelled = false;
     const fetchV2Quota = async () => {
       try {
-        const uid = firebaseUser?.uid || 'default-user';
+        const uid =
+          firebaseUser?.uid || simpleEntryCreds?.userId || 'default-user';
         const email = firebaseUser?.email || '';
         const verified = Boolean(firebaseUser?.emailVerified);
         const qs = new URLSearchParams({
@@ -974,7 +1030,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser]);
+  }, [firebaseUser, simpleEntryCreds?.userId]);
 
   const handleSelectProfile = (prof: SavedProviderProfile) => {
     const nextModel =
@@ -1018,7 +1074,14 @@ export default function App() {
     setSettings((prev) =>
       sanitizeSettings(
         tier
-          ? { ...prev, externalModel: trimmed, mode: tier.id }
+          ? {
+              ...prev,
+              provider: isBuiltinProviderId(prev.provider)
+                ? 'smfta_cloud'
+                : prev.provider,
+              externalModel: trimmed,
+              mode: tier.id,
+            }
           : isV2
           ? {
               ...prev,
@@ -1039,7 +1102,10 @@ export default function App() {
         p.id === activeProfile.id
           ? {
               ...p,
-              provider: isV2 ? 'smfta_cloud' : p.provider,
+              provider:
+                (isV2 || Boolean(tier)) && isBuiltinProviderId(p.provider)
+                  ? 'smfta_cloud'
+                  : p.provider,
               externalModel: trimmed,
             }
           : p
@@ -1049,12 +1115,132 @@ export default function App() {
     setBottomModelMenuOpen(false);
     showToast(
       tier
-        ? `Model: ${tier.label}`
+        ? `Model: ${tier.label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
         : isV2
-          ? `V2 – Special: ${getV2ModelSpec(trimmed).label}`
+          ? `V2 – Special: ${getV2ModelSpec(trimmed).label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
           : `Model: ${trimmed}`
     );
   };
+
+  // Extract a previewable side-by-side ArtifactPayload from any AI message text
+  const extractPreviewableArtifactFromMessage = React.useCallback(
+    (rawMsgText: string): ArtifactPayload | null => {
+      if (!rawMsgText || !rawMsgText.trim()) return null;
+      const { cleanResponse } = extractThinkingAndResponse(rawMsgText);
+      const textToScan = cleanResponse || rawMsgText;
+      const { artifacts: fileArts } = extractFileArtifacts(textToScan, false);
+      const codeBlocks = extractCodeBlocks(textToScan);
+
+      const extMap: Record<string, string> = {
+        html: 'index.html',
+        htm: 'index.html',
+        svg: 'graphic.svg',
+        css: 'styles.css',
+        scss: 'styles.css',
+        javascript: 'script.js',
+        js: 'script.js',
+        typescript: 'script.ts',
+        ts: 'script.ts',
+        jsx: 'App.jsx',
+        tsx: 'App.tsx',
+        react: 'App.tsx',
+      };
+
+      const bundleFiles: FileArtifactItem[] = [...fileArts];
+      codeBlocks.forEach((b, idx) => {
+        if (!b.content.trim()) return;
+        const lang = (b.lang || 'code').trim().toLowerCase();
+        const baseExt = extMap[lang] || `snippet-${idx + 1}.txt`;
+        const filename = bundleFiles.some((x) => x.filename === baseExt)
+          ? `${idx + 1}-${baseExt}`
+          : baseExt;
+        bundleFiles.push({
+          id: `auto-block-${idx}`,
+          filename,
+          lang,
+          title: `${lang.toUpperCase()} Block ${idx + 1}`,
+          content: b.content,
+          isStreaming: false,
+        });
+      });
+
+      const isUiPreviewable = (lang: string, code: string, fname?: string) => {
+        const l = (lang || '').toLowerCase();
+        const fn = (fname || '').toLowerCase();
+        if (
+          l === 'html' ||
+          l === 'htm' ||
+          l === 'svg' ||
+          l === 'jsx' ||
+          l === 'tsx' ||
+          l === 'react' ||
+          fn.endsWith('.html') ||
+          fn.endsWith('.htm') ||
+          fn.endsWith('.svg') ||
+          fn.endsWith('.jsx') ||
+          fn.endsWith('.tsx')
+        ) {
+          return true;
+        }
+        if (
+          /<!doctype\s+html|<html[\s>]|<body[\s>]|<svg[\s>]|<div[\s>]/i.test(
+            code
+          )
+        ) {
+          return true;
+        }
+        if (
+          /(?:export\s+default\s+function|function\s+[A-Z]\w*\s*\(|const\s+[A-Z]\w*\s*=\s*\([^)]*\)\s*=>)/.test(
+            code
+          ) &&
+          /<[A-Za-z][\w.-]*[\s/>]/.test(code)
+        ) {
+          return true;
+        }
+        return false;
+      };
+
+      const primaryArt = fileArts.find((a) =>
+        isUiPreviewable(a.lang, a.content, a.filename)
+      );
+      if (primaryArt) {
+        return {
+          title: primaryArt.title || primaryArt.filename,
+          filename: primaryArt.filename,
+          lang: primaryArt.lang,
+          code: primaryArt.content,
+          bundleFiles,
+        };
+      }
+
+      const primaryBlock = codeBlocks.find((b) =>
+        isUiPreviewable(b.lang, b.content)
+      );
+      if (primaryBlock) {
+        const cleanLang = (primaryBlock.lang || 'html').toLowerCase();
+        return {
+          title: `Interactive ${cleanLang.toUpperCase()} Live Preview`,
+          filename: extMap[cleanLang] || 'index.html',
+          lang: cleanLang,
+          code: primaryBlock.content,
+          bundleFiles,
+        };
+      }
+
+      return null;
+    },
+    []
+  );
+
+  const latestChatArtifact = React.useMemo(() => {
+    for (let i = activeChat.msgs.length - 1; i >= 0; i--) {
+      const m = activeChat.msgs[i];
+      if (m.role !== 'ai') continue;
+      const found = extractPreviewableArtifactFromMessage(m.text || '');
+      if (found) return found;
+    }
+    return null;
+  }, [activeChat.msgs, extractPreviewableArtifactFromMessage]);
 
   // ── v19.0.0 Full-screen Code Workspace (/workspace/code) handoff ─────────
   useEffect(() => {
@@ -2577,7 +2763,7 @@ export default function App() {
     );
   };
 
-  // Image Generation (Pollinations HD engine) — P1-13: avoid duplicate user message when invoked from handleSend
+  // Image Generation (Nano Banana 2.1 backend with Pollinations fallback)
   const handleRunImageGen = (
     prompt: string,
     style = settings.imageGenPrefs?.defaultStyle || 'high quality, detailed',
@@ -2602,26 +2788,69 @@ export default function App() {
       appendMessageToChat(targetChatId, userMsg);
     }
 
+    const aiMsgId = createUniqueId('ai');
     const seed = Math.floor(Math.random() * 100000);
-    const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
       `${prompt}, ${style}`.slice(0, 240)
     )}?width=${size}&height=${size}&nologo=true&seed=${seed}`;
 
     const aiMsg: ChatMessage = {
-      id: createUniqueId('ai'),
+      id: aiMsgId,
       role: 'ai',
-      text: `**${prompt}**`,
+      text: `**${prompt}**\n\n_ছবি তৈরি হচ্ছে…_`,
       ts: nowTs,
-      status: 'complete',
+      status: 'streaming',
       timing: {
         createdAt: nowIso,
         startedAt: nowIso,
-        completedAt: nowIso,
       },
-      imgGen: { url, prompt },
     };
     appendMessageToChat(targetChatId, aiMsg);
     scrollToBottom(true);
+
+    void (async () => {
+      let resolvedUrl = fallbackUrl;
+      let resolvedModel: string | undefined;
+      try {
+        const res = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            style,
+            size,
+            enabledTools: settings.enabledTools,
+          }),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            url?: string;
+            modelUsed?: string;
+          };
+          if (typeof data?.url === 'string' && data.url.trim()) {
+            resolvedUrl = data.url;
+          }
+          if (typeof data?.modelUsed === 'string' && data.modelUsed.trim()) {
+            resolvedModel = data.modelUsed;
+          }
+        }
+      } catch {
+        // Fallback URL already prepared
+      }
+      const doneIso = new Date().toISOString();
+      updateMessageInChat(targetChatId, aiMsgId, (m) => ({
+        ...m,
+        text: `**${prompt}**`,
+        status: 'complete',
+        ...(resolvedModel ? { modelUsed: resolvedModel } : {}),
+        timing: {
+          ...(m.timing || { createdAt: nowIso }),
+          completedAt: doneIso,
+        },
+        imgGen: { url: resolvedUrl, prompt },
+      }));
+      scrollToBottom(true);
+    })();
   };
 
   // Bilingual Speech synthesis (Bengali + English mixed segmentation)
@@ -2630,163 +2859,436 @@ export default function App() {
       text,
       msgId,
       preferredLang: voiceLangMode,
+      voiceProfile: settings.ttsVoice,
       rate: settings.voiceSpeed || 1.0,
       onDone,
     });
   };
 
-  // Bilingual Voice Recognition (ChatGPT / Lovable-style Waveform Dictation)
+  const clearVoiceRollingTimer = () => {
+    if (voiceRollingTimerRef.current !== null) {
+      window.clearInterval(voiceRollingTimerRef.current);
+      voiceRollingTimerRef.current = null;
+    }
+    voiceRollingInFlightRef.current = false;
+  };
+
+  useEffect(() => {
+    return () => {
+      clearVoiceRollingTimer();
+      voiceListeningRef.current = false;
+      try {
+        recogRef.current?.abort?.();
+      } catch {
+        // Ignore cleanup abort errors
+      }
+      if (voiceStreamRef.current) {
+        voiceStreamRef.current.getTracks().forEach((t) => {
+          try {
+            t.stop();
+          } catch {
+            // Ignore cleanup track stop errors
+          }
+        });
+      }
+    };
+  }, []);
+
+  const releaseVoiceMedia = () => {
+    const stream = voiceStreamRef.current;
+    voiceStreamRef.current = null;
+    setVoiceAudioStream(null);
+    if (stream) {
+      stream.getTracks().forEach((t) => {
+        try {
+          t.stop();
+        } catch {
+          // Ignore track stop failure
+        }
+      });
+    }
+  };
+
+  const stopActiveMediaRecorder = (): Promise<Blob | null> => {
+    const rec = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (!rec) {
+      releaseVoiceMedia();
+      return Promise.resolve(null);
+    }
+    if (rec.state === 'inactive') {
+      const existing =
+        mediaChunksRef.current.length > 0
+          ? new Blob(mediaChunksRef.current, { type: voiceMimeRef.current })
+          : null;
+      mediaChunksRef.current = [];
+      releaseVoiceMedia();
+      return Promise.resolve(existing);
+    }
+    return new Promise<Blob | null>((resolve) => {
+      let settled = false;
+      const finalize = () => {
+        if (settled) return;
+        settled = true;
+        const blob =
+          mediaChunksRef.current.length > 0
+            ? new Blob(mediaChunksRef.current, { type: voiceMimeRef.current })
+            : null;
+        mediaChunksRef.current = [];
+        releaseVoiceMedia();
+        resolve(blob);
+      };
+      const safetyTimer = window.setTimeout(finalize, 700);
+      rec.onstop = () => {
+        window.clearTimeout(safetyTimer);
+        finalize();
+      };
+      try {
+        rec.stop();
+      } catch {
+        window.clearTimeout(safetyTimer);
+        finalize();
+      }
+    });
+  };
+
+  const deliverCapturedVoiceText = (captured: string) => {
+    const clean = captured.trim();
+    if (!clean) return;
+    if (talkMode || voiceCallOpen) {
+      handleSend(clean);
+    } else {
+      setInputText((prev) => {
+        const cleanPrev = prev.trim();
+        return cleanPrev ? `${cleanPrev} ${clean}` : clean;
+      });
+      setTimeout(() => composerRef.current?.focus(), 40);
+    }
+  };
+
+  // Bilingual Voice Recognition (Hybrid Web Speech + Rolling Live Cloud STT)
   const cancelVoiceDictation = () => {
     voiceCancelledRef.current = true;
     voiceCommittedRef.current = false;
+    voiceListeningRef.current = false;
+    clearVoiceRollingTimer();
     voiceDraftRef.current = '';
+    voiceFinalPrefixRef.current = '';
+    voiceSessionFinalRef.current = '';
+    voiceWebSpeechTextRef.current = '';
+    voiceRollingTextRef.current = '';
     setVoiceLiveText('');
+    setIsListening(false);
+    setIsTranscribingVoice(false);
     try {
       recogRef.current?.abort?.();
       recogRef.current?.stop?.();
     } catch {
       // Ignore abort errors
     }
-    setIsListening(false);
+    void stopActiveMediaRecorder();
   };
 
-  const confirmVoiceDictation = () => {
+  const confirmVoiceDictation = async () => {
+    if (isTranscribingVoice) return;
     voiceCancelledRef.current = false;
     voiceCommittedRef.current = true;
-    const captured = voiceDraftRef.current.trim();
+    voiceListeningRef.current = false;
+    clearVoiceRollingTimer();
+    const captured = mergeVoiceLiveTranscript(
+      voiceWebSpeechTextRef.current || voiceDraftRef.current,
+      voiceRollingTextRef.current
+    );
     voiceDraftRef.current = '';
+    voiceFinalPrefixRef.current = '';
+    voiceSessionFinalRef.current = '';
+    voiceWebSpeechTextRef.current = '';
+    voiceRollingTextRef.current = '';
     setVoiceLiveText('');
+    setIsListening(false);
     try {
       recogRef.current?.stop?.();
     } catch {
       // Ignore stop errors
     }
-    setIsListening(false);
+
+    const effectiveLang = resolveRecognitionLanguage(
+      settings.vlang === 'bn-BD' || settings.vlang === 'en-US'
+        ? (settings.vlang as VoiceLangMode)
+        : voiceLangMode,
+      settings.appLanguage
+    );
+
+    const recordedBlob = await stopActiveMediaRecorder();
+
     if (captured) {
-      setInputText((prev) => {
-        const cleanPrev = prev.trim();
-        return cleanPrev ? `${cleanPrev} ${captured}` : captured;
-      });
+      deliverCapturedVoiceText(captured);
+      return;
     }
-    setTimeout(() => composerRef.current?.focus(), 40);
+
+    if (recordedBlob && recordedBlob.size >= 400) {
+      setIsTranscribingVoice(true);
+      try {
+        const audioBase64 = await blobToBase64Data(recordedBlob);
+        const stt = await requestServerVoiceTranscription({
+          audioBase64,
+          mimeType: recordedBlob.type || voiceMimeRef.current || 'audio/webm',
+          language: effectiveLang,
+        });
+        if (stt.ok && stt.text) {
+          deliverCapturedVoiceText(stt.text);
+        } else if (!stt.ok) {
+          showToast(stt.error || 'ভয়েস টেক্সটে রূপান্তর করা যায়নি');
+        } else {
+          showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
+        }
+      } catch {
+        showToast('ভয়েস ট্রান্সক্রিপশন ব্যর্থ হয়েছে — আবার চেষ্টা করুন');
+      } finally {
+        setIsTranscribingVoice(false);
+      }
+      return;
+    }
+
+    showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
   };
 
   const toggleMic = () => {
-    if (!isSpeechRecognitionSupported()) {
+    if (isTranscribingVoice) return;
+    if (isListening || voiceListeningRef.current) {
+      void confirmVoiceDictation();
+      return;
+    }
+    if (!isVoiceInputSupported()) {
       showToast('এই ব্রাউজারে ভয়েস ইনপুট সমর্থিত নয়');
       return;
     }
-    if (isListening) {
-      confirmVoiceDictation();
-      return;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const r = new SR();
-    const effectiveLang = resolveRecognitionLanguage(
-      settings.vlang === 'bn-BD' || settings.vlang === 'en-US' ? (settings.vlang as any) : voiceLangMode,
-      settings.appLanguage
-    );
-    r.lang = effectiveLang;
-    r.interimResults = true;
-    r.continuous = true;
+
+    clearVoiceRollingTimer();
     voiceDraftRef.current = '';
+    voiceFinalPrefixRef.current = '';
+    voiceSessionFinalRef.current = '';
+    voiceWebSpeechTextRef.current = '';
+    voiceRollingTextRef.current = '';
     voiceCancelledRef.current = false;
     voiceCommittedRef.current = false;
+    voiceListeningRef.current = true;
+    mediaChunksRef.current = [];
     setVoiceLiveText('');
     setVoiceActivityAt(Date.now());
 
-    const bumpActivity = () => {
-      setVoiceActivityAt(Date.now());
-    };
-    r.onaudiostart = bumpActivity;
-    r.onsoundstart = bumpActivity;
-    r.onspeechstart = bumpActivity;
+    const effectiveLang = resolveRecognitionLanguage(
+      settings.vlang === 'bn-BD' || settings.vlang === 'en-US'
+        ? (settings.vlang as VoiceLangMode)
+        : voiceLangMode,
+      settings.appLanguage
+    );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    r.onresult = (e: any) => {
-      let acc = '';
-      const results = e?.results || [];
-      for (let i = 0; i < results.length; i++) {
-        const alt = results[i]?.[0];
-        const seg = String(alt?.transcript || '').trim();
-        if (!seg) continue;
-        if (results[i].isFinal) {
-          acc = acc ? `${acc} ${seg}` : seg;
-        } else {
-          acc = acc ? `${acc} ${seg}` : seg;
+    // 1. Start Web SpeechRecognition SYNCHRONOUSLY inside user click (before any await/getUserMedia)
+    let recognitionStarted = false;
+    if (isSpeechRecognitionSupported()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const r = new SR();
+      r.lang = effectiveLang;
+      r.interimResults = true;
+      r.continuous = true;
+
+      const bumpActivity = () => setVoiceActivityAt(Date.now());
+      r.onaudiostart = bumpActivity;
+      r.onsoundstart = bumpActivity;
+      r.onspeechstart = bumpActivity;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      r.onresult = (e: any) => {
+        const { finalPrefix, liveTranscript } = accumulateSpeechResults(
+          e?.results,
+          voiceFinalPrefixRef.current
+        );
+        voiceSessionFinalRef.current = finalPrefix;
+        if (liveTranscript) {
+          voiceWebSpeechTextRef.current = liveTranscript;
+          const merged = mergeVoiceLiveTranscript(
+            liveTranscript,
+            voiceRollingTextRef.current
+          );
+          voiceDraftRef.current = merged;
+          if (settings.voiceLiveCaptions !== false) {
+            setVoiceLiveText(merged);
+          }
         }
-      }
-      const clean = acc.replace(/\s+/g, ' ').trim();
-      voiceDraftRef.current = clean || voiceDraftRef.current;
-      setVoiceLiveText(clean || voiceDraftRef.current);
-      setVoiceActivityAt(Date.now());
-    };
+        setVoiceActivityAt(Date.now());
+      };
 
-    r.onend = () => {
-      setIsListening(false);
-      if (voiceCancelledRef.current) {
-        voiceDraftRef.current = '';
-        voiceCancelledRef.current = false;
-        voiceCommittedRef.current = false;
-        setVoiceLiveText('');
-        return;
-      }
-      if (voiceCommittedRef.current) {
-        voiceCommittedRef.current = false;
-        setVoiceLiveText('');
-        return;
-      }
-      const captured = voiceDraftRef.current.trim();
-      voiceDraftRef.current = '';
-      setVoiceLiveText('');
-      if ((talkMode || voiceCallOpen) && captured) {
-        handleSend(captured);
-      } else if (captured) {
-        setInputText((prev) => {
-          const cleanPrev = prev.trim();
-          return cleanPrev ? `${cleanPrev} ${captured}` : captured;
-        });
-        setTimeout(() => composerRef.current?.focus(), 40);
-      }
-    };
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    r.onerror = (ev: any) => {
-      const code = String(ev?.error || '');
-      if (code === 'aborted' && (voiceCancelledRef.current || voiceCommittedRef.current)) {
-        return;
-      }
-      if (code === 'no-speech') {
-        if (!voiceDraftRef.current.trim()) {
-          showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনে পরিষ্কার বলুন');
+      r.onend = () => {
+        if (voiceCancelledRef.current || voiceCommittedRef.current || !voiceListeningRef.current) {
+          return;
         }
-        return;
-      }
-      setIsListening(false);
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        showToast('মাইক্রোফোন পারমিশন ব্লক করা আছে — ব্রাউজার সেটিংসে অনুমতি দিন');
-      } else if (code === 'audio-capture') {
-        showToast('কোনো মাইক্রোফোন পাওয়া যায়নি');
-      } else if (code === 'network') {
-        // Fallback or tolerant message for network STT error
-        showToast('ভয়েস রিকগনিশন সার্ভারে সংযোগ বিচ্ছিন্ন — পুনরায় চেষ্টা করুন');
-      } else if (code) {
-        showToast(`ভয়েস ত্রুটি: ${code}`);
-      }
-    };
+        if (voiceSessionFinalRef.current) {
+          voiceFinalPrefixRef.current = voiceSessionFinalRef.current;
+        }
+        // Keep Web Speech active seamlessly across natural pauses while listening
+        window.setTimeout(() => {
+          if (!voiceListeningRef.current || voiceCancelledRef.current || voiceCommittedRef.current) {
+            return;
+          }
+          try {
+            r.start();
+          } catch {
+            // MediaRecorder + rolling transcription continues uninterrupted
+          }
+        }, 120);
+      };
 
-    recogRef.current = r;
-    try {
-      r.start();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      r.onerror = (ev: any) => {
+        const code = String(ev?.error || '');
+        if (code === 'aborted' || code === 'no-speech') {
+          return;
+        }
+        // If MediaRecorder fallback is capturing audio cleanly, don't kill the session
+        if (isMediaRecorderSupported()) {
+          return;
+        }
+        if (voiceCancelledRef.current || voiceCommittedRef.current) return;
+        voiceListeningRef.current = false;
+        clearVoiceRollingTimer();
+        setIsListening(false);
+        if (code === 'not-allowed' || code === 'service-not-allowed') {
+          showToast('মাইক্রোফোন পারমিশন ব্লক করা আছে — ব্রাউজার সেটিংসে অনুমতি দিন');
+        } else if (code === 'audio-capture') {
+          showToast('কোনো মাইক্রোফোন পাওয়া যায়নি');
+        } else if (code) {
+          showToast(`ভয়েস ত্রুটি: ${code}`);
+        }
+      };
+
+      recogRef.current = r;
+      try {
+        r.start();
+        recognitionStarted = true;
+      } catch {
+        recognitionStarted = false;
+      }
+    }
+
+    // 2. Acquire MediaRecorder non-blockingly so waveform + server STT work across all browsers/iframes
+    const hasRecorder = isMediaRecorderSupported();
+    if (hasRecorder || recognitionStarted) {
       setIsListening(true);
-    } catch (err: unknown) {
-      console.warn(
-        '[App.toggleMic]',
-        err instanceof Error ? err.message : 'SpeechRecognition start failed'
-      );
-      setIsListening(false);
-      showToast('ভয়েস চালু করা যায়নি — মাইক্রোফোন পরীক্ষা করুন');
+    } else {
+      voiceListeningRef.current = false;
+      showToast('ভয়েস চালু করা যায়নি — মাইক্রোফোন পারমিশন পরীক্ষা করুন');
+      return;
+    }
+
+    if (hasRecorder) {
+      navigator.mediaDevices
+        .getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+        .then((stream) => {
+          if (!voiceListeningRef.current || voiceCancelledRef.current || voiceCommittedRef.current) {
+            stream.getTracks().forEach((t) => {
+              try {
+                t.stop();
+              } catch {
+                // Ignore track stop failure
+              }
+            });
+            return;
+          }
+          voiceStreamRef.current = stream;
+          setVoiceAudioStream(stream);
+          const preferredMime = pickSupportedAudioMimeType();
+          const recorder = preferredMime
+            ? new MediaRecorder(stream, { mimeType: preferredMime })
+            : new MediaRecorder(stream);
+          voiceMimeRef.current = recorder.mimeType || preferredMime || 'audio/webm';
+          recorder.ondataavailable = (ev: BlobEvent) => {
+            if (ev.data && ev.data.size > 0) {
+              mediaChunksRef.current.push(ev.data);
+              setVoiceActivityAt(Date.now());
+            }
+          };
+          mediaRecorderRef.current = recorder;
+          recorder.start(300);
+
+          // Rolling server live-caption poller when SpeechRecognition yields no live text
+          voiceRollingTimerRef.current = window.setInterval(() => {
+            const totalBytes = mediaChunksRef.current.reduce(
+              (acc, b) => acc + b.size,
+              0
+            );
+            if (
+              !shouldPollRollingVoiceTranscript({
+                isListening: voiceListeningRef.current,
+                hasWebSpeechText: Boolean(voiceWebSpeechTextRef.current.trim()),
+                totalChunkBytes: totalBytes,
+                inFlight: voiceRollingInFlightRef.current,
+                liveCaptionsEnabled: settings.voiceLiveCaptions,
+              })
+            ) {
+              return;
+            }
+            const snapBlob = new Blob(mediaChunksRef.current, {
+              type: voiceMimeRef.current || 'audio/webm',
+            });
+            voiceRollingInFlightRef.current = true;
+            void blobToBase64Data(snapBlob)
+              .then((audioBase64) =>
+                requestServerVoiceTranscription({
+                  audioBase64,
+                  mimeType: snapBlob.type || voiceMimeRef.current || 'audio/webm',
+                  language: effectiveLang,
+                })
+              )
+              .then((stt) => {
+                if (
+                  !voiceListeningRef.current ||
+                  voiceCancelledRef.current ||
+                  voiceCommittedRef.current
+                ) {
+                  return;
+                }
+                if (stt.ok && stt.text) {
+                  voiceRollingTextRef.current = stt.text;
+                  const merged = mergeVoiceLiveTranscript(
+                    voiceWebSpeechTextRef.current,
+                    stt.text
+                  );
+                  voiceDraftRef.current = merged;
+                  setVoiceLiveText(merged);
+                }
+              })
+              .catch(() => {
+                // Non-fatal; final confirm pass will still transcribe complete audio
+              })
+              .finally(() => {
+                voiceRollingInFlightRef.current = false;
+              });
+          }, 2100);
+        })
+        .catch((micErr: unknown) => {
+          releaseVoiceMedia();
+          if (!recognitionStarted) {
+            voiceListeningRef.current = false;
+            clearVoiceRollingTimer();
+            setIsListening(false);
+            const name = micErr instanceof Error ? micErr.name : '';
+            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+              showToast('মাইক্রোফোন পারমিশন ব্লক করা আছে — ব্রাউজার সেটিংসে অনুমতি দিন');
+            } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+              showToast('কোনো মাইক্রোফোন পাওয়া যায়নি');
+            } else {
+              showToast('ভয়েস চালু করা যায়নি — মাইক্রোফোন পারমিশন পরীক্ষা করুন');
+            }
+          }
+        });
     }
   };
 
@@ -3191,8 +3693,10 @@ export default function App() {
     overrideProvider?: AppSettings['provider'],
     appendToMsg?: { id: string; prefixText: string }
   ) => {
+    const isThinkingEnabledAtStart =
+      settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
     setIsGenerating(true);
-    setIsWaitingFirstToken(!appendToMsg);
+    setIsWaitingFirstToken(!appendToMsg && !isThinkingEnabledAtStart);
     setGenPhase(nextGenPhase(null, { type: 'start' }));
     setGenStepDetail(null);
     const abortCtrl = new AbortController();
@@ -3292,6 +3796,40 @@ export default function App() {
     } = {};
 
     let bubbleCreated = Boolean(appendToMsg);
+    const isThinkingEnabledForTurn =
+      settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
+    const rawLastUserMsg =
+      [...historyMsgs].reverse().find((m) => m.role === 'user')?.text || '';
+    const initialTurnTopic = deriveInitialThinkingTopic(rawLastUserMsg);
+    let thinkingStartMs: number | null = isThinkingEnabledForTurn
+      ? Date.now()
+      : null;
+    let computedThinkingSec: number | undefined;
+
+    if (appendToMsg) {
+      setStreamingMsgId(aiMsgId);
+    } else if (isThinkingEnabledForTurn) {
+      bubbleCreated = true;
+      setIsWaitingFirstToken(false);
+      setStreamingMsgId(aiMsgId);
+      appendMessageToChat(chatId, {
+        id: aiMsgId,
+        role: 'ai',
+        text: ' ',
+        thinking: `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`,
+        v2ModelId: isV2Request ? effectiveExternalModel : undefined,
+        ts: reqStart,
+        turnId,
+        status: 'streaming',
+        requestedProvider: activeProvider,
+        requestedModel: effectiveExternalModel || activeModelName,
+        timing: {
+          createdAt: reqStartIso,
+          startedAt: reqStartIso,
+        },
+      });
+      scrollToBottom(false);
+    }
 
     try {
       // v18.11 + v19.0 — history is user-controlled: off sends only the current
@@ -3437,7 +3975,29 @@ export default function App() {
           }
         }
       }
+      const samePagePriorLines: string[] = [];
+      if (
+        settings.crossModelMemoryCarryover !== false &&
+        cleanHistoryMsgs.length > 1
+      ) {
+        const recentSamePage = cleanHistoryMsgs.slice(0, -1).slice(-8);
+        for (const pm of recentSamePage) {
+          const roleTag = pm.role === 'user' ? 'User' : 'Assistant';
+          const cleanTxt = String(pm.text || '')
+            .replace(/⟦FILE:[^\n⟦]+⟧[\s\S]*?⟦\/FILE⟧/g, '[Attached File]')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 320);
+          if (cleanTxt) {
+            samePagePriorLines.push(`${roleTag}: ${cleanTxt}`);
+          }
+        }
+      }
+
       const chatHistorySummary = [
+        samePagePriorLines.length > 0
+          ? `[ACTIVE PAGE CONVERSATION CONTINUITY — RETAIN ACROSS MODEL SWITCHES]:\n${samePagePriorLines.join('\n')}`
+          : '',
         smartCtx?.updatedSummary || '',
         previousSessionsLines.join('\n'),
       ]
@@ -3569,7 +4129,10 @@ export default function App() {
         topP: settings.topP ?? 0.9,
         topK: settings.topK,
         stopSequences: settings.stopSequences,
-        thinkingMode: settings.thinkingMode || 'auto',
+        thinkingMode:
+          settings.thinkingEnabled === false
+            ? 'off'
+            : settings.thinkingMode || 'medium',
         requestTimeoutSec: settings.requestTimeoutSec ?? 120,
         trainingData: settings.trainingData || '',
         fastDecision: settings.fastDecision !== false,
@@ -3589,7 +4152,7 @@ export default function App() {
           title: n.title || 'Untitled',
           content: (n.content || '').slice(0, 1200),
         })),
-        firebaseUid: firebaseUser?.uid || '',
+        firebaseUid: firebaseUser?.uid || simpleEntryCreds?.userId || '',
         firebaseUserEmail: firebaseUser?.email || '',
         firebaseEmailVerified: Boolean(firebaseUser?.emailVerified),
         v2TestingBypass: isV2AuthorizedTester
@@ -3673,10 +4236,6 @@ export default function App() {
         }
       }
 
-      bubbleCreated = Boolean(appendToMsg);
-      if (appendToMsg) {
-        setStreamingMsgId(aiMsgId);
-      }
       let frameTimer: number | null = null;
       const useGpuRaf =
         settings.gpuAccel !== false &&
@@ -3690,8 +4249,12 @@ export default function App() {
       let revealDoneCb: (() => void) | null = null;
       let liveThinking = '';
       let liveStatusSteps: string[] = [];
-      let thinkingStartMs: number | null = null;
-      let computedThinkingSec: number | undefined;
+
+      const buildEffectiveLiveThinking = (): string | undefined => {
+        if (liveThinking.trim()) return liveThinking;
+        if (!isThinkingEnabledForTurn) return undefined;
+        return `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`;
+      };
 
       const scheduleReveal = (): number => {
         if (typeof window.requestAnimationFrame === 'function') {
@@ -3711,8 +4274,14 @@ export default function App() {
 
       const paintReveal = () => {
         const visible = safeSlice(revealTarget, revealShown);
+        const effectiveThinking = buildEffectiveLiveThinking();
         if (!bubbleCreated) {
-          if (!visible.trim() && !liveThinking.trim() && liveStatusSteps.length === 0) {
+          if (
+            !visible.trim() &&
+            !liveThinking.trim() &&
+            liveStatusSteps.length === 0 &&
+            !effectiveThinking
+          ) {
             return;
           }
           bubbleCreated = true;
@@ -3723,7 +4292,7 @@ export default function App() {
             id: aiMsgId,
             role: 'ai',
             text: visible || ' ',
-            thinking: liveThinking || undefined,
+            thinking: effectiveThinking,
             thinkingDurationSec: computedThinkingSec,
             statusSteps: liveStatusSteps.length > 0 ? [...liveStatusSteps] : undefined,
             v2ModelId: isV2Request ? effectiveExternalModel : undefined,
@@ -3742,7 +4311,7 @@ export default function App() {
           updateMessageInChat(chatId, aiMsgId, (m) => ({
             ...m,
             text: visible || m.text || ' ',
-            thinking: liveThinking || m.thinking,
+            thinking: effectiveThinking || m.thinking,
             thinkingDurationSec: computedThinkingSec ?? m.thinkingDurationSec,
             statusSteps:
               liveStatusSteps.length > 0 ? [...liveStatusSteps] : m.statusSteps,
@@ -3831,11 +4400,17 @@ export default function App() {
         }
       };
 
-      const pipeSSE = async (res: Response): Promise<{ stalled: boolean }> => {
+      let serverReportedTruncated = false;
+
+      const pipeSSE = async (
+        res: Response,
+        opts?: { bufferToStringOnly?: boolean }
+      ): Promise<{ stalled: boolean; bufferedText: string }> => {
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let stalled = false;
+        let bufferedText = '';
         const watchdog = createIdleWatchdog(() => {
           stalled = true;
           void reader.cancel().catch(() => undefined);
@@ -3891,6 +4466,7 @@ export default function App() {
                 text?: string;
                 delta?: string;
                 thinking?: string;
+                truncated?: boolean;
                 reset?: string | boolean;
                 providerReasoning?: boolean;
               } | null = null;
@@ -3925,16 +4501,8 @@ export default function App() {
                 continue;
               }
 
-              if (parsed.type === 'status' && typeof parsed.status === 'string' && parsed.status.trim()) {
-                const st = parsed.status.trim();
-                if (!liveStatusSteps.includes(st)) {
-                  liveStatusSteps = [...liveStatusSteps, st];
-                  if (!bubbleCreated) {
-                    flushStreamText();
-                  } else {
-                    scheduleFlush();
-                  }
-                }
+              if (parsed.type === 'status') {
+                // Do not show intermediate Processing / Confirming memory status badges; start directly with Groq Thinking
                 continue;
               }
 
@@ -3969,6 +4537,9 @@ export default function App() {
                   ttftMs: parsed.ttftMs,
                   latencyMs: parsed.latencyMs,
                 };
+                if (typeof parsed.truncated === 'boolean') {
+                  serverReportedTruncated = parsed.truncated;
+                }
                 if (Array.isArray(parsed.sources) && parsed.sources.length > 0) {
                   attachedSources = parsed.sources.map((s) => ({
                     title: s.title,
@@ -4002,91 +4573,55 @@ export default function App() {
                   : typeof parsed.delta === 'string'
                   ? parsed.delta
                   : '';
-              if (deltaTxt) {
-                if (thinkingStartMs !== null && computedThinkingSec === undefined) {
-                  computedThinkingSec = Math.max(
-                    1,
-                    Math.round((Date.now() - thinkingStartMs) / 1000)
-                  );
-                }
-                if (firstTokenPerf === null) {
-                  firstTokenPerf =
-                    typeof performance !== 'undefined'
-                      ? performance.now()
-                      : Date.now();
-                  firstTokenIso = new Date().toISOString();
-                  setGenPhase((cur) =>
-                    nextGenPhase(cur, { type: 'first-token' })
-                  );
-                }
-                accumulated += deltaTxt;
-                if (!bubbleCreated) {
-                  flushStreamText();
-                } else {
-                  scheduleFlush();
+                if (deltaTxt) {
+                  if (opts?.bufferToStringOnly) {
+                    bufferedText += deltaTxt;
+                    continue;
+                  }
+                  if (thinkingStartMs !== null && computedThinkingSec === undefined) {
+                    computedThinkingSec = Math.max(
+                      1,
+                      Math.round((Date.now() - thinkingStartMs) / 1000)
+                    );
+                  }
+                  if (firstTokenPerf === null) {
+                    firstTokenPerf =
+                      typeof performance !== 'undefined'
+                        ? performance.now()
+                        : Date.now();
+                    firstTokenIso = new Date().toISOString();
+                    setGenPhase((cur) =>
+                      nextGenPhase(cur, { type: 'first-token' })
+                    );
+                  }
+                  accumulated += deltaTxt;
+                  if (!bubbleCreated) {
+                    flushStreamText();
+                  } else {
+                    scheduleFlush();
+                  }
                 }
               }
             }
+          } catch (readErr: unknown) {
+            if (readErr instanceof Error && readErr.name === 'AbortError') {
+              throw readErr;
+            }
+            if (!accumulated.trim() || (readErr as { code?: string })?.code) {
+              throw readErr;
+            }
+          } finally {
+            watchdog.disarm();
           }
-        } catch (readErr: unknown) {
-          if (readErr instanceof Error && readErr.name === 'AbortError') {
-            throw readErr;
-          }
-          if (!accumulated.trim() || (readErr as { code?: string })?.code) {
-            throw readErr;
-          }
-        } finally {
-          watchdog.disarm();
-        }
-        return { stalled };
-      };
+          return { stalled, bufferedText };
+        };
 
+      // Architecture decision: V2 – Special uses ONLY the server /api/chat/stream route
+      // (streamV2FirebaseModel); client-side tryStreamViaFirebaseAiLogic chat is disabled
+      // so presets, models, thinking, RAG, and quota rules are always identical.
       if (response && response.ok && response.body) {
         setGenPhase((cur) => nextGenPhase(cur, { type: 'response' }));
-        try {
-          await pipeSSE(response);
-        } catch (streamErr: unknown) {
-          const streamCode = (streamErr as { code?: string })?.code;
-          if (
-            isV2Request &&
-            streamCode === 'V2_AI_UNAVAILABLE' &&
-            !accumulated.trim() &&
-            !abortCtrl.signal.aborted
-          ) {
-            const v2Spec = getV2ModelSpec(effectiveExternalModel);
-            const fbOk = await tryStreamViaFirebaseAiLogic({
-              modelId: effectiveExternalModel as V2ModelId,
-              systemInstruction: v2Spec.systemDirective,
-              history: contextSlice.map((m) => ({
-                role: m.role === 'user' ? 'user' : 'assistant',
-                content: m.text,
-              })),
-              signal: abortCtrl.signal,
-              onDelta: (deltaTxt) => {
-                if (!deltaTxt) return;
-                if (firstTokenPerf === null) {
-                  firstTokenPerf =
-                    typeof performance !== 'undefined'
-                      ? performance.now()
-                      : Date.now();
-                  firstTokenIso = new Date().toISOString();
-                  setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
-                }
-                accumulated += deltaTxt;
-                if (!bubbleCreated) {
-                  flushStreamText();
-                } else {
-                  scheduleFlush();
-                }
-              },
-            });
-            if (!fbOk) {
-              throw streamErr;
-            }
-          } else {
-            throw streamErr;
-          }
-        }
+        await pipeSSE(response);
       } else if (response && !response.ok) {
         const errPayload = await response.json().catch(() => null);
         const extractedError =
@@ -4101,39 +4636,10 @@ export default function App() {
         httpErr.code = errPayload?.errorCode || errPayload?.error?.code;
         throw httpErr;
       } else if (isV2Request) {
-        // Standalone APK / direct Firebase AI Logic client path (V2-only, zero retry loops)
         const v2Spec = getV2ModelSpec(effectiveExternalModel);
-        const fbOk = await tryStreamViaFirebaseAiLogic({
-          modelId: effectiveExternalModel as V2ModelId,
-          systemInstruction: v2Spec.systemDirective,
-          history: contextSlice.map((m) => ({
-            role: m.role === 'user' ? 'user' : 'assistant',
-            content: m.text,
-          })),
-          signal: abortCtrl.signal,
-          onDelta: (deltaTxt) => {
-            if (!deltaTxt) return;
-            if (firstTokenPerf === null) {
-              firstTokenPerf =
-                typeof performance !== 'undefined'
-                  ? performance.now()
-                  : Date.now();
-              firstTokenIso = new Date().toISOString();
-              setGenPhase((cur) => nextGenPhase(cur, { type: 'first-token' }));
-            }
-            accumulated += deltaTxt;
-            if (!bubbleCreated) {
-              flushStreamText();
-            } else {
-              scheduleFlush();
-            }
-          },
-        });
-        if (!fbOk) {
-          throw new Error(
-            `${v2Spec.label} is temporarily unavailable. Verify server API configuration or try again shortly.`
-          );
-        }
+        throw new Error(
+          `${v2Spec.label} requires the server /api/chat/stream route, which could not be reached.`
+        );
       } else {
         // Standalone APK or direct client-side fallback (V1 untouched)
         try {
@@ -4205,7 +4711,7 @@ export default function App() {
           continuationRounds < MAX_AUTO_CONTINUATIONS &&
           !abortCtrl.signal.aborted &&
           accumulated.trim() &&
-          looksTruncated(accumulated)
+          (serverReportedTruncated || looksTruncated(accumulated))
         ) {
           continuationRounds += 1;
           const baseBeforeCont = accumulated;
@@ -4221,13 +4727,16 @@ export default function App() {
               signal: abortCtrl.signal,
             });
             if (!contRes.ok || !contRes.body) break;
-            await pipeSSE(contRes);
-            const rawContChunk = accumulated.slice(baseBeforeCont.length);
-            const mergedCont = mergeContinuationText(baseBeforeCont, rawContChunk);
-            accumulated = mergedCont.merged;
+            serverReportedTruncated = false;
+            const contSse = await pipeSSE(contRes, { bufferToStringOnly: true });
+            const mergedCont = mergeContinuationText(
+              baseBeforeCont,
+              contSse.bufferedText
+            );
             if (!mergedCont.deltaToAppend.trim()) {
               break;
             }
+            accumulated = mergedCont.merged;
             scheduleFlush();
           } catch {
             break;
@@ -4340,6 +4849,8 @@ export default function App() {
         !hasAttachedImgs &&
         !webSearch &&
         contextSlice.length <= 1 &&
+        !serverReportedTruncated &&
+        !looksTruncated(finalText) &&
         finalText.trim()
       ) {
         const clientCacheModeKey = `${activeProvider}:${effectiveExternalModel || ''}:${settings.mode}`;
@@ -4500,13 +5011,15 @@ export default function App() {
           ? Math.max(1, Math.round((Date.now() - thinkingStartMs) / 1000))
           : undefined);
 
+      const finalEffectiveThinking =
+        extractedThinking || liveThinking || buildEffectiveLiveThinking();
+
       const finalCompletedMsg: ChatMessage = {
         id: aiMsgId,
         role: 'ai',
         text: finalText || cleanText || accumulated,
-        thinking: extractedThinking || liveThinking || undefined,
-        thinkingDurationSec:
-          extractedThinking || liveThinking ? finalThinkingSec : undefined,
+        thinking: finalEffectiveThinking,
+        thinkingDurationSec: finalEffectiveThinking ? finalThinkingSec : undefined,
         statusSteps:
           liveStatusSteps.length > 0 ? [...liveStatusSteps] : undefined,
         v2ModelId: isV2Request ? effectiveExternalModel : undefined,
@@ -4545,6 +5058,16 @@ export default function App() {
           finalCompletedMsg.thinkingDurationSec ?? m.thinkingDurationSec,
         statusSteps: finalCompletedMsg.statusSteps ?? m.statusSteps,
       }));
+
+      // Automatically open side-by-side Live Preview when previewable HTML/CSS/JS/React/SVG is generated
+      if (settings.autoOpenLivePreview !== false && finalCompletedMsg.text) {
+        const autoPreviewPayload = extractPreviewableArtifactFromMessage(
+          finalCompletedMsg.text
+        );
+        if (autoPreviewPayload) {
+          setActiveArtifact(autoPreviewPayload);
+        }
+      }
 
       setTelemetryLogs(
         appendTelemetryLog(
@@ -4671,6 +5194,14 @@ export default function App() {
               latencyMs: elapsedMs,
             },
           }));
+        } else if (bubbleCreated && !appendToMsg) {
+          setChats((prev) =>
+            prev.map((c) =>
+              c.id === chatId
+                ? { ...c, msgs: c.msgs.filter((m) => m.id !== aiMsgId) }
+                : c
+            )
+          );
         }
         showToast('Generation stopped');
       } else {
@@ -5499,7 +6030,26 @@ export default function App() {
               )}
             </div>
 
-            <div className="pt-2 border-t border-[var(--border)]">
+            <div className="pt-2 border-t border-[var(--border)] space-y-1">
+              <button
+                type="button"
+                data-testid="sidebar-simple-entry-btn"
+                onClick={() => {
+                  setSimpleEntryModalOpen(true);
+                  setSidebarOpen(false);
+                }}
+                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center justify-between gap-2 cursor-pointer"
+              >
+                <span className="flex items-center gap-2.5 min-w-0 truncate">
+                  <KeyRound className="w-4 h-4 text-[var(--primary)] shrink-0" />
+                  <span className="truncate">
+                    {profile?.name?.trim() || simpleEntryCreds?.name || 'নাম ও পাসওয়ার্ড'}
+                  </span>
+                </span>
+                <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--ink-dim)] shrink-0">
+                  {simpleEntryCreds ? 'Active' : 'Setup'}
+                </span>
+              </button>
               <button
                 type="button"
                 data-testid="sidebar-settings-btn"
@@ -5551,11 +6101,22 @@ export default function App() {
                 >
                   <StaggeredMenuIcon className="w-4 h-4" />
                 </button>
-                <span className="hidden sm:inline text-[15px] font-medium text-[var(--ink-muted)] truncate">
-                  {activeDisplayName === 'Msfta shop ai'
-                    ? 'SMFTA AI'
-                    : activeDisplayName || 'SMFTA AI'}
-                </span>
+                <div
+                  data-testid="app-header-brand"
+                  className="inline-flex items-center gap-2 min-w-0"
+                >
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] shrink-0">
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[15px] font-bold tracking-tight text-[var(--ink)] truncate">
+                    SMFTA AI Pro
+                  </span>
+                  {activeModelLabel && (
+                    <span className="hidden xs:inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink-dim)] truncate max-w-[140px]">
+                      {activeModelLabel}
+                    </span>
+                  )}
+                </div>
 
                 {/* Active Project Selector Pill (Section ঘ: Projects) */}
                 {(settings.projects || []).length > 0 && (
@@ -5598,6 +6159,44 @@ export default function App() {
 
               <div className="relative flex items-center gap-1.5">
                 <div className="ref-pill-group">
+                  {(latestChatArtifact || activeArtifact) && (
+                    <button
+                      type="button"
+                      data-testid="header-live-preview-toggle"
+                      onClick={() => {
+                        if (activeArtifact) {
+                          setActiveArtifact(null);
+                        } else if (latestChatArtifact) {
+                          setActiveArtifact(latestChatArtifact);
+                        }
+                      }}
+                      className={`ref-pill-icon-btn ${
+                        activeArtifact ? 'text-[var(--primary)]' : ''
+                      }`}
+                      aria-label="Toggle side-by-side live preview"
+                      title={
+                        activeArtifact
+                          ? 'পাশাপাশি লাইভ প্রিভিউ বন্ধ করুন'
+                          : 'পাশাপাশি লাইভ প্রিভিউ খুলুন (Live Preview)'
+                      }
+                    >
+                      <Eye className="w-[16px] h-[16px]" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="header-simple-entry-btn"
+                    onClick={() => setSimpleEntryModalOpen(true)}
+                    className="ref-pill-icon-btn"
+                    aria-label="নাম ও পাসওয়ার্ড প্রোফাইল"
+                    title={
+                      profile?.name?.trim()
+                        ? `প্রোফাইল: ${profile.name.trim()} (নাম ও পাসওয়ার্ড)`
+                        : 'নাম ও পাসওয়ার্ড দিয়ে প্রবেশ করুন'
+                    }
+                  >
+                    <User className="w-[16px] h-[16px]" />
+                  </button>
                   <button
                     type="button"
                     data-testid="incognito-chat-toggle"
@@ -5659,8 +6258,25 @@ export default function App() {
                     />
                     <div
                       data-testid="header-menu-popover"
-                      className="absolute right-0 top-full mt-2 w-48 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
+                      className="absolute right-0 top-full mt-2 w-52 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
                     >
+                      <button
+                        type="button"
+                        data-testid="header-menu-simple-entry"
+                        onClick={() => {
+                          setSimpleEntryModalOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span className="truncate">
+                          {profile?.name?.trim()
+                            ? `${profile.name.trim()} (নাম ও পাসওয়ার্ড)`
+                            : 'নাম ও পাসওয়ার্ড সেটআপ'}
+                        </span>
+                      </button>
+
                       <button
                         type="button"
                         data-testid="header-menu-new-chat"
@@ -5810,13 +6426,50 @@ export default function App() {
                 className="content-scroll flex-1"
               >
                 {activeChat.msgs.length === 0 && !isWaitingFirstToken ? (
-                  <div className="empty-state">
+                  <div className="empty-state" data-testid="ultra-empty-home">
+                    <div
+                      className="inline-flex items-center gap-2 text-xs text-[var(--ink-dim)] mb-1"
+                      data-testid="home-model-readiness-pill"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="font-medium text-[var(--ink-muted)]">
+                        {activeModelLabel}
+                      </span>
+                      {settings.thinkingEnabled !== false &&
+                        settings.thinkingMode !== 'off' && (
+                          <span className="text-[var(--primary)] font-medium">
+                            · Thinking Ready
+                          </span>
+                        )}
+                    </div>
                     <SunburstMarkIcon className="ref-sunburst" />
                     <h1 className="empty-title">What can I help with?</h1>
+                    {profile?.name?.trim() ? (
+                      <p className="empty-sub">
+                        স্বাগতম, {profile.name.trim()} — আপনার পরবর্তী কাজটি শুরু করুন
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="home-simple-entry-prompt-btn"
+                        onClick={() => setSimpleEntryModalOpen(true)}
+                        className="mt-1 inline-flex items-center gap-1.5 text-xs text-[var(--ink-dim)] hover:text-[var(--ink)] transition-colors cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>লগইন বা রেজিস্ট্রেশন ছাড়াই আপনার নাম ও পাসওয়ার্ড সেট করুন</span>
+                      </button>
+                    )}
                   </div>
                 ) : (
               <div className="w-full max-w-[780px] mx-auto">
-                {activeChat.msgs.map((m) => {
+                {activeChat.msgs.map((m, msgIdx) => {
+                  const prevUserMsg =
+                    m.role === 'ai'
+                      ? activeChat.msgs
+                          .slice(0, msgIdx)
+                          .reverse()
+                          .find((x) => x.role === 'user')
+                      : undefined;
                   const attachedDocNames =
                     m.role === 'user'
                       ? Array.from(
@@ -5886,6 +6539,10 @@ export default function App() {
                             thinking={m.thinking}
                             thinkingDurationSec={m.thinkingDurationSec}
                             statusSteps={m.statusSteps}
+                            thinkingEnabled={
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                            }
                             liveThinkingSummary={
                               settings.liveThinkingSummary !== false
                             }
@@ -5984,6 +6641,9 @@ export default function App() {
                             onToast={showToast}
                             renderMarkdown={settings.markdownRender !== false}
                             highlightCode={settings.codeHighlight !== false}
+                            userPromptPreview={prevUserMsg?.text || ''}
+                            showThinkingTopic={settings.showThinkingTopic !== false}
+                            autoCollapseThinking={Boolean(settings.autoCollapseThinking)}
                           />
 
                           {/* Artifact / Downloadable Card (Screenshot 1 style) */}
@@ -6306,25 +6966,39 @@ export default function App() {
                   );
                 })}
 
-                {/* Live, honest pipeline status before the first answer token */}
-                {isWaitingFirstToken && (
-                  <div className="msg-row is-ai">
-                    <div className="msg-ai-head">
-                      <span className="msg-ai-model">{activeModelLabel}</span>
+                {/* Direct Groq-style Thinking indicator before first token (zero Processing/Confirming intermediate screens) */}
+                {isWaitingFirstToken && (() => {
+                  const lastUser = [...activeChat.msgs]
+                    .reverse()
+                    .find((x) => x.role === 'user');
+                  const waitingSubject = deriveInitialThinkingTopic(
+                    lastUser?.text || ''
+                  );
+                  return (
+                    <div className="msg-row is-ai">
+                      <div
+                        data-testid="thinking-accordion"
+                        className="mt-0 mb-2.5 select-none"
+                      >
+                        <div
+                          data-testid="thinking-accordion-headline"
+                          className="inline-flex items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[13px] font-medium text-[var(--primary)]"
+                        >
+                          <Brain className="w-3.5 h-3.5 animate-pulse shrink-0" />
+                          <span className="font-semibold animate-pulse">
+                            Thinking... 0.1s
+                          </span>
+                          <span
+                            data-testid="thinking-subject-label"
+                            className="text-[12.5px] font-medium text-[var(--ink-dim)] truncate max-w-[240px]"
+                          >
+                            · {waitingSubject}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="gen-status" role="status" aria-live="polite">
-                      <span className="typing-dots" aria-hidden="true">
-                        <i />
-                        <i />
-                        <i />
-                      </span>
-                      <span className="gen-status-label">
-                        {genStepDetail || GEN_PHASE_LABEL[genPhase || 'connecting']}
-                        <span className="gen-status-ellipsis" aria-hidden="true">…</span>
-                      </span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
                 )}
               </div>
@@ -6547,13 +7221,17 @@ export default function App() {
                       </div>
                     )}
 
-                  {isListening && !voiceCallOpen ? (
+                  {(isListening || isTranscribingVoice) && !voiceCallOpen ? (
                     <VoiceWaveformBar
                       isListening={isListening}
+                      isTranscribing={isTranscribingVoice}
                       speechActivityAt={voiceActivityAt}
                       liveText={voiceLiveText}
+                      audioStream={voiceAudioStream}
                       onCancel={cancelVoiceDictation}
-                      onConfirm={confirmVoiceDictation}
+                      onConfirm={() => {
+                        void confirmVoiceDictation();
+                      }}
                     />
                   ) : (
                     <>
@@ -6682,6 +7360,10 @@ export default function App() {
                                 : 'Enable Extended Thinking'
                             }
                             aria-label="Toggle Extended Thinking"
+                            aria-pressed={
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                            }
                           >
                             <Brain className="w-4 h-4" />
                           </button>
@@ -6778,44 +7460,50 @@ export default function App() {
                         <div className="ref-sheet-title">Select model</div>
                       </div>
 
-                      {/* Primary Model Group */}
-                      <div className="ref-sheet-group">
-                        {[...V2_SPECIAL_MODELS]
-                          .sort((a, b) => {
-                            const order = { 'smfta-max': 0, 'smfta-v2-pro': 1, 'smfta-v5': 2 } as Record<string, number>;
-                            return (order[a.id] ?? 9) - (order[b.id] ?? 9);
-                          })
-                          .map((spec) => {
-                            const isSelectedV2 =
-                              activeIsBuiltin && activeModelName === spec.id;
-                            return (
-                              <button
-                                key={spec.id}
-                                type="button"
-                                data-testid={`select-model-${spec.id}`}
-                                onClick={() => {
-                                  handleSelectModel(spec.id);
-                                  setBottomModelMenuOpen(false);
-                                }}
-                                className="ref-sheet-row"
-                              >
-                                <div className="flex flex-col items-start min-w-0 text-left">
+                      {/* Primary Model Group (Flash / V5 at Top, Pro & Max at Bottom) */}
+                      <div className="ref-sheet-group" data-testid="v2-model-options-list">
+                        {sortV2ModelsFlashFirst(V2_SPECIAL_MODELS).map((spec) => {
+                          const isSelectedV2 =
+                            activeIsBuiltin && activeModelName === spec.id;
+                          const tierChip =
+                            spec.id === 'smfta-v5'
+                              ? 'Flash'
+                              : spec.id === 'smfta-v2-pro'
+                                ? 'Pro'
+                                : 'Max';
+                          return (
+                            <button
+                              key={spec.id}
+                              type="button"
+                              data-testid={`select-model-${spec.id}`}
+                              onClick={() => {
+                                handleSelectModel(spec.id);
+                                setBottomModelMenuOpen(false);
+                              }}
+                              className="ref-sheet-row"
+                            >
+                              <div className="flex flex-col items-start flex-1 min-w-0 text-left">
+                                <div className="flex items-center gap-1.5 min-w-0">
                                   <span className="ref-sheet-row-title truncate">
                                     {spec.label}
                                   </span>
-                                  <span className="text-[11.5px] text-[var(--ink-dim)] truncate max-w-[260px]">
-                                    {spec.tagline}
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
+                                    {tierChip}
                                   </span>
                                 </div>
-                                {isSelectedV2 && (
-                                  <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })}
+                                <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
+                                  {spec.desc}
+                                </span>
+                              </div>
+                              {isSelectedV2 && (
+                                <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      {/* Claude-Style Extended Thinking & Effort Controls */}
+                      {/* Compact Extended Thinking, Effort & Style Controls */}
                       <div className="ref-sheet-group">
                         <button
                           type="button"
@@ -6842,20 +7530,15 @@ export default function App() {
                           className="ref-sheet-row"
                         >
                           <div className="flex items-center gap-2 min-w-0">
-                            <Brain className="w-4 h-4 text-[var(--primary)] shrink-0" />
-                            <div className="flex flex-col items-start text-left">
-                              <span className="ref-sheet-row-title">Extended Thinking</span>
-                              <span className="text-[11px] text-[var(--ink-dim)]">
-                                উত্তর দেওয়ার আগে ধাপে ধাপে গভীর চিন্তা করবে
-                              </span>
-                            </div>
+                            <Brain className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
+                            <span className="ref-sheet-row-title">Extended Thinking</span>
                           </div>
                           <span
-                            className={`px-2.5 py-0.5 rounded-md text-xs font-semibold ${
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
                               settings.thinkingEnabled !== false &&
                               settings.thinkingMode !== 'off'
                                 ? 'bg-[var(--primary)] text-white'
-                                : 'bg-[var(--surface-2)] text-[var(--ink-dim)]'
+                                : 'bg-[var(--surface)] text-[var(--ink-dim)] border border-[var(--border)]'
                             }`}
                           >
                             {settings.thinkingEnabled !== false &&
@@ -6865,62 +7548,41 @@ export default function App() {
                           </span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const order: AppSettings['mode'][] = ['fast', 'balanced', 'power'];
-                            const nextMode =
-                              order[(order.indexOf(settings.mode) + 1) % order.length] ||
-                              'balanced';
-                            const nextThinkLevel =
-                              nextMode === 'fast'
-                                ? 'low'
-                                : nextMode === 'power'
-                                  ? 'high'
-                                  : 'medium';
-                            setSettings((prev) => {
-                              const next = sanitizeSettings({
-                                ...prev,
-                                mode: nextMode,
-                                thinkingEnabled: true,
-                                thinkingMode: nextThinkLevel,
-                              });
-                              if (activeIsBuiltin && !activeIsV2) {
-                                next.externalModel = builtinTierForModel(
-                                  null,
-                                  nextMode
-                                ).model;
-                              }
-                              return next;
-                            });
-                            if (activeIsBuiltin && !activeIsV2 && activeProfile) {
-                              const tierModel = builtinTierForModel(
-                                null,
-                                nextMode
-                              ).model;
-                              handleUpdateProfiles(
-                                savedProfiles.map((p) =>
-                                  p.id === activeProfile.id
-                                    ? { ...p, externalModel: tierModel }
-                                    : p
-                                )
-                              );
-                            }
-                          }}
-                          className="ref-sheet-row border-t border-[var(--border)]"
-                        >
+                        <div className="ref-sheet-row border-t border-[var(--border)]">
                           <span className="ref-sheet-row-title">Effort</span>
-                          <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)]">
-                            <span>
-                              {settings.mode === 'fast'
-                                ? 'Low'
-                                : settings.mode === 'power'
-                                  ? 'High'
-                                  : 'Medium'}
-                            </span>
-                            <ChevronRight className="w-4 h-4" />
+                          <div className="flex items-center gap-1">
+                            {(['low', 'medium', 'high'] as const).map((eff) => {
+                              const isActiveEff =
+                                settings.thinkingEnabled !== false &&
+                                settings.thinkingMode !== 'off' &&
+                                (settings.thinkingMode === eff ||
+                                  (!settings.thinkingMode && eff === 'medium'));
+                              return (
+                                <button
+                                  key={eff}
+                                  type="button"
+                                  data-testid={`sheet-effort-${eff}`}
+                                  onClick={() =>
+                                    setSettings((prev) =>
+                                      sanitizeSettings({
+                                        ...prev,
+                                        thinkingEnabled: true,
+                                        thinkingMode: eff,
+                                      })
+                                    )
+                                  }
+                                  className={`px-2 py-0.5 rounded-md text-[11px] font-medium capitalize transition-colors cursor-pointer ${
+                                    isActiveEff
+                                      ? 'bg-[var(--primary)] text-white'
+                                      : 'bg-[var(--surface)] text-[var(--ink-dim)] border border-[var(--border)] hover:text-[var(--ink)]'
+                                  }`}
+                                >
+                                  {eff}
+                                </button>
+                              );
+                            })}
                           </div>
-                        </button>
+                        </div>
 
                         <button
                           type="button"
@@ -6946,9 +7608,9 @@ export default function App() {
                           className="ref-sheet-row border-t border-[var(--border)]"
                         >
                           <span className="ref-sheet-row-title">Writing Style</span>
-                          <div className="flex items-center gap-1.5 text-[14px] text-[var(--ink-dim)] capitalize">
+                          <div className="flex items-center gap-1 text-[12.5px] text-[var(--ink-dim)] capitalize">
                             <span>{settings.responseStyle || 'normal'}</span>
-                            <ChevronRight className="w-4 h-4" />
+                            <ChevronRight className="w-3.5 h-3.5" />
                           </div>
                         </button>
                       </div>
@@ -7235,6 +7897,33 @@ export default function App() {
               ? 'প্রজেক্ট এই চ্যাটে যুক্ত করা হয়েছে'
               : 'প্রজেক্ট এই চ্যাট থেকে সরানো হয়েছে'
           );
+        }}
+        onOpenSimpleEntryModal={() => {
+          setSettingsOpen(false);
+          setSimpleEntryModalOpen(true);
+        }}
+      />
+
+      {/* Simple Name + Password Entry Modal (No Login/Registration Required) */}
+      <SimpleEntryModal
+        isOpen={simpleEntryModalOpen}
+        existingCreds={simpleEntryCreds}
+        initialName={profile?.name || settings.displayName || ''}
+        canClose={!settings.simpleEntryRequireOnLoad || Boolean(simpleEntryCreds)}
+        onClose={() => setSimpleEntryModalOpen(false)}
+        onSuccess={(creds) => {
+          setSimpleEntryCreds(creds);
+          setProfile((prev) => ({ ...prev, name: creds.name }));
+          setSettings((prev) =>
+            sanitizeSettings({
+              ...prev,
+              displayName: creds.name,
+              nickname: creds.name,
+              simpleEntryPasscode: creds.passwordHash,
+            })
+          );
+          setSimpleEntryModalOpen(false);
+          showToast(`স্বাগতম, ${creds.name}! সব ফিচার সক্রিয় আছে।`);
         }}
       />
 

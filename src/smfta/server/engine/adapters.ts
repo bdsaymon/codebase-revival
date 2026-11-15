@@ -177,7 +177,7 @@ export function toOpenAICompatiblePayload(params: {
       payload.top_p = params.topP;
     }
     if (
-      /gemini-2\.5|gemini-3/i.test(params.modelId) &&
+      /gemini-2\.5|gemini-[34]/i.test(params.modelId) &&
       params.thinkingMode &&
       params.thinkingMode !== 'off' &&
       !('reasoning_effort' in payload)

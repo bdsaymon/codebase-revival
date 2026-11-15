@@ -55,7 +55,7 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(v5.useSearchGrounding, false);
 
   assert.equal(pro.label, 'SMFTA Pro');
-  assert.equal(pro.serverGeminiModel, 'gemini-3-flash-preview');
+  assert.equal(pro.serverGeminiModel, 'gemini-3.8-flash');
   assert.equal(pro.temperature, 0.4);
   assert.equal(pro.maxOutputTokens, 16384);
   assert.equal(pro.defaultDailyLimit, 40);
@@ -63,10 +63,10 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(pro.useSearchGrounding, false);
 
   assert.equal(max.label, 'SMFTA Max');
-  assert.equal(max.serverGeminiModel, 'gemini-3.8-flash');
+  assert.equal(max.serverGeminiModel, 'gemini-4-hydrogen');
   assert.equal(max.maxOutputTokens, 32768);
   assert.equal(max.defaultDailyLimit, 15);
-  assert.equal(max.thinkingLevel, 'HIGH');
+  assert.equal(max.thinkingLevel, 'MEDIUM');
   assert.equal(max.useSearchGrounding, true);
 });
 
@@ -86,6 +86,7 @@ test('gemini-2.5 config sets thinkingBudget and preserves parameter safety', () 
     modelName: 'gemini-2.5-pro',
     spec: maxSpec,
     fullSystemInstruction: 'System prompt',
+    thinkingEffort: 'high',
   });
   assert.deepEqual(max25Cfg.thinkingConfig, {
     includeThoughts: true,
@@ -207,21 +208,21 @@ test('Asia/Riyadh (UTC+3) daily reset rollover & 80%/100% quota checks work accu
   assert.equal(blockedStatus.remaining, 0);
 });
 
-test('server quota enforcement & verified admin testing bypass cannot be spoofed', () => {
+test('server quota enforcement & verified admin testing bypass cannot be spoofed', async () => {
   assert.equal(isServerAuthorizedTester('msftashop@gmail.com', 'uid_admin', true), true);
   assert.equal(isServerAuthorizedTester('msftashop@gmail.com', 'uid_admin', false), false);
   assert.equal(isServerAuthorizedTester('other@example.com', 'uid_other', true), false);
 
   const userUid = `test_user_${Date.now()}`;
-  updateServerV2QuotaConfig(userUid, { testingBypassEnabled: true, maxLimit: 15 });
-  setServerV2UsageCountForTesting({
+  await updateServerV2QuotaConfig(userUid, { testingBypassEnabled: true, maxLimit: 15 });
+  await setServerV2UsageCountForTesting({
     userId: userUid,
     userEmail: 'normal@example.com',
     modelId: 'smfta-max',
     usedCount: 15,
   });
 
-  const denied = checkAndConsumeServerV2Quota({
+  const denied = await checkAndConsumeServerV2Quota({
     userId: userUid,
     userEmail: 'normal@example.com',
     emailVerified: true,
@@ -231,11 +232,11 @@ test('server quota enforcement & verified admin testing bypass cannot be spoofed
   assert.equal(denied.status.isTestingBypass, false);
 
   const adminUid = `admin_user_${Date.now()}`;
-  updateServerV2QuotaConfig(adminUid, {
+  await updateServerV2QuotaConfig(adminUid, {
     testingBypassEnabled: true,
     testingAllowance: 5,
   });
-  const allowedAdmin = checkAndConsumeServerV2Quota({
+  const allowedAdmin = await checkAndConsumeServerV2Quota({
     userId: adminUid,
     userEmail: 'msftashop@gmail.com',
     emailVerified: true,
@@ -301,17 +302,80 @@ test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays b
 
   assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
     'gemini-3.5-flash-lite',
-    'gemini-3-flash-preview',
-    'gemini-3.8-flash',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-v2-pro'), [
-    'gemini-3-flash-preview',
     'gemini-3.8-flash',
     'gemini-3.5-flash-lite',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
+    'gemini-4-hydrogen',
     'gemini-3.8-flash',
-    'gemini-3-flash-preview',
     'gemini-3.5-flash-lite',
   ]);
+});
+
+test('streamV2FirebaseModel falls back downward when primary stalls thinking-only and resumes dropped stream without duplication', async () => {
+  const modelsSeen: string[] = [];
+  let emitted = '';
+  const fakeAi = {
+    models: {
+      generateContentStream: async ({ model }: { model: string }) => {
+        modelsSeen.push(model);
+        if (model === 'gemini-4-hydrogen') {
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield {
+                candidates: [
+                  { content: { parts: [{ text: 'Step 1 thinking', thought: true }] } },
+                ],
+              } as never;
+              await new Promise((r) => setTimeout(r, 120));
+            },
+          };
+        }
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              candidates: [
+                {
+                  content: {
+                    parts: [{ text: 'Downward fallback thought', thought: true }],
+                  },
+                },
+              ],
+            } as never;
+            yield {
+              candidates: [
+                {
+                  content: { parts: [{ text: 'Clean downward reply!' }] },
+                  finishReason: 'MAX_TOKENS',
+                },
+              ],
+            } as never;
+          },
+        };
+      },
+    },
+  };
+
+  const res = await streamV2FirebaseModel({
+    modelId: 'smfta-max',
+    systemInstruction: 'Be helpful',
+    history: [{ role: 'user', content: 'Explain something' }],
+    signal: new AbortController().signal,
+    thinkingEnabled: true,
+    thinkingEffort: 'high',
+    emitDelta: (d) => {
+      emitted += d;
+    },
+    genAiClientOverride: fakeAi,
+    firstAnswerTimeoutMs: 50,
+    idleChunkTimeoutMs: 50,
+  });
+
+  assert.equal(res.ok, true);
+  assert.equal(res.modelUsed, 'gemini-3.8-flash');
+  assert.equal(res.truncated, true);
+  assert.equal(emitted, 'Clean downward reply!');
+  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.8-flash']);
 });

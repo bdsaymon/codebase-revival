@@ -32,7 +32,7 @@ describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', ()
 
   it('recognizes Gemini/SMFTA/OpenAI/Reasoning models cleanly without breaking non-thinking legacy models', () => {
     expect(detectGeminiThinkingStyle('smfta-ultra')).toBe('gemini25_budget');
-    expect(detectGeminiThinkingStyle('smfta-v2-pro')).toBe('gemini25_budget');
+    expect(detectGeminiThinkingStyle('smfta-v2-pro')).toBe('gemini3_level');
     expect(detectGeminiThinkingStyle('gemini-2.5-flash')).toBe('gemini25_budget');
     expect(detectGeminiThinkingStyle('gemini-3-flash-preview')).toBe('gemini3_level');
 
