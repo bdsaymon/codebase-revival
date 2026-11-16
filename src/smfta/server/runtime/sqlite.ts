@@ -7,8 +7,8 @@
  * `initSqlite()` must resolve before any DatabaseSync is constructed; the
  * API dispatcher awaits it before loading the engine modules.
  */
-// @ts-expect-error — sql.js ships no types for the asm build path
-import initSqlJs from 'sql.js/dist/sql-asm.js';
+// @ts-expect-error — sql.js ships no types for the wasm-inline build path
+import initSqlJs from 'sql.js/dist/sql-wasm-inline.js';
 
 type SqlJsStatic = {
   Database: new () => SqlJsDatabase;

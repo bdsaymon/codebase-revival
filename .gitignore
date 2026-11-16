@@ -13,9 +13,7 @@ lerna-debug.log*
 !.env.example
 
 node_modules
-dist
 dist-ssr
-.output
 .vinxi
 .tanstack/**
 .nitro
