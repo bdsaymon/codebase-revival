@@ -47,6 +47,7 @@ import {
   continuationDirective,
   createIdleWatchdog,
   looksTruncated,
+  hasIncompleteCodeArtifact,
   mergeContinuationText,
   MAX_AUTO_CONTINUATIONS,
 } from '../../src/utils/streamGuard';
@@ -134,6 +135,9 @@ export function getOrCreateSessionUid(
   uidSessionStore.set(key, { uid: fresh, updatedAt: now });
   return fresh;
 }
+
+const CODING_REPLY_GUIDANCE = `
+For coding requests, lead with the solution in the user's language. For a non-trivial change, briefly explain the approach, then provide complete, runnable files or precise edits as appropriate, with filenames. Put long deliverables in code blocks or artifacts; keep surrounding prose concise. Respect the existing project, do not replace unrelated files, and include only the setup and verification steps that matter. Never claim changes were applied or tests passed unless confirmed by a tool. If a requirement is ambiguous and would materially change the implementation, state your assumption or ask a focused question.`;
 
 export function buildContextualThinkingTrace(
   userText: string,
@@ -1308,7 +1312,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     let v2StreamRes = await streamV2FirebaseModel({
       modelId: v2ModelId,
       webSearch: webToolAllowed && webSearch === true,
-      systemInstruction: v2SystemInstruction,
+      systemInstruction: v2SystemInstruction + CODING_REPLY_GUIDANCE,
       history: baseV2History,
       signal: upstreamAbortController.signal,
       emitDelta,
@@ -1340,9 +1344,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     // Section 8A: Auto-continuation for V2 (strictly stays on the V2 model chain)
     const isLongV2Task = isLongCodeOrWritingRequest(lastUserText);
     const v2NeedsContinuation = (acc: string) =>
-      hasUnclosedCodeFence(acc) ||
-      hasUnclosedArtifactTag(acc) ||
-      hasUnclosedHtmlDocument(acc) ||
+      hasIncompleteCodeArtifact(acc) ||
       (isLongV2Task && acc.length > 400 && looksTruncated(acc));
 
     let v2LastTruncated = Boolean(v2StreamRes.truncated);
@@ -1359,7 +1361,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       const v2ContRes = await streamV2FirebaseModel({
         modelId: v2ModelId,
         webSearch: webToolAllowed && webSearch === true,
-        systemInstruction: v2SystemInstruction,
+        systemInstruction: v2SystemInstruction + CODING_REPLY_GUIDANCE,
         history: [
           ...baseV2History,
           { role: 'assistant', content: baseBeforeV2Cont.slice(-3000) },
@@ -1657,7 +1659,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   const outputGuidanceRule = wantConciseOnly
     ? "\n\nRESPONSE STYLE: Keep the answer concise, direct, and focused in the user's language, while still giving complete code if code is requested."
     : "\n\nRESPONSE STYLE (highest priority): Use the user's language. When the user asks for large writing, in-depth information, creating/building apps, large UI/web designs, or code updates, ALWAYS provide the FULL, complete, richly detailed implementation and information without shortening, skipping parts, or leaving placeholders like '// ... existing code'.";
-  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}${outputGuidanceRule}`;
+  const sysInstruction = `${baseSysInstruction}\n${algoDecision.thinkingHint}${trainedExamplesContext}${webGroundingBlock}${outputGuidanceRule}${CODING_REPLY_GUIDANCE}`;
   const cacheModelKey = `${effectiveProvider}:${activeCustomModelName || 'default'}`;
 
   // 3. Response Cache Lookup (user-scoped sha256 - P0-03; only for standalone single-turn requests without active conversation/project context)
@@ -1998,9 +2000,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   // 6. Auto-continuation if truncated (MAX_TOKENS/LENGTH) or cut mid-block/mid-sentence
   const isLongTask = isLongCodeOrWritingRequest(lastUserText);
   const needsContinuation = (acc: string) =>
-    hasUnclosedCodeFence(acc) ||
-    hasUnclosedArtifactTag(acc) ||
-    hasUnclosedHtmlDocument(acc) ||
+    hasIncompleteCodeArtifact(acc) ||
     (isLongTask && acc.length > 400 && looksTruncated(acc));
 
   let contFailedOrStillTruncated = false;

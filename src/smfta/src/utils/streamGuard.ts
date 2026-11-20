@@ -28,6 +28,15 @@ export function unclosedFenceCount(text: string): number {
   return fences ? fences.length % 2 : 0;
 }
 
+/** Detect an unfinished deliverable before saving files or opening a preview. */
+export function hasIncompleteCodeArtifact(text: string): boolean {
+  const count = (pattern: RegExp) => (text.match(pattern) || []).length;
+  return count(/^[ \t]*```/gm) % 2 === 1 ||
+    count(/<smfta_artifact\b/gi) > count(/<\/smfta_artifact>/gi) ||
+    count(/⟦FILE:[^\n⟧]+⟧/g) > count(/⟦\/FILE⟧/g) ||
+    (/^[ \t]*(?:<html\b|<!doctype\s+html)/im.test(text) && !/<\/html>/i.test(text));
+}
+
 /** ⟦SELF_UPDATE⟧ / ⟦NOTE⟧ / ⟦SELF_CODE⟧ blocks that were opened but not closed. */
 export function hasUnclosedControlBlock(text: string): boolean {
   if (!text) return false;
@@ -340,7 +349,7 @@ export function isGreetingMessage(text: string): boolean {
 
 /** Code fences / control blocks — these must never be cut or restructured. */
 function hasCodeContent(text: string): boolean {
-  return /```|⟦/.test(text || '');
+  return /```|⟦|<smfta_artifact\b|<!doctype\s+html|<html\b/i.test(text || '');
 }
 
 /** Tables and multi-section answers are intentional structure, not padding. */
@@ -419,6 +428,7 @@ export function polishReply(
   text: string,
   opts: { concise?: boolean } = {}
 ): string {
+  if (hasCodeContent(text)) return text;
   let out = dedupeRepeats(text);
   if (opts.concise) out = stripPadding(out);
   return out;
@@ -484,7 +494,7 @@ export function hasStallExcuse(text: string): boolean {
  * answer. Content in the middle of a reply is never touched now.
  */
 export function dropStallSentences(text: string): string {
-  if (!text || !hasStallExcuse(text)) return text;
+  if (!text || hasCodeContent(text) || !hasStallExcuse(text)) return text;
   const sentences = text.split(/(?<=[.!?।\n])/);
   const isExcuse = (sentence: string) => {
     const lower = sentence.toLowerCase();

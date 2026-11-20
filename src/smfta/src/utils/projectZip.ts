@@ -405,5 +405,5 @@ export function parseFileEdits(
       return '';
     }
   );
-  return { edits, cleanText: cleanText.replace(/\n{3,}/g, '\n\n').trim() };
+  return { edits, cleanText: cleanText.trim() };
 }
