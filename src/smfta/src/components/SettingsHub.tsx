@@ -6,13 +6,10 @@ import {
   Cpu,
   FileText,
   FolderKanban,
-  Gauge,
   Mic,
   Plug,
   Shield,
   Sliders,
-  Sparkles,
-  Wrench,
   X,
 } from 'lucide-react';
 import {
@@ -67,13 +64,10 @@ import { GeneralSection } from './settings/GeneralSection';
 import { InstructionsSection } from './settings/InstructionsSection';
 import { MemoryKnowledgeSection } from './settings/MemoryKnowledgeSection';
 import { ProjectsSection } from './settings/ProjectsSection';
-import { ModelsSection } from './settings/ModelsSection';
 import { SecurityPrivacySection } from './settings/SecurityPrivacySection';
 import { ConnectionsSection } from './settings/ConnectionsSection';
 import { ProvidersApiSection } from './settings/ProvidersApiSection';
 import { VoiceAudioSection } from './settings/VoiceAudioSection';
-import { PerformanceAdvancedSection } from './settings/PerformanceAdvancedSection';
-import { ToolsCapabilitiesSection } from './settings/ToolsCapabilitiesSection';
 
 export type SettingsTabId =
   | 'general'
@@ -112,9 +106,6 @@ export type SettingsTabId =
 export type SectionId =
   | 'general'
   | 'providers'
-  | 'models'
-  | 'tools'
-  | 'performance'
   | 'instructions'
   | 'memory'
   | 'projects'
@@ -133,21 +124,6 @@ const SETTINGS_CATEGORIES: CategoryDescriptor[] = [
     id: 'general',
     label: 'General',
     icon: Sliders,
-  },
-  {
-    id: 'models',
-    label: 'AI & Thinking',
-    icon: Sparkles,
-  },
-  {
-    id: 'tools',
-    label: 'Tools & Capabilities',
-    icon: Wrench,
-  },
-  {
-    id: 'performance',
-    label: 'Performance & Advanced',
-    icon: Gauge,
   },
   {
     id: 'voice',
@@ -202,13 +178,11 @@ function normalizeTab(t?: SettingsTabId): SectionId {
     case 'projects':
       return 'projects';
     case 'tools':
-      return 'tools';
     case 'performance':
-      return 'performance';
     case 'models':
     case 'ai':
     case 'responses':
-      return 'models';
+      return 'general';
     case 'data':
     case 'security':
     case 'privacy':
@@ -1259,19 +1233,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             notify={notify}
           />
         );
-      case 'models':
-        return (
-          <ModelsSection
-            draft={draft}
-            savedProfiles={localProfiles}
-            activeProfile={activeProfile}
-            onActivateProfile={activateSavedProfile}
-            onUpdateProfileModel={(profId, modId) =>
-              updateSavedProfileField(profId, { externalModel: modId })
-            }
-            patch={patch}
-          />
-        );
       case 'data':
         return (
           <SecurityPrivacySection
@@ -1390,23 +1351,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <VoiceAudioSection
             settings={draft}
             onUpdate={patch}
-            notify={notify}
-          />
-        );
-      case 'tools':
-        return (
-          <ToolsCapabilitiesSection
-            draft={draft}
-            patch={patch}
-          />
-        );
-      case 'performance':
-        return (
-          <PerformanceAdvancedSection
-            draft={draft}
-            patch={patch}
-            telemetryLogs={effectiveTelemetryLogs}
-            onClearTelemetryLogs={handleClearLogs}
             notify={notify}
           />
         );

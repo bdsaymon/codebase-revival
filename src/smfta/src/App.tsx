@@ -17,12 +17,9 @@ import {
   FileText,
   X,
   ExternalLink,
-  MoreVertical,
   ChevronDown,
   Check,
-  AlertTriangle,
   Zap,
-  User,
   MessageSquare,
   Send,
   ArrowUp,
@@ -38,7 +35,7 @@ import {
   Loader2,
   LogOut,
   MessageSquarePlus,
-  MoreHorizontal,
+  MoreVertical,
   Pause,
   PenLine,
   Play,
@@ -115,7 +112,6 @@ import {
   BUILTIN_TIERS,
   DEFAULT_BUILTIN_PROFILE,
   builtinTierForModel,
-  builtinTierLabel,
   getInitialProviderProfiles,
   getModelsForProfile,
   hydrateSavedProfiles,
@@ -180,6 +176,7 @@ import {
 import { SettingsModal, SettingsTabId } from './components/SettingsHub';
 import { NotebookModal, createNote, sanitizeNotes } from './components/NotebookModal';
 import { ConnectionsModal } from './components/ConnectionsModal';
+import { ChatProgress } from './components/ChatProgress';
 import { ChatConnectedServicesToolbar } from './components/ChatConnectedServicesToolbar';
 import { CodeWorkspaceModal } from './components/CodeWorkspace';
 import { CodeWorkspacePage } from './components/CodeWorkspacePage';
@@ -285,7 +282,6 @@ import {
 } from './utils/cloudVault';
 import { DEFAULT_SETTINGS, sanitizeSettings } from './utils/settings';
 import { isToolEnabled } from './utils/capabilityRegistry';
-import { notifyUser } from './utils/notify';
 import {
   isStandaloneApkEnv,
   runStandaloneClientSideAI,
@@ -352,7 +348,6 @@ import {
   isV2ModelId,
   evaluateV2ModelQuota,
   getNextRiyadhResetInfo,
-  getV2ModelLabel,
   getV2ModelSpec,
 } from './utils/v2UsageLimits';
 import {
@@ -619,11 +614,6 @@ export default function App() {
   const [bottomProviderMenuOpen, setBottomProviderMenuOpen] = useState(false);
   const [bottomModelMenuOpen, setBottomModelMenuOpen] = useState(false);
   const [moreModelsOpen, setMoreModelsOpen] = useState(false);
-  const [providerLimitBanner, setProviderLimitBanner] = useState<{
-    profileName: string;
-    message: string;
-    profileId?: string;
-  } | null>(null);
 
   const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
   const [dbConnections, setDbConnections] = useState<DbConnectionConfig[]>([]);
@@ -836,11 +826,6 @@ export default function App() {
     settings.externalModel?.trim() ||
     (activeIsBuiltin ? builtinTierForModel('', settings.mode).model : '');
 
-  // Human label for chrome (header, message heads, selector button).
-  const activeModelLabel = activeIsBuiltin
-    ? builtinTierLabel(activeModelName, settings.mode)
-    : activeModelName || 'No model selected';
-
   const activeAvailableModels = activeProfile
     ? getModelsForProfile(activeProfile)
     : [];
@@ -1050,76 +1035,21 @@ export default function App() {
         displayName: prof.name,
       })
     );
-    setProviderLimitBanner(null);
     setTopProviderMenuOpen(false);
     setBottomProviderMenuOpen(false);
-    showToast(
-      nextModel
-        ? `Switched to ${prof.name} · ${
-            isBuiltinProviderId(prof.provider)
-              ? builtinTierLabel(nextModel, settings.mode)
-              : nextModel
-          }`
-        : `Switched to ${prof.name}`
-    );
   };
 
   const handleSelectModel = (modelId: string) => {
     const trimmed = modelId.trim();
     if (!trimmed) return;
-    const isV2 = isV2ModelId(trimmed);
-    // Picking a built-in tier also switches the reasoning mode so request and
-    // label stay consistent; external models only change the model id.
-    const tier = BUILTIN_TIERS.find((t) => t.model === trimmed);
-    setSettings((prev) =>
-      sanitizeSettings(
-        tier
-          ? {
-              ...prev,
-              provider: isBuiltinProviderId(prev.provider)
-                ? 'smfta_cloud'
-                : prev.provider,
-              externalModel: trimmed,
-              mode: tier.id,
-            }
-          : isV2
-          ? {
-              ...prev,
-              provider: 'smfta_cloud',
-              externalModel: trimmed,
-              mode:
-                trimmed === 'smfta-v5'
-                  ? 'fast'
-                  : trimmed === 'smfta-max'
-                    ? 'power'
-                    : 'balanced',
-            }
-          : { ...prev, externalModel: trimmed }
-      )
-    );
-    if (activeProfile) {
-      const updated = savedProfiles.map((p) =>
-        p.id === activeProfile.id
-          ? {
-              ...p,
-              provider:
-                (isV2 || Boolean(tier)) && isBuiltinProviderId(p.provider)
-                  ? 'smfta_cloud'
-                  : p.provider,
-              externalModel: trimmed,
-            }
-          : p
-      );
-      handleUpdateProfiles(updated);
-    }
+    const builtin = savedProfiles.find((p) => isBuiltinProviderId(p.provider)) || DEFAULT_BUILTIN_PROFILE;
+    const selected = { ...builtin, provider: 'smfta_cloud' as const, externalModel: trimmed };
+    const mode = BUILTIN_TIERS.find((tier) => tier.model === trimmed)?.id ??
+      (trimmed === 'smfta-v5' ? 'fast' : trimmed === 'smfta-max' ? 'power' : 'balanced');
+    handleUpdateProfiles([selected, ...savedProfiles.filter((p) => p.id !== selected.id)]);
+    handleSelectProfile(selected);
+    setSettings((prev) => sanitizeSettings({ ...prev, mode }));
     setBottomModelMenuOpen(false);
-    showToast(
-      tier
-        ? `Model: ${tier.label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
-        : isV2
-          ? `V2 – Special: ${getV2ModelSpec(trimmed).label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
-          : `Model: ${trimmed}`
-    );
   };
 
   // Extract a previewable side-by-side ArtifactPayload from any AI message text
@@ -1128,7 +1058,7 @@ export default function App() {
       if (!rawMsgText || !rawMsgText.trim()) return null;
       const { cleanResponse } = extractThinkingAndResponse(rawMsgText);
       const textToScan = cleanResponse || rawMsgText;
-      const { artifacts: fileArts } = extractFileArtifacts(textToScan, false);
+      const { artifacts: fileArts } = extractFileArtifacts(textToScan);
       const codeBlocks = extractCodeBlocks(textToScan);
 
       const extMap: Record<string, string> = {
@@ -1984,7 +1914,6 @@ export default function App() {
     setTelemetryLogs([]);
     setConnections(sanitizeVaultConnections({}));
     setProviderTestStatus(null);
-    setProviderLimitBanner(null);
     syncedSessionVersions.current.clear();
   };
 
@@ -3303,17 +3232,7 @@ export default function App() {
 
     // V2 – Special independent daily quota pre-check (blocks cleanly at 100%)
     if (activeIsV2 && activeV2QuotaStatus?.isBlocked) {
-      showToast(
-        activeV2QuotaStatus.blockedMessage ||
-          `Daily limit reached for ${activeV2QuotaStatus.label}.`,
-        5200
-      );
-      notifyUser(
-        settings,
-        'usageLimit',
-        `${activeV2QuotaStatus.label} limit reached`,
-        activeV2QuotaStatus.blockedMessage || 'Daily request limit reached.'
-      );
+      showToast('Daily request limit reached. Please try again later.', 5200);
       return;
     }
 
@@ -3321,17 +3240,12 @@ export default function App() {
     const dailyCap = settings.dailyMessageLimit ?? 0;
     if (dailyCap > 0 && usageToday >= dailyCap) {
       showToast(
-        'Daily message limit reached — change it in Settings → Usage & Limits.'
-      );
-      notifyUser(
-        settings,
-        'usageLimit',
-        'Daily limit reached',
-        'Your configured daily message cap has been reached.'
+        'Daily message limit reached. Please try again tomorrow.'
       );
       return;
     }
 
+    setToastMsg(null);
     inFlightSendRef.current = true;
     try {
       let mergedTxt = rawTxt;
@@ -4090,7 +4004,7 @@ export default function App() {
         memoryPaused: Boolean(settings.memoryPaused),
         incognito: isIncognitoChat,
         thinkingEnabled: settings.thinkingEnabled !== false,
-        liveThinkingSummary: settings.liveThinkingSummary !== false,
+        includeThinkingDetails: false,
         outputFormat: settings.outputFormat || 'auto',
         userProfileContext: settings.userProfileContext || '',
         knowledgeContext: kbResult.promptContext || '',
@@ -4139,9 +4053,7 @@ export default function App() {
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
         userName: settings.nickname || profile.name || MASTER_PROFILE_NAME,
         chatHistorySummary:
-          settings.crossChatReference !== false && !isIncognitoChat
-            ? chatHistorySummary
-            : '',
+          !isIncognitoChat ? chatHistorySummary : '',
         activeSkills: matchedSkills
           .filter((sk) => sk.type === 'prompt' && sk.prompt)
           .map((sk) => ({ name: sk.name, description: sk.description, prompt: sk.prompt })),
@@ -4870,7 +4782,6 @@ export default function App() {
           provider: activeProvider,
           model: actualModel,
         });
-        setProviderLimitBanner(null);
 
         if (profileSnapshot) {
           setSavedProfiles((prev) => {
@@ -4935,9 +4846,10 @@ export default function App() {
                 memoryRef.current,
                 extData.memories
               );
-              if (mergedRes.addedOrUpdated.length > 0) {
-                memoryRef.current = mergedRes.memories;
-                setMemory(mergedRes.memories);
+              if (mergedRes.updated.some((fact, index) => fact !== memoryRef.current[index]) ||
+                mergedRes.updated.length !== memoryRef.current.length) {
+                memoryRef.current = mergedRes.updated;
+                setMemory(mergedRes.updated);
               }
             }
           } catch {
@@ -5148,17 +5060,7 @@ export default function App() {
         })();
       }
 
-      if (responderMeta.fallbackNotice) {
-        showToast(`ℹ️ ${responderMeta.fallbackNotice}`, 3800);
-      }
 
-      // v18.11 — task-completion notification, gated by user settings.
-      notifyUser(
-        settings,
-        'taskDone',
-        'Response ready',
-        'Your AI reply has finished generating.'
-      );
 
       if (
         finalText.trim() &&
@@ -5236,7 +5138,6 @@ export default function App() {
             `Fallback: ${activeProvider} ব্যর্থ — বিল্ট-ইন ইঞ্জিনে চেষ্টা করছি`,
             4200
           );
-          setProviderLimitBanner(null);
           await streamAIResponse(
             chatId,
             historyMsgs,
@@ -5247,46 +5148,24 @@ export default function App() {
           return;
         }
 
-        // v18.11 — real browser notification for request failures (gated by
-        // the user's Notifications settings and browser permission).
-        notifyUser(
-          settings,
-          'errors',
-          'Reply failed',
-          rawMsg.slice(0, 140)
-        );
-
         const isNetworkFetchErr = errCode === 'NETWORK_ERROR';
         // P1-08: Fix `isQuotaOrRateLimit || true` bug! Only set quotaExhausted on true QUOTA_EXHAUSTED / 402 billing evidence
         const isTrueQuotaExhausted = errCode === 'QUOTA_EXHAUSTED';
-        const isRateLimited = errCode === 'RATE_LIMITED';
+        const isRateLimited = errCode === 'RATE_LIMITED' || errCode === 'V2_DAILY_LIMIT_REACHED';
 
         const cleanErr = isNetworkFetchErr
           ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
           : rawMsg;
-        const finalErrText = cleanErr.startsWith('⚠️')
-          ? cleanErr
-          : `⚠️ ${cleanErr}`;
-
-        // Toast alert on custom provider HTTP 401 / 404 or connection failure
-        if (errCode === 'AUTH_INVALID') {
-          showToast(
-            `⚠️ HTTP 401 Unauthorized: Invalid API key for ${activeDisplayName || activeProvider}.`,
-            5000
-          );
-        } else if (errCode === 'MODEL_UNAVAILABLE') {
-          showToast(
-            `⚠️ HTTP 404 Model Not Found: "${effectiveExternalModel || activeModelName}" on ${activeDisplayName || activeProvider}.`,
-            5000
-          );
-        } else {
-          showToast(finalErrText.slice(0, 140), 4500);
-        }
+        const finalErrText = isNetworkFetchErr ? cleanErr
+          : isRateLimited || isTrueQuotaExhausted ? 'Request limit reached. Please try again later.'
+          : errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
+            ? 'This connection could not answer. Check Custom Providers in Settings and try again.'
+            : 'Could not finish the reply. Please retry.';
 
         if (!isV2Request) {
           setProviderTestStatus({
             ok: false,
-            message: finalErrText,
+            message: cleanErr,
             testedAt: Date.now(),
             provider: activeProvider,
             model: effectiveExternalModel || activeModelName,
@@ -5306,7 +5185,7 @@ export default function App() {
                           ? ('failed' as const)
                           : ('degraded' as const),
                       quotaExhausted: isTrueQuotaExhausted,
-                      statusMessage: finalErrText,
+                      statusMessage: cleanErr,
                       lastTestedAt: Date.now(),
                     }
                   : p
@@ -5315,26 +5194,6 @@ export default function App() {
               return next;
             });
           }
-          setProviderLimitBanner({
-            profileName: activeDisplayName,
-            message: isTrueQuotaExhausted
-              ? `Quota/credits exhausted on "${activeDisplayName}". Please switch to another saved property manually below.`
-              : isRateLimited
-              ? `Rate limit (429) reached on "${activeDisplayName}". Wait briefly or switch to another saved property below.`
-              : `"${activeDisplayName}" returned an error [${errCode}]: ${cleanErr.slice(0, 280)}`,
-            profileId: profileSnapshot?.id,
-          });
-        } else {
-          const v2Display = getV2ModelLabel(effectiveExternalModel);
-          const cleanBannerMsg = cleanErr.startsWith(v2Display)
-            ? cleanErr.slice(0, 240)
-            : `${v2Display}: ${cleanErr.slice(0, 240)}`;
-          setProviderLimitBanner({
-            profileName: v2Display,
-            message: isRateLimited
-              ? `${v2Display} সাময়িকভাবে রেট লিমিটে পৌঁছেছে (429)। অনুগ্রহ করে একটু পর আবার চেষ্টা করুন।`
-              : cleanBannerMsg,
-          });
         }
 
         // P1-09: If partial text was already streamed in this bubble, keep it and mark status 'failed'; otherwise append a single error message
@@ -5436,7 +5295,7 @@ export default function App() {
   const handleProcessIncomingFiles = async (files: File[]) => {
     for (const f of files) {
       // 1. .zip project archive (with automatic fallback to universal document reader for huge/binary zips)
-      if (/\.zip$/i.test(f.name)) {
+      if (currentView === 'workspace' && /\.zip$/i.test(f.name)) {
         try {
           if (f.size <= 60 * 1024 * 1024) {
             const buf = await f.arrayBuffer();
@@ -5458,7 +5317,6 @@ export default function App() {
             ...prev.slice(-15),
             { name: doc.name, content: doc.content, summary: doc.summary, doc },
           ]);
-          showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
         } catch {
           try {
             const doc = await readDocumentFile(f);
@@ -5466,7 +5324,6 @@ export default function App() {
               ...prev.slice(-15),
               { name: doc.name, content: doc.content, summary: doc.summary, doc },
             ]);
-            showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
           } catch (err) {
             showToast(err instanceof Error ? err.message : 'ZIP could not be read', 4000);
           }
@@ -5485,7 +5342,6 @@ export default function App() {
             ...prev.slice(-3),
             { mime: mime || 'image/jpeg', data: base64Data, url },
           ]);
-          showToast(`Attached image "${f.name}"`, 2200);
         };
 
         if (f.size > 3.2 * 1024 * 1024 && typeof document !== 'undefined') {
@@ -5532,7 +5388,6 @@ export default function App() {
           ...prev.slice(-15),
           { name: doc.name, content: doc.content, summary: doc.summary, doc },
         ]);
-        showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
       } catch (err) {
         showToast(
           `Could not read "${f.name}": ${err instanceof Error ? err.message : 'Unknown error'}`,
@@ -5904,7 +5759,6 @@ export default function App() {
     setTelemetryLogs([]);
     setConnections(sanitizeVaultConnections({}));
     setProviderTestStatus(null);
-    setProviderLimitBanner(null);
     setSettingsOpen(false);
     setCurrentView('chat');
     showToast('All local data, chats, profiles, notes & memory wiped');
@@ -6069,8 +5923,8 @@ export default function App() {
       )}
 
       {/* Toast Notification */}
-      {toastMsg && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
+      {toastMsg && !isGenerating && (
+        <div role="status" className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
           {toastMsg}
         </div>
       )}
@@ -6111,39 +5965,7 @@ export default function App() {
                   <span className="text-[15px] font-bold tracking-tight text-[var(--ink)] truncate">
                     SMFTA AI Pro
                   </span>
-                  {activeModelLabel && (
-                    <span className="hidden xs:inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink-dim)] truncate max-w-[140px]">
-                      {activeModelLabel}
-                    </span>
-                  )}
                 </div>
-
-                {/* Active Project Selector Pill (Section ঘ: Projects) */}
-                {(settings.projects || []).length > 0 && (
-                  <select
-                    data-testid="active-project-selector"
-                    value={activeChat.projectId || ''}
-                    onChange={(e) => {
-                      const nextProjId = e.target.value || undefined;
-                      setChats((prev) =>
-                        prev.map((c) =>
-                          c.id === activeChat.id
-                            ? { ...c, projectId: nextProjId }
-                            : c
-                        )
-                      );
-                    }}
-                    className="max-w-[130px] sm:max-w-[180px] px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink)] outline-none cursor-pointer truncate"
-                    title="এই চ্যাটের প্রজেক্ট নির্বাচন করুন"
-                  >
-                    <option value="">প্রজেক্ট ছাড়া চ্যাট</option>
-                    {(settings.projects || []).map((proj) => (
-                      <option key={proj.id} value={proj.id}>
-                        📁 {proj.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
 
                 {activeChat.incognito && (
                   <span
@@ -6159,75 +5981,6 @@ export default function App() {
 
               <div className="relative flex items-center gap-1.5">
                 <div className="ref-pill-group">
-                  {(latestChatArtifact || activeArtifact) && (
-                    <button
-                      type="button"
-                      data-testid="header-live-preview-toggle"
-                      onClick={() => {
-                        if (activeArtifact) {
-                          setActiveArtifact(null);
-                        } else if (latestChatArtifact) {
-                          setActiveArtifact(latestChatArtifact);
-                        }
-                      }}
-                      className={`ref-pill-icon-btn ${
-                        activeArtifact ? 'text-[var(--primary)]' : ''
-                      }`}
-                      aria-label="Toggle side-by-side live preview"
-                      title={
-                        activeArtifact
-                          ? 'পাশাপাশি লাইভ প্রিভিউ বন্ধ করুন'
-                          : 'পাশাপাশি লাইভ প্রিভিউ খুলুন (Live Preview)'
-                      }
-                    >
-                      <Eye className="w-[16px] h-[16px]" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    data-testid="header-simple-entry-btn"
-                    onClick={() => setSimpleEntryModalOpen(true)}
-                    className="ref-pill-icon-btn"
-                    aria-label="নাম ও পাসওয়ার্ড প্রোফাইল"
-                    title={
-                      profile?.name?.trim()
-                        ? `প্রোফাইল: ${profile.name.trim()} (নাম ও পাসওয়ার্ড)`
-                        : 'নাম ও পাসওয়ার্ড দিয়ে প্রবেশ করুন'
-                    }
-                  >
-                    <User className="w-[16px] h-[16px]" />
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="incognito-chat-toggle"
-                    onClick={() => {
-                      const nextIncog = !activeChat.incognito;
-                      setChats((prev) =>
-                        prev.map((c) =>
-                          c.id === activeChat.id
-                            ? { ...c, incognito: nextIncog }
-                            : c
-                        )
-                      );
-                      showToast(
-                        nextIncog
-                          ? '🕶️ Incognito চ্যাট চালু — মেমোরি ও হিস্ট্রি সেভ হবে না'
-                          : 'Incognito চ্যাট বন্ধ করা হয়েছে'
-                      );
-                    }}
-                    className={`ref-pill-icon-btn ${
-                      activeChat.incognito ? 'text-amber-400' : ''
-                    }`}
-                    aria-label="Incognito chat toggle"
-                    aria-pressed={Boolean(activeChat.incognito)}
-                    title={
-                      activeChat.incognito
-                        ? 'Incognito চ্যাট বন্ধ করুন'
-                        : 'Incognito চ্যাট (মেমোরি ও হিস্ট্রি ছাড়া চ্যাট)'
-                    }
-                  >
-                    <EyeOff className="w-[16px] h-[16px]" />
-                  </button>
                   <button
                     type="button"
                     onClick={handleNewChat}
@@ -6242,11 +5995,14 @@ export default function App() {
                     data-testid="header-menu-btn"
                     onClick={() => setHeaderMenuOpen((v) => !v)}
                     className="ref-pill-icon-btn"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setHeaderMenuOpen(false);
+                    }}
                     aria-label="Options & Settings"
                     aria-expanded={headerMenuOpen}
                     title="Options & Settings"
                   >
-                    <MoreHorizontal className="w-[17px] h-[17px]" />
+                    <MoreVertical className="w-[17px] h-[17px]" />
                   </button>
                 </div>
 
@@ -6260,6 +6016,44 @@ export default function App() {
                       data-testid="header-menu-popover"
                       className="absolute right-0 top-full mt-2 w-52 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
                     >
+                      {(settings.projects || []).length > 0 && (
+                        <select
+                          data-testid="active-project-selector"
+                          value={activeChat.projectId || ''}
+                          onChange={(e) => {
+                            const nextProjId = e.target.value || undefined;
+                            setChats((prev) =>
+                              prev.map((c) =>
+                                c.id === activeChat.id
+                                  ? { ...c, projectId: nextProjId }
+                                  : c
+                              )
+                            );
+                          }}
+                          className="max-w-[130px] sm:max-w-[180px] px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink)] outline-none cursor-pointer truncate"
+                          aria-label="Project for this chat"
+                          title="এই চ্যাটের প্রজেক্ট নির্বাচন করুন"
+                        >
+                          <option value="">প্রজেক্ট ছাড়া চ্যাট</option>
+                          {(settings.projects || []).map((proj) => (
+                            <option key={proj.id} value={proj.id}>
+                              📁 {proj.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {(latestChatArtifact || activeArtifact) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--surface-2)]"
+                          onClick={() => {
+                            setActiveArtifact(activeArtifact ? null : latestChatArtifact);
+                            setHeaderMenuOpen(false);
+                          }}
+                        >
+                          {activeArtifact ? 'Close live preview' : 'Open live preview'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         data-testid="header-menu-simple-entry"
@@ -6427,38 +6221,9 @@ export default function App() {
               >
                 {activeChat.msgs.length === 0 && !isWaitingFirstToken ? (
                   <div className="empty-state" data-testid="ultra-empty-home">
-                    <div
-                      className="inline-flex items-center gap-2 text-xs text-[var(--ink-dim)] mb-1"
-                      data-testid="home-model-readiness-pill"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                      <span className="font-medium text-[var(--ink-muted)]">
-                        {activeModelLabel}
-                      </span>
-                      {settings.thinkingEnabled !== false &&
-                        settings.thinkingMode !== 'off' && (
-                          <span className="text-[var(--primary)] font-medium">
-                            · Thinking Ready
-                          </span>
-                        )}
-                    </div>
                     <SunburstMarkIcon className="ref-sunburst" />
                     <h1 className="empty-title">What can I help with?</h1>
-                    {profile?.name?.trim() ? (
-                      <p className="empty-sub">
-                        স্বাগতম, {profile.name.trim()} — আপনার পরবর্তী কাজটি শুরু করুন
-                      </p>
-                    ) : (
-                      <button
-                        type="button"
-                        data-testid="home-simple-entry-prompt-btn"
-                        onClick={() => setSimpleEntryModalOpen(true)}
-                        className="mt-1 inline-flex items-center gap-1.5 text-xs text-[var(--ink-dim)] hover:text-[var(--ink)] transition-colors cursor-pointer"
-                      >
-                        <KeyRound className="w-3.5 h-3.5 text-[var(--primary)]" />
-                        <span>লগইন বা রেজিস্ট্রেশন ছাড়াই আপনার নাম ও পাসওয়ার্ড সেট করুন</span>
-                      </button>
-                    )}
+                    <p className="empty-sub">Start a conversation or attach a file to get started.</p>
                   </div>
                 ) : (
               <div className="w-full max-w-[780px] mx-auto">
@@ -6533,19 +6298,14 @@ export default function App() {
                         </>
                       ) : (
                         <div className="w-full min-w-0">
+                          {streamingMsgId === m.id && (
+                            <ChatProgress phase={m.text.trim() ? 'responding' : 'preparing'} prompt={prevUserMsg?.text ?? ''} />
+                          )}
                           <InteractiveMessageContent
                             messageId={m.id}
                             text={m.text}
-                            thinking={m.thinking}
-                            thinkingDurationSec={m.thinkingDurationSec}
-                            statusSteps={m.statusSteps}
-                            thinkingEnabled={
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off'
-                            }
-                            liveThinkingSummary={
-                              settings.liveThinkingSummary !== false
-                            }
+                            thinkingEnabled={false}
+                            hideThinkingDetails
                             isStreaming={streamingMsgId === m.id}
                             proactiveSuggestions={m.proactiveSuggestions}
                             revisions={m.revisions}
@@ -6738,11 +6498,6 @@ export default function App() {
                               ))}
                             </div>
                           )}
-                          {m.fallbackNotice && (
-                            <div className="mt-1.5 text-[11px] text-amber-400/90 flex items-center gap-1.5">
-                              <span>⚡ {m.fallbackNotice}</span>
-                            </div>
-                          )}
                         </div>
                       )}
 
@@ -6761,6 +6516,7 @@ export default function App() {
                             rating,
                             reason: reasonText?.trim() || undefined,
                             createdAt: Date.now(),
+                            updatedAt: Date.now(),
                           };
                           updateMessageInChat(activeChat.id, m.id, (old) => ({
                             ...old,
@@ -6966,39 +6722,9 @@ export default function App() {
                   );
                 })}
 
-                {/* Direct Groq-style Thinking indicator before first token (zero Processing/Confirming intermediate screens) */}
-                {isWaitingFirstToken && (() => {
-                  const lastUser = [...activeChat.msgs]
-                    .reverse()
-                    .find((x) => x.role === 'user');
-                  const waitingSubject = deriveInitialThinkingTopic(
-                    lastUser?.text || ''
-                  );
-                  return (
-                    <div className="msg-row is-ai">
-                      <div
-                        data-testid="thinking-accordion"
-                        className="mt-0 mb-2.5 select-none"
-                      >
-                        <div
-                          data-testid="thinking-accordion-headline"
-                          className="inline-flex items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[13px] font-medium text-[var(--primary)]"
-                        >
-                          <Brain className="w-3.5 h-3.5 animate-pulse shrink-0" />
-                          <span className="font-semibold animate-pulse">
-                            Thinking... 0.1s
-                          </span>
-                          <span
-                            data-testid="thinking-subject-label"
-                            className="text-[12.5px] font-medium text-[var(--ink-dim)] truncate max-w-[240px]"
-                          >
-                            · {waitingSubject}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {isWaitingFirstToken && (
+                  <ChatProgress phase="preparing" prompt={[...activeChat.msgs].reverse().find((m) => m.role === 'user')?.text ?? ''} />
+                )}
               </div>
                 )}
               </div>
@@ -7028,54 +6754,6 @@ export default function App() {
                       onChangePlan={(updated) => setActiveTaskPlan(updated)}
                       onDismiss={() => setActiveTaskPlan(null)}
                     />
-                  </div>
-                )}
-
-                {/* Manual Provider Switch Alert Banner (when active provider hits rate limit / quota / error) */}
-                {providerLimitBanner && (
-                  <div className="limit-banner w-full max-w-[780px] mb-3 flex flex-col gap-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2 text-xs">
-                        <AlertTriangle className="limit-banner-icon w-4 h-4 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="limit-banner-title">
-                            এই AI এখন উত্তর দিতে পারছে না
-                          </div>
-                          <p className="limit-banner-text">
-                            {providerLimitBanner.message}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setProviderLimitBanner(null)}
-                        className="icon-btn"
-                        title="Dismiss"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="limit-banner-label">
-                        অন্যটা বেছে নিন:
-                      </span>
-                      {savedProfiles
-                        .filter((p) => p.id !== providerLimitBanner.profileId)
-                        .map((prof) => (
-                          <button
-                            key={prof.id}
-                            type="button"
-                            onClick={() => handleSelectProfile(prof)}
-                            className="hdr-btn limit-banner-chip"
-                          >
-                            <Zap className="w-3 h-3" />
-                            <span>
-                              {prof.name} ({prof.externalModel || 'default'})
-                            </span>
-                          </button>
-                        ))}
-                    </div>
                   </div>
                 )}
 
@@ -7198,29 +6876,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* V2 Daily Quota Warning / Limit Banner (only when V2 model selected & >=80% or blocked) */}
-                  {activeIsV2 &&
-                    activeV2QuotaStatus &&
-                    (activeV2QuotaStatus.isWarning ||
-                      activeV2QuotaStatus.isBlocked) && (
-                      <div
-                        data-testid="v2-quota-alert-banner"
-                        className={`mb-2 px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-                          activeV2QuotaStatus.isBlocked
-                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                            : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                        }`}
-                      >
-                        <span className="truncate">
-                          {activeV2QuotaStatus.blockedMessage ||
-                            activeV2QuotaStatus.warningMessage}
-                        </span>
-                        <span className="text-[10px] font-mono shrink-0 opacity-80">
-                          {activeV2QuotaStatus.statusText}
-                        </span>
-                      </div>
-                    )}
-
                   {(isListening || isTranscribingVoice) && !voiceCallOpen ? (
                     <VoiceWaveformBar
                       isListening={isListening}
@@ -7283,13 +6938,8 @@ export default function App() {
                             );
                           }
                         }}
-                        placeholder={`Ask ${
-                          activeIsBuiltin
-                            ? activeModelLabel
-                            : activeDisplayName === 'Msfta shop ai'
-                              ? activeModelLabel
-                              : activeDisplayName
-                        } anything…`}
+                        aria-label="Message"
+                        placeholder="Message SMFTA…"
                         className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
                       />
                       </div>
@@ -7314,72 +6964,24 @@ export default function App() {
                               setBottomModelMenuOpen((v) => !v);
                             }}
                             className="composer-model"
-                            title="Select Model & Reasoning"
+                            title="Select model"
                           >
-                            <span className="truncate">{activeModelLabel}</span>
+                            <span>Model</span>
                             <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
-                          </button>
-
-                          <button
-                            type="button"
-                            data-testid="composer-thinking-toggle"
-                            onClick={() => {
-                              const currentlyOn =
-                                settings.thinkingEnabled !== false &&
-                                settings.thinkingMode !== 'off';
-                              const nextEnabled = !currentlyOn;
-                              const nextEffort =
-                                settings.thinkingMode === 'low' ||
-                                settings.thinkingMode === 'medium' ||
-                                settings.thinkingMode === 'high'
-                                  ? settings.thinkingMode
-                                  : 'medium';
-                              setSettings((prev) =>
-                                sanitizeSettings({
-                                  ...prev,
-                                  thinkingEnabled: nextEnabled,
-                                  thinkingMode: nextEnabled ? nextEffort : 'off',
-                                })
-                              );
-                              showToast(
-                                nextEnabled
-                                  ? `Extended Thinking ON (${nextEffort.toUpperCase()})`
-                                  : 'Extended Thinking OFF'
-                              );
-                            }}
-                            className={`composer-icon composer-icon-web ${
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off'
-                                ? 'is-on'
-                                : ''
-                            }`}
-                            title={
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off'
-                                ? `Extended Thinking active (${settings.thinkingMode || 'medium'})`
-                                : 'Enable Extended Thinking'
-                            }
-                            aria-label="Toggle Extended Thinking"
-                            aria-pressed={
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off'
-                            }
-                          >
-                            <Brain className="w-4 h-4" />
                           </button>
 
                           <button
                             type="button"
                             onClick={() => {
                               if (!isToolEnabled('web_search', settings.enabledTools)) {
-                                showToast('Web search tool is disabled in Settings → Tools.');
+                                showToast('Web search is unavailable.');
                                 return;
                               }
                               setWebSearch((w) => {
-                                showToast(!w ? 'Web search on' : 'Web search off');
                                 return !w;
                               });
                             }}
+                            aria-pressed={webSearch && isToolEnabled('web_search', settings.enabledTools)}
                             className={`composer-icon composer-icon-web ${
                               webSearch && isToolEnabled('web_search', settings.enabledTools)
                                 ? 'is-on'
@@ -7387,7 +6989,7 @@ export default function App() {
                             }`}
                             title={
                               !isToolEnabled('web_search', settings.enabledTools)
-                                ? 'Web Search disabled in Settings → Tools'
+                                ? 'Web search is unavailable'
                                 : webSearch
                                   ? 'Web Search active'
                                   : 'Enable Web Search'
@@ -7465,154 +7067,24 @@ export default function App() {
                         {sortV2ModelsFlashFirst(V2_SPECIAL_MODELS).map((spec) => {
                           const isSelectedV2 =
                             activeIsBuiltin && activeModelName === spec.id;
-                          const tierChip =
-                            spec.id === 'smfta-v5'
-                              ? 'Flash'
-                              : spec.id === 'smfta-v2-pro'
-                                ? 'Pro'
-                                : 'Max';
                           return (
                             <button
                               key={spec.id}
                               type="button"
+                              aria-pressed={isSelectedV2}
                               data-testid={`select-model-${spec.id}`}
                               onClick={() => {
                                 handleSelectModel(spec.id);
-                                setBottomModelMenuOpen(false);
                               }}
                               className="ref-sheet-row"
                             >
-                              <div className="flex flex-col items-start flex-1 min-w-0 text-left">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="ref-sheet-row-title truncate">
-                                    {spec.label}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
-                                    {tierChip}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
-                                  {spec.desc}
-                                </span>
-                              </div>
+                              <span className="ref-sheet-row-title truncate">{spec.label}</span>
                               {isSelectedV2 && (
                                 <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
                               )}
                             </button>
                           );
                         })}
-                      </div>
-
-                      {/* Compact Extended Thinking, Effort & Style Controls */}
-                      <div className="ref-sheet-group">
-                        <button
-                          type="button"
-                          data-testid="sheet-thinking-toggle"
-                          onClick={() => {
-                            const currentlyOn =
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off';
-                            const nextEnabled = !currentlyOn;
-                            const nextEffort =
-                              settings.thinkingMode === 'low' ||
-                              settings.thinkingMode === 'medium' ||
-                              settings.thinkingMode === 'high'
-                                ? settings.thinkingMode
-                                : 'medium';
-                            setSettings((prev) =>
-                              sanitizeSettings({
-                                ...prev,
-                                thinkingEnabled: nextEnabled,
-                                thinkingMode: nextEnabled ? nextEffort : 'off',
-                              })
-                            );
-                          }}
-                          className="ref-sheet-row"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Brain className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
-                            <span className="ref-sheet-row-title">Extended Thinking</span>
-                          </div>
-                          <span
-                            className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
-                              settings.thinkingEnabled !== false &&
-                              settings.thinkingMode !== 'off'
-                                ? 'bg-[var(--primary)] text-white'
-                                : 'bg-[var(--surface)] text-[var(--ink-dim)] border border-[var(--border)]'
-                            }`}
-                          >
-                            {settings.thinkingEnabled !== false &&
-                            settings.thinkingMode !== 'off'
-                              ? 'ON'
-                              : 'OFF'}
-                          </span>
-                        </button>
-
-                        <div className="ref-sheet-row border-t border-[var(--border)]">
-                          <span className="ref-sheet-row-title">Effort</span>
-                          <div className="flex items-center gap-1">
-                            {(['low', 'medium', 'high'] as const).map((eff) => {
-                              const isActiveEff =
-                                settings.thinkingEnabled !== false &&
-                                settings.thinkingMode !== 'off' &&
-                                (settings.thinkingMode === eff ||
-                                  (!settings.thinkingMode && eff === 'medium'));
-                              return (
-                                <button
-                                  key={eff}
-                                  type="button"
-                                  data-testid={`sheet-effort-${eff}`}
-                                  onClick={() =>
-                                    setSettings((prev) =>
-                                      sanitizeSettings({
-                                        ...prev,
-                                        thinkingEnabled: true,
-                                        thinkingMode: eff,
-                                      })
-                                    )
-                                  }
-                                  className={`px-2 py-0.5 rounded-md text-[11px] font-medium capitalize transition-colors cursor-pointer ${
-                                    isActiveEff
-                                      ? 'bg-[var(--primary)] text-white'
-                                      : 'bg-[var(--surface)] text-[var(--ink-dim)] border border-[var(--border)] hover:text-[var(--ink)]'
-                                  }`}
-                                >
-                                  {eff}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          data-testid="sheet-style-selector"
-                          onClick={() => {
-                            const styles: Array<NonNullable<AppSettings['responseStyle']>> = [
-                              'normal',
-                              'concise',
-                              'explanatory',
-                              'formal',
-                            ];
-                            const cur = settings.responseStyle || 'normal';
-                            const nextStyle =
-                              styles[(styles.indexOf(cur) + 1) % styles.length] || 'normal';
-                            setSettings((prev) =>
-                              sanitizeSettings({
-                                ...prev,
-                                responseStyle: nextStyle,
-                                style: nextStyle === 'concise' ? 'concise' : 'detailed',
-                              })
-                            );
-                          }}
-                          className="ref-sheet-row border-t border-[var(--border)]"
-                        >
-                          <span className="ref-sheet-row-title">Writing Style</span>
-                          <div className="flex items-center gap-1 text-[12.5px] text-[var(--ink-dim)] capitalize">
-                            <span>{settings.responseStyle || 'normal'}</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </div>
-                        </button>
                       </div>
 
                       {/* More Models (Built-in Tiers + Custom Providers) */}
@@ -7643,18 +7115,7 @@ export default function App() {
                                   type="button"
                                   data-testid={`select-model-${tier.model}`}
                                   onClick={() => {
-                                    if (!activeIsBuiltin) {
-                                      const builtinProf =
-                                        savedProfiles.find((p) =>
-                                          isBuiltinProviderId(p.provider)
-                                        ) || DEFAULT_BUILTIN_PROFILE;
-                                      handleSelectProfile({
-                                        ...builtinProf,
-                                        externalModel: tier.model,
-                                      });
-                                    }
                                     handleSelectModel(tier.model);
-                                    setBottomModelMenuOpen(false);
                                   }}
                                   className="ref-sheet-row"
                                 >
@@ -7674,51 +7135,26 @@ export default function App() {
                                   !isBuiltinProviderId(p.provider) &&
                                   p.enabled !== false
                               )
-                              .map((customProf) => {
-                                const vModels = getModelsForProfile(customProf);
-                                if (vModels.length === 0) return null;
-                                return (
-                                  <div key={customProf.id} className="border-t border-[var(--border)]">
-                                    <div className="px-4 pt-2 pb-1 text-[11px] font-medium text-[var(--ink-dim)] truncate">
-                                      {customProf.name}
-                                    </div>
-                                    {vModels.map((mId) => {
-                                      const isSelectedCustom =
-                                        !activeIsBuiltin &&
-                                        activeProfile?.id === customProf.id &&
-                                        activeModelName === mId;
-                                      return (
-                                        <button
-                                          key={`${customProf.id}-${mId}`}
-                                          type="button"
-                                          onClick={() => {
-                                            handleSelectProfile({
-                                              ...customProf,
-                                              externalModel: mId,
-                                            });
-                                            setBottomModelMenuOpen(false);
-                                          }}
-                                          className="ref-sheet-row"
-                                        >
-                                          <span className="text-[14px] font-mono truncate">
-                                            {mId}
-                                          </span>
-                                          {isSelectedCustom && (
-                                            <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
-                                          )}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              })}
+                              .map((customProf) => (
+                                <button key={customProf.id} type="button" className="ref-sheet-row"
+                                  aria-pressed={!activeIsBuiltin && activeProfile?.id === customProf.id}
+                                  onClick={() => {
+                                    handleSelectProfile(customProf);
+                                    setBottomModelMenuOpen(false);
+                                  }}>
+                                  <span className="truncate">{customProf.name}</span>
+                                  {!activeIsBuiltin && activeProfile?.id === customProf.id && (
+                                    <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
+                                  )}
+                                </button>
+                              ))}
 
                             <button
                               type="button"
                               data-testid="sheet-manage-providers-btn"
                               onClick={() => {
                                 setBottomModelMenuOpen(false);
-                                setSettingsTab('providers_api');
+                                setSettingsTab('providers');
                                 setSettingsOpen(true);
                               }}
                               className="ref-sheet-row border-t border-[var(--border)] text-[var(--primary)] font-medium"
@@ -7883,7 +7319,7 @@ export default function App() {
         onDeleteCloudData={handleDeleteCloudData}
         cloudConnected={Boolean(cloudClient && userId)}
         cloudUserEmail={auth.user?.email || undefined}
-        activeProjectId={activeChat.projectId || null}
+        activeProjectId={activeChat.projectId || undefined}
         onSelectActiveProject={(projId) => {
           setChats((prev) =>
             prev.map((c) =>
@@ -7907,9 +7343,9 @@ export default function App() {
       {/* Simple Name + Password Entry Modal (No Login/Registration Required) */}
       <SimpleEntryModal
         isOpen={simpleEntryModalOpen}
-        existingCreds={simpleEntryCreds}
-        initialName={profile?.name || settings.displayName || ''}
-        canClose={!settings.simpleEntryRequireOnLoad || Boolean(simpleEntryCreds)}
+        storedCredentials={simpleEntryCreds}
+        defaultName={profile?.name || settings.displayName || ''}
+        isLockedGate={Boolean(settings.simpleEntryRequireOnLoad && !simpleEntryCreds)}
         onClose={() => setSimpleEntryModalOpen(false)}
         onSuccess={(creds) => {
           setSimpleEntryCreds(creds);

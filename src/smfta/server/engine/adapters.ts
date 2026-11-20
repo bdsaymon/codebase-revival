@@ -648,7 +648,7 @@ export function parseProtocolResponse(
   rawBody: Record<string, unknown>
 ): AdapterParsedResponse {
   if (protocol === 'openai_compatible') {
-    const c0 = (Array.isArray(rawBody.choices) ? rawBody.choices[0] : {}) as Record<
+    const c0 = (Array.isArray(rawBody.choices) ? rawBody.choices[0] ?? {} : {}) as Record<
       string,
       unknown
     >;
@@ -675,12 +675,9 @@ export function parseProtocolResponse(
         : typeof msg.thinking === 'string' && msg.thinking.trim()
         ? msg.thinking
         : '';
-    let thinking: string | undefined = rawThinking || undefined;
+    const thinking = rawThinking || undefined;
     if (!text.trim()) {
-      if (rawThinking) {
-        text = rawThinking;
-        thinking = undefined;
-      } else if (typeof c0.text === 'string' && c0.text.trim()) {
+      if (typeof c0.text === 'string' && c0.text.trim()) {
         text = c0.text;
       } else if (typeof rawBody.output_text === 'string' && rawBody.output_text.trim()) {
         text = rawBody.output_text;
@@ -726,7 +723,7 @@ export function parseProtocolResponse(
 
   if (protocol === 'gemini_native') {
     const cand0 = (
-      Array.isArray(rawBody.candidates) ? rawBody.candidates[0] : {}
+      Array.isArray(rawBody.candidates) ? rawBody.candidates[0] ?? {} : {}
     ) as Record<string, unknown>;
     const content = (cand0.content || {}) as {
       parts?: Array<Record<string, unknown>>;
@@ -754,7 +751,8 @@ export function parseProtocolResponse(
       }
     }
 
-    const rawFinish = String(cand0.finishReason || 'STOP').toUpperCase();
+    const promptFeedback = rawBody.promptFeedback as { blockReason?: string } | undefined;
+    const rawFinish = String(cand0.finishReason || (promptFeedback?.blockReason ? 'SAFETY' : 'STOP')).toUpperCase();
     const stopReason: AdapterParsedResponse['stopReason'] =
       rawFinish === 'MAX_TOKENS'
         ? 'length'
@@ -775,20 +773,9 @@ export function parseProtocolResponse(
         ? usage.candidatesTokenCount
         : null;
 
-    let finalText = textChunks.join('');
-    let thinking: string | undefined =
-      thoughtChunks.length > 0 ? thoughtChunks.join('') : undefined;
-    if (!finalText.trim() && thoughtChunks.length > 0) {
-      finalText = thoughtChunks.join('');
-      thinking = undefined;
-    }
-    if (!finalText.trim() && rawFinish === 'MAX_TOKENS') {
-      finalText = 'OK';
-    }
-
     return {
-      text: finalText,
-      thinking,
+      text: textChunks.join(''),
+      thinking: thoughtChunks.join('') || undefined,
       toolCalls,
       stopReason,
       inputTokens,

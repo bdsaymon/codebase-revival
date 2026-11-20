@@ -88,6 +88,7 @@ interface InteractiveMessageContentProps {
   autoCollapseThinking?: boolean;
   /** Whether Thinking mode is enabled for the active AI turn. */
   thinkingEnabled?: boolean;
+  hideThinkingDetails?: boolean;
 }
 
 
@@ -650,6 +651,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   showThinkingTopic = true,
   autoCollapseThinking = false,
   thinkingEnabled = true,
+  hideThinkingDetails = false,
 }) => {
   const [activeBlockIdx, setActiveBlockIdx] = useState<number | null>(null);
   const [selectedSnippet, setSelectedSnippet] = useState<string>('');
@@ -677,7 +679,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
         (!hasAnswerStarted || statusSteps.length > 0) &&
         (Boolean(thinkingText) || thinkingEnabled !== false))
   );
-  const showInlineThinkingCard = Boolean(
+  const showInlineThinkingCard = !hideThinkingDetails && Boolean(
     thinkingText ||
       isThinkingActive ||
       (isStreaming && (thinkingEnabled !== false || statusSteps.length > 0))
