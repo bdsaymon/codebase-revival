@@ -292,7 +292,7 @@ export async function updateServerV2QuotaConfig(
       const { error } = await supabaseAdmin.from('smfta_v2_quota_config').upsert(
         {
           user_id: key,
-          config_json: updated,
+          config_json: { ...updated },
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -840,11 +840,12 @@ export async function streamV2FirebaseModel(params: {
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   emitThinking?: (chunk: string) => void;
   emitDelta: (delta: string) => void;
+  webSearch?: boolean;
   genAiClientOverride?: V2GenAiStreamClientLike | null;
   firstAnswerTimeoutMs?: number;
   idleChunkTimeoutMs?: number;
 }): Promise<V2StreamResult> {
-  const spec = getV2ModelSpec(params.modelId);
+  const spec = { ...getV2ModelSpec(params.modelId), useSearchGrounding: params.webSearch === true };
   const ai =
     params.genAiClientOverride !== undefined
       ? params.genAiClientOverride

@@ -147,7 +147,6 @@ describe('Small Model Upgrade, Thinking Stability, RAG & V2 Memory Verification'
         model: 'google/gemini-3.8-flash',
         systemInstruction: 'sys',
         history: [{ role: 'user', content: 'hi' }],
-        thinkingEnabled: true,
         thinkingEffort: 'high',
         emitThinking: (t) => {
           outThought += t;

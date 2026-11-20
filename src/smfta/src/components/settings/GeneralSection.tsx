@@ -6,6 +6,7 @@ import {
   saveSimpleEntryCredentials,
 } from '../../utils/simpleEntryAuth';
 import {
+  SettingNumber,
   SettingSegmented,
   SettingToggle,
   SettingsCard,
@@ -324,6 +325,21 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
           checked={draft.sendOnEnter}
           testId="enter-to-send-toggle"
           onChange={(v) => patch({ sendOnEnter: v })}
+        />
+
+        <SettingToggle
+          label="Allow web search"
+          checked={draft.enabledTools?.web_search !== false && draft.enabledTools?.web_browse !== false}
+          onChange={(allowed) => patch({
+            enabledTools: { ...draft.enabledTools, web_search: allowed, web_browse: allowed },
+          })}
+        />
+        <SettingNumber
+          label="Daily message limit (0 = no limit)"
+          value={draft.dailyMessageLimit ?? 0}
+          min={0}
+          max={10000}
+          onChange={(dailyMessageLimit) => patch({ dailyMessageLimit })}
         />
 
         {/* Code Highlight & Artifact Preview */}

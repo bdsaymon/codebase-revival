@@ -273,6 +273,12 @@ export function interceptIdentityQuery(
     return `আমি **${sysName}** (**SMFTA AI Pro** প্ল্যাটফর্ম), আমাকে তৈরি করেছেন **${CREATOR_NAME}**। কোডিং, লেখালেখি, বিশ্লেষণ ও যেকোনো সমস্যা সমাধানে আমি আপনার সাথে আছি।`;
   }
 
+  if (SECURITY_CONTACT_REGEX.test(clean)) {
+    return preferEnglish
+      ? `For help with **${sysName}**, report the issue to the **SMFTA AI Pro** development team, led by **${CREATOR_NAME}**. Do not include passwords or API keys.`
+      : `**${sysName}**-এ সমস্যা হলে **${CREATOR_NAME}**-এর নেতৃত্বাধীন **SMFTA AI Pro** ডেভেলপমেন্ট টিমকে জানান। রিপোর্টে পাসওয়ার্ড বা API কী দেবেন না।`;
+  }
+
   return null;
 }
 

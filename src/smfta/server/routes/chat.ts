@@ -1083,6 +1083,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   try {
 
+  const webToolAllowed =
+    !enabledTools ||
+    typeof enabledTools !== 'object' ||
+    ((enabledTools as Record<string, boolean>).web_search !== false &&
+      (enabledTools as Record<string, boolean>).web_browse !== false);
+
   // ============================================================================
   // INDEPENDENT V2 – SPECIAL (FIREBASE AI SYSTEM) BRANCH
   // Strictly isolated from V1 – Natural. Never routes to or falls back to V1.
@@ -1301,6 +1307,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
     let v2StreamRes = await streamV2FirebaseModel({
       modelId: v2ModelId,
+      webSearch: webToolAllowed && webSearch === true,
       systemInstruction: v2SystemInstruction,
       history: baseV2History,
       signal: upstreamAbortController.signal,
@@ -1351,6 +1358,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       let contBuffer = '';
       const v2ContRes = await streamV2FirebaseModel({
         modelId: v2ModelId,
+        webSearch: webToolAllowed && webSearch === true,
         systemInstruction: v2SystemInstruction,
         history: [
           ...baseV2History,
@@ -1479,11 +1487,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   // P1-17 + v19.0: Automatic real-time web browsing & search grounding whenever
   // webSearch is toggled OR the user's message mentions a URL/website or live/current query.
-  const webToolAllowed =
-    !enabledTools ||
-    typeof enabledTools !== 'object' ||
-    ((enabledTools as Record<string, boolean>).web_search !== false &&
-      (enabledTools as Record<string, boolean>).web_browse !== false);
   const webSearchPermitted =
     webToolAllowed && shouldAutoTriggerLiveWeb(lastUserText, Boolean(webSearch));
 
