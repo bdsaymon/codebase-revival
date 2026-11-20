@@ -6894,3 +6894,18 @@ body {
   border-radius: 8px;
   box-shadow: none;
 }
+
+/* Keep long code and generated files inside the chat column, including in embedded previews. */
+.v2-main .content-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow-wrap: anywhere;
+}
+.v2-main .content-scroll pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.v2-main .composer-wrap > * {
+  min-width: 0;
+  max-width: 100%;
+}

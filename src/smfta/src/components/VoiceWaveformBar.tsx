@@ -52,15 +52,9 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
     let tick = 0;
     let audioCtx: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
-    let ownedStream: MediaStream | null = null;
     let freqData: Uint8Array<ArrayBuffer> | null = null;
 
-    const attachStream = (stream: MediaStream, owned: boolean) => {
-      if (cancelled) {
-        if (owned) stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      if (owned) ownedStream = stream;
+    const attachStream = (stream: MediaStream) => {
       const AudioContextCtor =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext?: typeof AudioContext })
@@ -79,27 +73,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
       }
     };
 
-    if (audioStream) {
-      attachStream(audioStream, false);
-    } else if (
-      typeof window !== 'undefined' &&
-      typeof navigator !== 'undefined' &&
-      navigator.mediaDevices &&
-      typeof navigator.mediaDevices.getUserMedia === 'function'
-    ) {
-      navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
-        .then((stream) => attachStream(stream, true))
-        .catch(() => {
-          // Graceful fallback to speech-activity wave when mic stream is unavailable
-        });
-    }
+    if (audioStream) attachStream(audioStream);
 
     const loop = () => {
       if (cancelled) return;
@@ -153,9 +127,6 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
     return () => {
       cancelled = true;
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-      if (ownedStream) {
-        ownedStream.getTracks().forEach((t) => t.stop());
-      }
       if (audioCtx && audioCtx.state !== 'closed') {
         audioCtx.close().catch(() => {});
       }
@@ -170,7 +141,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
   return (
     <div
       data-testid="voice-waveform-bar"
-      className="flex flex-col gap-2 px-4 py-3 min-h-[68px]"
+      className="flex min-w-0 flex-col gap-2 px-3 py-2 min-h-[64px]"
     >
       {isTranscribing ? (
         <div
@@ -189,7 +160,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
             <span className="inline-flex items-center gap-1.5 font-medium">
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
               <Mic className="w-3 h-3 text-[var(--primary)]" />
-              <span>{cleanLive ? 'লাইভ ভয়েস টেক্সট' : 'শুনছি — কথা বলুন… শেষ হলে ✓ চাপুন'}</span>
+              <span>{cleanLive ? 'লাইভ ভয়েস টেক্সট' : 'শুনছি…'}</span>
             </span>
             <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">
               {formattedTime}
@@ -215,7 +186,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
           {levels.map((lvl, i) => (
             <span
               key={i}
-              className="w-[3px] rounded-full bg-[var(--ink)]/75 transition-[height] duration-75 ease-out"
+              className="w-[3px] rounded-full bg-[var(--primary)]/80 motion-safe:transition-[height] duration-75 ease-out"
               style={{
                 height: `${Math.round(5 + lvl * 28)}px`,
                 opacity: isTranscribing ? 0.35 : 0.4 + lvl * 0.6,

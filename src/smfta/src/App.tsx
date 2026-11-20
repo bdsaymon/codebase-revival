@@ -180,18 +180,6 @@ import { ChatProgress } from './components/ChatProgress';
 import { ChatConnectedServicesToolbar } from './components/ChatConnectedServicesToolbar';
 import { CodeWorkspaceModal } from './components/CodeWorkspace';
 import { CodeWorkspacePage } from './components/CodeWorkspacePage';
-import { TaskExecutionPanel } from './components/TaskExecutionPanel';
-import {
-  TaskExecutionPlan,
-  createTaskPlan,
-  parseTaskPlanFromText,
-  advanceTaskPlan,
-  isMultiStepRequest,
-  setPlanPaused,
-  setPlanResumed,
-  setPlanCancelled,
-  retryFailedTask,
-} from './utils/taskExecutionEngine';
 import {
   buildSmartConversationContext,
   deriveLiveOperationProgressSteps,
@@ -242,6 +230,7 @@ import {
   createIdleWatchdog,
   dropStallSentences,
   looksTruncated,
+  hasIncompleteCodeArtifact,
   matchAnswerLength,
   mergeContinuationText,
   polishReply,
@@ -697,7 +686,6 @@ export default function App() {
   const [webSearch, setWebSearch] = useState(
     () => settings.webSearchDefault === true
   );
-  const [activeTaskPlan, setActiveTaskPlan] = useState<TaskExecutionPlan | null>(null);
   const [talkMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
@@ -1058,7 +1046,7 @@ export default function App() {
   // Extract a previewable side-by-side ArtifactPayload from any AI message text
   const extractPreviewableArtifactFromMessage = React.useCallback(
     (rawMsgText: string): ArtifactPayload | null => {
-      if (!rawMsgText || !rawMsgText.trim()) return null;
+      if (!rawMsgText?.trim() || hasIncompleteCodeArtifact(rawMsgText)) return null;
       const { cleanResponse } = extractThinkingAndResponse(rawMsgText);
       const textToScan = cleanResponse || rawMsgText;
       const { artifacts: fileArts } = extractFileArtifacts(textToScan);
@@ -1168,12 +1156,12 @@ export default function App() {
   const latestChatArtifact = React.useMemo(() => {
     for (let i = activeChat.msgs.length - 1; i >= 0; i--) {
       const m = activeChat.msgs[i];
-      if (m.role !== 'ai') continue;
+      if (m.role !== 'ai' || m.id === streamingMsgId || m.isError || m.status === 'failed') continue;
       const found = extractPreviewableArtifactFromMessage(m.text || '');
       if (found) return found;
     }
     return null;
-  }, [activeChat.msgs, extractPreviewableArtifactFromMessage]);
+  }, [activeChat.msgs, streamingMsgId, extractPreviewableArtifactFromMessage]);
 
   // ── v19.0.0 Full-screen Code Workspace (/workspace/code) handoff ─────────
   useEffect(() => {
@@ -2951,38 +2939,35 @@ export default function App() {
       settings.appLanguage
     );
 
-    const recordedBlob = await stopActiveMediaRecorder();
-
-    if (captured) {
-      deliverCapturedVoiceText(captured);
-      return;
-    }
-
-    if (recordedBlob && recordedBlob.size >= 400) {
-      setIsTranscribingVoice(true);
-      try {
-        const audioBase64 = await blobToBase64Data(recordedBlob);
-        const stt = await requestServerVoiceTranscription({
-          audioBase64,
-          mimeType: recordedBlob.type || voiceMimeRef.current || 'audio/webm',
-          language: effectiveLang,
-        });
-        if (stt.ok && stt.text) {
-          deliverCapturedVoiceText(stt.text);
-        } else if (!stt.ok) {
-          showToast(stt.error || 'ভয়েস টেক্সটে রূপান্তর করা যায়নি');
-        } else {
-          showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
-        }
-      } catch {
-        showToast('ভয়েস ট্রান্সক্রিপশন ব্যর্থ হয়েছে — আবার চেষ্টা করুন');
-      } finally {
-        setIsTranscribingVoice(false);
+    setIsTranscribingVoice(true);
+    try {
+      const recordedBlob = await stopActiveMediaRecorder();
+      if (captured) {
+        deliverCapturedVoiceText(captured);
+        return;
       }
-      return;
+      if (!recordedBlob || recordedBlob.size < 400) {
+        showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
+        return;
+      }
+      const audioBase64 = await blobToBase64Data(recordedBlob);
+      const stt = await requestServerVoiceTranscription({
+        audioBase64,
+        mimeType: recordedBlob.type || voiceMimeRef.current || 'audio/webm',
+        language: effectiveLang,
+      });
+      if (stt.ok && stt.text) {
+        deliverCapturedVoiceText(stt.text);
+      } else if (!stt.ok) {
+        showToast(stt.error || 'ভয়েস টেক্সটে রূপান্তর করা যায়নি');
+      } else {
+        showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
+      }
+    } catch {
+      showToast('ভয়েস ট্রান্সক্রিপশন ব্যর্থ হয়েছে — আবার চেষ্টা করুন');
+    } finally {
+      setIsTranscribingVoice(false);
     }
-
-    showToast('কোনো কথা শোনা যায়নি — মাইক্রোফোনের কাছে পরিষ্কার বলুন');
   };
 
   const toggleMic = () => {
@@ -3566,10 +3551,6 @@ export default function App() {
       }
     }
 
-    // Clear any stale task progress panel so large notes process cleanly without step bars
-    if (activeTaskPlan) {
-      setActiveTaskPlan(null);
-    }
 
       // Persist implicit extracted facts to Cloud Firestore for cross-device sync when signed in
       if (
@@ -3801,7 +3782,6 @@ export default function App() {
               memoryFacts: contextRelevantMemory,
               connections,
               serviceContext: targetSession?.serviceContext,
-              activeTaskPlan,
               activeProjectName: project?.name,
               activeProjectFilesCount: project?.files.length,
             });
@@ -4626,7 +4606,7 @@ export default function App() {
           continuationRounds < MAX_AUTO_CONTINUATIONS &&
           !abortCtrl.signal.aborted &&
           accumulated.trim() &&
-          (serverReportedTruncated || looksTruncated(accumulated))
+          (serverReportedTruncated || hasIncompleteCodeArtifact(accumulated) || looksTruncated(accumulated))
         ) {
           continuationRounds += 1;
           const baseBeforeCont = accumulated;
@@ -4642,7 +4622,6 @@ export default function App() {
               signal: abortCtrl.signal,
             });
             if (!contRes.ok || !contRes.body) break;
-            serverReportedTruncated = false;
             const contSse = await pipeSSE(contRes, { bufferToStringOnly: true });
             const mergedCont = mergeContinuationText(
               baseBeforeCont,
@@ -4670,6 +4649,10 @@ export default function App() {
       revealFinishing = true;
       await drainReveal();
       cancelReveal();
+
+      if (hasIncompleteCodeArtifact(accumulated)) {
+        throw Object.assign(new Error('Incomplete code artifact'), { code: 'INCOMPLETE_ARTIFACT' });
+      }
 
       const { edits: fileEdits, cleanText: textWithoutFileBlocks } =
         parseFileEdits(accumulated);
@@ -4714,8 +4697,7 @@ export default function App() {
         const extractedBlocks = extractCodeBlocks(finalText);
         const storedProjects = loadWebsiteProjects();
         const existingForConv =
-          storedProjects.find((p) => String(p.conversationId) === String(chatId)) ||
-          storedProjects[0];
+          storedProjects.find((p) => String(p.conversationId) === String(chatId));
         const aiWebResult = extractAiWebsiteFileEdits(accumulated, existingForConv);
         if (aiWebResult.edits.length > 0 || hasPreviewableCode(extractedBlocks)) {
           let updatedWebProj = existingForConv;
@@ -4975,7 +4957,8 @@ export default function App() {
       }));
 
       // Automatically open side-by-side Live Preview when previewable HTML/CSS/JS/React/SVG is generated
-      if (settings.autoOpenLivePreview !== false && finalCompletedMsg.text) {
+      if (settings.autoOpenLivePreview !== false &&
+        window.matchMedia?.('(min-width: 1024px)').matches && finalCompletedMsg.text) {
         const autoPreviewPayload = extractPreviewableArtifactFromMessage(
           finalCompletedMsg.text
         );
@@ -5159,7 +5142,9 @@ export default function App() {
         const cleanErr = isNetworkFetchErr
           ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
           : rawMsg;
-        const finalErrText = isNetworkFetchErr ? cleanErr
+        const finalErrText = errCode === 'INCOMPLETE_ARTIFACT'
+          ? 'কোড সম্পূর্ণ আসেনি। কোনো প্রজেক্ট ফাইল বদলানো হয়নি। আবার চেষ্টা করুন।'
+          : isNetworkFetchErr ? cleanErr
           : isRateLimited || isTrueQuotaExhausted ? 'Request limit reached. Please try again later.'
           : errCode === 'AUTH_INVALID' || errCode === 'MODEL_UNAVAILABLE'
             ? 'This connection could not answer. Check Custom Providers in Settings and try again.'
@@ -5204,7 +5189,7 @@ export default function App() {
           const { cleanText } = parseAIControlTags(accumulated);
           updateMessageInChat(chatId, aiMsgId, (m) => ({
             ...m,
-            text: `${cleanText}\n\n${finalErrText}`,
+            text: errCode === 'INCOMPLETE_ARTIFACT' ? cleanText : `${cleanText}\n\n${finalErrText}`,
             isError: true,
             status: 'failed',
             errorCode: errCode,
@@ -5268,7 +5253,6 @@ export default function App() {
       setIsGenerating(false);
       setGenPhase(nextGenPhase(null, { type: 'stop' }));
       setGenStepDetail(null);
-      setActiveTaskPlan(null);
     }
   };
 
@@ -6304,6 +6288,11 @@ export default function App() {
                           {streamingMsgId === m.id && (
                             <ChatProgress phase={m.text.trim() ? 'responding' : 'preparing'} prompt={prevUserMsg?.text ?? ''} />
                           )}
+                          {m.errorCode === 'INCOMPLETE_ARTIFACT' && (
+                            <p role="status" className="mb-2 text-sm text-[var(--ink-muted)]">
+                              কোড সম্পূর্ণ আসেনি। প্রজেক্টের ফাইল অপরিবর্তিত আছে। Retry চাপুন।
+                            </p>
+                          )}
                           <InteractiveMessageContent
                             messageId={m.id}
                             text={m.text}
@@ -6379,6 +6368,7 @@ export default function App() {
                               );
                             }}
                             onOpenCodeLab={(code, lang, filename, title, bundleFiles) => {
+                              if (streamingMsgId === m.id || m.isError || hasIncompleteCodeArtifact(m.text)) return;
                               const cleanLang = (lang || 'html').trim().toLowerCase();
                               setActiveArtifact({
                                 title: title || filename || `${cleanLang.toUpperCase()} Artifact`,
@@ -6749,17 +6739,6 @@ export default function App() {
             {/* VARIATION 2 COMPOSER & FOOTER METADATA */}
             <div>
               <section className="composer-wrap">
-                {/* Active Multi-Step Task Execution Planner */}
-                {activeTaskPlan && (
-                  <div className="w-full max-w-[850px] mb-3">
-                    <TaskExecutionPanel
-                      plan={activeTaskPlan}
-                      onChangePlan={(updated) => setActiveTaskPlan(updated)}
-                      onDismiss={() => setActiveTaskPlan(null)}
-                    />
-                  </div>
-                )}
-
                 {/* Connected services row — only shown once a service is actually linked */}
                 {Object.values(connections || {}).some((c: any) => c && c.connected) && (
                 <div className="w-full max-w-[850px]">
