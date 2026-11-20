@@ -33,9 +33,17 @@ function toGatewayRole(role: string): 'user' | 'assistant' {
   return role === 'assistant' || role === 'model' || role === 'ai' ? 'assistant' : 'user';
 }
 
+type GatewayMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string | Array<
+    { type: 'text'; text: string } |
+    { type: 'image_url'; image_url: { url: string } }
+  >;
+};
+
 export interface LovableStreamParams {
   systemInstruction: string;
-  history: Array<{ role: string; content: string }>;
+  history: Array<{ role: string; content: string; imgs?: Array<{ mime: string; data: string }> }>;
   requestedModel?: string | null;
   model?: string | null;
   signal?: AbortSignal;
@@ -52,7 +60,7 @@ async function runSingleLovablePass(params: {
   url: string;
   apiKey: string;
   model: string;
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  messages: GatewayMessage[];
   signal: AbortSignal;
   maxTokens?: number;
   temperature?: number;
@@ -227,13 +235,25 @@ export async function streamFromLovableAi(
 
   const parentSignal = params.signal || new AbortController().signal;
   const gatewayUrl = params.endpointUrl || GATEWAY_URL;
-  const baseMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+  const baseMessages: GatewayMessage[] = [
     ...(params.systemInstruction
       ? [{ role: 'system' as const, content: params.systemInstruction }]
       : []),
-    ...params.history
-      .filter((m) => typeof m.content === 'string' && m.content.trim())
-      .map((m) => ({ role: toGatewayRole(m.role), content: m.content })),
+    ...params.history.flatMap((m): GatewayMessage[] => {
+      const role = toGatewayRole(m.role);
+      const images = role === 'user' ? m.imgs?.filter((image) => image.data) : undefined;
+      if (images?.length) {
+        return [{ role, content: [
+          { type: 'text', text: m.content.trim() || 'Analyze the attached image.' },
+          ...images.map((image) => ({
+            type: 'image_url' as const,
+            image_url: { url: image.data.startsWith('data:')
+              ? image.data : `data:${image.mime};base64,${image.data}` },
+          })),
+        ] }];
+      }
+      return m.content.trim() ? [{ role, content: m.content }] : [];
+    }),
   ];
 
   let activeModel = primaryModel;

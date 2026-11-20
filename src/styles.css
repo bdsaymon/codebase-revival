@@ -6876,3 +6876,21 @@ body {
 }
 
 
+
+/* Sent attachments stay compact and anchored to their own message. */
+.ref-attach-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+}
+.ref-attach-doc {
+  width: auto;
+  height: auto;
+  max-width: min(220px, 70vw);
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  box-shadow: none;
+}

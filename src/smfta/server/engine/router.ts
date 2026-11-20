@@ -241,15 +241,6 @@ function extractTokenFromSseDataLine(dataStr: string): string {
         .join('');
       if (t) return t;
     }
-    if (
-      typeof delta.reasoning_content === 'string' &&
-      delta.reasoning_content
-    ) {
-      return delta.reasoning_content;
-    }
-    if (typeof delta.reasoning === 'string' && delta.reasoning) {
-      return delta.reasoning;
-    }
     if (typeof c0.text === 'string' && c0.text) return c0.text;
   }
   if (Array.isArray(parsed.candidates) && parsed.candidates.length > 0) {

@@ -50,7 +50,7 @@ import {
   mergeContinuationText,
   MAX_AUTO_CONTINUATIONS,
 } from '../../src/utils/streamGuard';
-import { parseExtractedMemoriesJson, isSensitiveFact } from '../../src/utils/memoryBank';
+import { parseExtractedMemoriesJson } from '../../src/utils/memoryBank';
 import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
 import {
   isV2ModelId,
@@ -901,6 +901,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     memoryPaused = false,
     incognito = false,
     thinkingEnabled = true,
+    includeThinkingDetails = true,
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
@@ -976,6 +977,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   let hasEmittedAnyThinking = false;
   const emitThinking = (thinkingChunk: string) => {
     if (
+      includeThinkingDetails === false ||
       !thinkingChunk ||
       requestedThinkingMode === 'off' ||
       clientClosed ||
@@ -1957,7 +1959,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       streamSucceeded = true;
       streamTruncated = Boolean(gw.truncated);
       actualProviderUsed = 'smfta_cloud';
-      actualModelUsed = gw.modelUsed || gw.model || activeCustomModelName || 'smfta-flash';
+      actualModelUsed = gw.model || activeCustomModelName || 'smfta-flash';
       if (gw.fallbackNotice) {
         gatewayFallbackNotice = gw.fallbackNotice;
       }
@@ -2550,16 +2552,9 @@ chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
       }
     );
 
-    const parsedItems = aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [];
-    const safeItems = parsedItems.filter(
-      (item) =>
-        !isSensitiveFact(`${item.key}: ${item.value}`) &&
-        !isSensitiveFact(item.value)
-    );
-
     return res.json({
       ok: true,
-      memories: safeItems,
+      memories: aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [],
     });
   } catch {
     return res.json({
@@ -2597,7 +2592,7 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
     const engine = getSharedHardenedEngine();
     const record = engine.storage.saveMessageFeedback({
       messageId: cleanMessageId,
-      conversationId: cleanConvId,
+      sessionId: cleanConvId,
       userId,
       rating,
       reason: cleanReason,
