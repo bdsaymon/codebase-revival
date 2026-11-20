@@ -1017,6 +1017,9 @@ export default function App() {
     };
   }, [firebaseUser, simpleEntryCreds?.userId]);
 
+  const webSearchAllowed = isToolEnabled('web_search', settings.enabledTools) &&
+    isToolEnabled('web_browse', settings.enabledTools);
+
   const handleSelectProfile = (prof: SavedProviderProfile) => {
     const nextModel =
       prof.externalModel?.trim() ||
@@ -3240,7 +3243,7 @@ export default function App() {
     const dailyCap = settings.dailyMessageLimit ?? 0;
     if (dailyCap > 0 && usageToday >= dailyCap) {
       showToast(
-        'Daily message limit reached. Please try again tomorrow.'
+        'Daily message limit reached. Try tomorrow or change it in Settings → General.'
       );
       return;
     }
@@ -4025,7 +4028,7 @@ export default function App() {
         includeHistory: settings.includeHistory !== false,
         activeWidgets: selfWidgets.map((w) => w.title),
         webSearch: Boolean(
-          webSearch && isToolEnabled('web_search', settings.enabledTools)
+          webSearch && webSearchAllowed
         ),
         enabledTools: settings.enabledTools || {},
         provider: activeProvider,
@@ -6973,22 +6976,22 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (!isToolEnabled('web_search', settings.enabledTools)) {
-                                showToast('Web search is unavailable.');
+                              if (!webSearchAllowed) {
+                                showToast('Enable web search in Settings → General.');
                                 return;
                               }
                               setWebSearch((w) => {
                                 return !w;
                               });
                             }}
-                            aria-pressed={webSearch && isToolEnabled('web_search', settings.enabledTools)}
+                            aria-pressed={webSearch && webSearchAllowed}
                             className={`composer-icon composer-icon-web ${
-                              webSearch && isToolEnabled('web_search', settings.enabledTools)
+                              webSearch && webSearchAllowed
                                 ? 'is-on'
                                 : ''
                             }`}
                             title={
-                              !isToolEnabled('web_search', settings.enabledTools)
+                              !webSearchAllowed
                                 ? 'Web search is unavailable'
                                 : webSearch
                                   ? 'Web Search active'

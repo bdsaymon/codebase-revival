@@ -15,6 +15,7 @@ import {
   isServerAuthorizedTester,
   setServerV2UsageCountForTesting,
   stripPrivateChainOfThought,
+  streamV2FirebaseModel,
   updateServerV2QuotaConfig,
 } from '../smfta/server/v2FirebaseAi';
 import { sanitizeChatBody } from '../smfta/server/engine/requestGuard';
@@ -319,4 +320,33 @@ describe('V2 Special Firebase AI System', () => {
     expect(utf8ByteLength(largeBn.messagesPayload)).toBeLessThanOrEqual(250_000);
     expect(Array.isArray(JSON.parse(largeBn.messagesPayload))).toBe(true);
   });
+});
+
+
+describe('V2 web search routing', () => {
+  it.each(V2_SPECIAL_MODELS.flatMap(({ id }) => [[id, true], [id, false]] as const))(
+    'honors the search toggle for %s (%s)',
+    async (modelId, webSearch) => {
+      const configs: Record<string, unknown>[] = [];
+      const result = await streamV2FirebaseModel({
+        modelId,
+        webSearch,
+        systemInstruction: '',
+        history: [{ role: 'user', content: 'Example request' }],
+        signal: new AbortController().signal,
+        emitDelta: () => {},
+        genAiClientOverride: { models: {
+          async generateContentStream({ config }) {
+            configs.push(config);
+            return (async function* () {
+              yield { candidates: [{ content: { parts: [{ text: 'Example answer.' }] } }] } as never;
+            })();
+          },
+        } },
+      });
+      expect(result.ok).toBe(true);
+      expect(configs).toHaveLength(1);
+      expect(configs[0].tools).toEqual(webSearch ? [{ googleSearch: {} }] : undefined);
+    },
+  );
 });

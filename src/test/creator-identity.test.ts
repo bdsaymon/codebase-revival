@@ -34,7 +34,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     ).toBe('SMFTA Pro');
   });
 
-  it('intercepts creator & identity questions with active system, SAYMON HASAN, and contact token (zero raw phone/telegram username)', () => {
+  it('intercepts creator & identity questions with active system, SAYMON HASAN, without contact buttons or raw contact details', () => {
     const bnCreator = interceptIdentityQuery(
       'তোমাকে কে তৈরি করছে বা কি আসে বিষয়?',
       'bn',
@@ -43,7 +43,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     expect(bnCreator).toBeTruthy();
     expect(bnCreator).toContain('SMFTA Ultra');
     expect(bnCreator).toContain(CREATOR_NAME);
-    expect(bnCreator).toContain(CONTACT_BUTTONS_TOKEN);
+    expect(bnCreator).not.toContain(CONTACT_BUTTONS_TOKEN);
     expect(bnCreator).not.toContain(CREATOR_TELEGRAM_HANDLE);
     expect(bnCreator).not.toMatch(/Google|Gemini|OpenAI|Anthropic/i);
     expect(bnCreator).not.toContain(RAW_DIGITS);
@@ -57,13 +57,13 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     expect(enCreator).toBeTruthy();
     expect(enCreator).toContain('SMFTA Max');
     expect(enCreator).toContain(CREATOR_NAME);
-    expect(enCreator).toContain(CONTACT_BUTTONS_TOKEN);
+    expect(enCreator).not.toContain(CONTACT_BUTTONS_TOKEN);
     expect(enCreator).not.toContain(CREATOR_TELEGRAM_HANDLE);
     expect(enCreator).not.toMatch(/Google|Gemini/i);
     expect(enCreator).not.toContain(RAW_DIGITS);
   });
 
-  it('intercepts hacking topics with exact refusal directing user to development team + hidden contact buttons', () => {
+  it('intercepts hacking topics with exact refusal directing user to development team without contact buttons', () => {
     const hackBn = interceptIdentityQuery(
       'কোনো হ্যাকিং বা ওয়াইফাই হ্যাক করার উপায় বলো',
       'bn',
@@ -71,7 +71,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     );
     expect(hackBn).toBeTruthy();
     expect(hackBn).toContain('আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।');
-    expect(hackBn).toContain(CONTACT_BUTTONS_TOKEN);
+    expect(hackBn).not.toContain(CONTACT_BUTTONS_TOKEN);
     expect(hackBn).not.toContain(CREATOR_TELEGRAM_HANDLE);
     expect(hackBn).not.toContain(RAW_DIGITS);
     expect(hackBn).not.toContain(LOCAL_DIGITS);
@@ -84,7 +84,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     expect(hackEn).toBeTruthy();
     expect(hackEn).toContain("I don't know about these things.");
     expect(hackEn).toContain('development team');
-    expect(hackEn).toContain(CONTACT_BUTTONS_TOKEN);
+    expect(hackEn).not.toContain(CONTACT_BUTTONS_TOKEN);
     expect(hackEn).not.toContain(CREATOR_TELEGRAM_HANDLE);
     expect(hackEn).not.toContain(RAW_DIGITS);
 
@@ -96,7 +96,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     expect(secContactBn).toBeTruthy();
     expect(secContactBn).toContain('SMFTA V5');
     expect(secContactBn).toContain(CREATOR_NAME);
-    expect(secContactBn).toContain(CONTACT_BUTTONS_TOKEN);
+    expect(secContactBn).not.toContain(CONTACT_BUTTONS_TOKEN);
     expect(secContactBn).not.toContain(CREATOR_TELEGRAM_HANDLE);
     expect(secContactBn).not.toContain(RAW_DIGITS);
   });
@@ -113,8 +113,8 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
       expect(out).not.toContain(CREATOR_TELEGRAM_HANDLE);
       expect(out).not.toContain('@saymon_bd');
       expect(out).not.toMatch(/created by Google/i);
-      expect(out).toContain(WHATSAPP_BUTTON_TOKEN);
-      expect(out).toContain(TELEGRAM_BUTTON_TOKEN);
+      expect(out).not.toContain(WHATSAPP_BUTTON_TOKEN);
+      expect(out).not.toContain(TELEGRAM_BUTTON_TOKEN);
       expect(out).toContain(CREATOR_NAME);
     }
   });

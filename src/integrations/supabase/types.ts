@@ -14,6 +14,117 @@ export type Database = {
   }
   public: {
     Tables: {
+      smfta_v2_usage: {
+        Row: {
+          user_id: string
+          date_riyadh: string
+          used_by_model: Json
+          testing_used_by_model: Json
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          date_riyadh: string
+          used_by_model?: Json
+          testing_used_by_model?: Json
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          date_riyadh?: string
+          used_by_model?: Json
+          testing_used_by_model?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_quota_config: {
+        Row: {
+          user_id: string
+          config_json: Json
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          config_json?: Json
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          config_json?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_document_chunks: {
+        Row: {
+          id: string
+          user_id: string
+          doc_id: string
+          file_name: string
+          mime_type: string | null
+          chunk_index: number
+          content: string
+          embedding: string | null
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          doc_id: string
+          file_name: string
+          mime_type?: string | null
+          chunk_index: number
+          content: string
+          embedding?: string | null
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          doc_id?: string
+          file_name?: string
+          mime_type?: string | null
+          chunk_index?: number
+          content?: string
+          embedding?: string | null
+          metadata?: Json
+          created_at?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_memories: {
+        Row: {
+          id: string
+          user_id: string
+          content: string
+          embedding: string | null
+          pinned: boolean
+          updated_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          content: string
+          embedding?: string | null
+          pinned?: boolean
+          updated_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          content?: string
+          embedding?: string | null
+          pinned?: boolean
+          updated_at?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       smfta_chat_sessions: {
         Row: {
           created_at: string
@@ -163,7 +274,27 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      match_v2_document_chunks: {
+        Args: { query_embedding: string; match_user_id: string; match_count?: number }
+        Returns: {
+          id: string
+          doc_id: string
+          file_name: string
+          chunk_index: number
+          content: string
+          metadata: Json
+          similarity: number
+        }[]
+      }
+      match_v2_memories: {
+        Args: { query_embedding: string; match_user_id: string; match_count?: number }
+        Returns: {
+          id: string
+          content: string
+          pinned: boolean
+          similarity: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

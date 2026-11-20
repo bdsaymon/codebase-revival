@@ -680,3 +680,6 @@ export interface AppSettings {
 
 
 
+
+export type ThinkingEffortLevel = NonNullable<AppSettings['thinkingMode']> | 'auto';
+export type ResponseStylePreset = NonNullable<AppSettings['responseStyle']>;
