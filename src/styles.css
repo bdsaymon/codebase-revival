@@ -6909,3 +6909,67 @@ body {
   min-width: 0;
   max-width: 100%;
 }
+
+/* Explicitly bound the chat grid: wide children must not size the implicit track. */
+.app-shell,
+.chat-shell-body {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+.chat-shell-body > .v2-main {
+  container: chat-column / inline-size;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.chat-transcript,
+.chat-footer {
+  min-inline-size: 0;
+  min-block-size: 0;
+}
+.chat-transcript .content-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.chat-footer {
+  max-block-size: 60%;
+  max-block-size: min(60dvh, calc(var(--app-height, 100dvh) * .6));
+  overflow: auto;
+}
+/* Keep fixed sheets out of the footer's scroll container; no transform/contain on the footer. */
+.chat-footer .composer {
+  width: 100%;
+  min-width: 0;
+}
+.chat-footer .composer-bar {
+  flex-wrap: wrap !important;
+}
+.composer-tools {
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+.composer-tools > button,
+.composer-submit > button {
+  flex-shrink: 0;
+}
+.composer-submit {
+  margin-inline-start: auto;
+}
+
+@container chat-column (max-width: 420px) {
+  .chat-transcript .content-scroll {
+    padding-inline: 10px !important;
+  }
+  .chat-footer .composer-wrap {
+    padding-inline: 8px !important;
+    padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+  }
+  .chat-footer .composer textarea {
+    font-size: 16px !important;
+  }
+  .chat-footer .composer-bar {
+    gap: 4px !important;
+  }
+}
