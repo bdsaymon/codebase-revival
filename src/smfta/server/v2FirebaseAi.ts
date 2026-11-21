@@ -19,6 +19,7 @@ import {
 import { MASTER_PROFILE_PROMPT_BASELINE } from '../src/utils/memoryBank';
 import { sanitizeProprietaryOutput } from './providers';
 import { supabaseAdmin } from '../../integrations/supabase/client.server';
+import type { Json } from '../../integrations/supabase/types';
 import {
   continuationDirective,
   createIdleWatchdog,
@@ -292,7 +293,7 @@ export async function updateServerV2QuotaConfig(
       const { error } = await supabaseAdmin.from('smfta_v2_quota_config').upsert(
         {
           user_id: key,
-          config_json: { ...updated },
+          config_json: updated as unknown as Json,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
@@ -773,22 +774,55 @@ export function isTransientV2UpstreamError(err: unknown): boolean {
   return lower.includes('not found') || lower.includes('not supported');
 }
 
+const V2_COOLDOWN_MS = 60_000;
+const v2ModelCooldownUntil = new Map<string, number>();
+
+function isV2ModelInCooldown(model: string): boolean {
+  const until = v2ModelCooldownUntil.get(model);
+  if (!until) return false;
+  if (Date.now() >= until) {
+    v2ModelCooldownUntil.delete(model);
+    return false;
+  }
+  return true;
+}
+
+function markV2ModelUnhealthy(model: string): void {
+  v2ModelCooldownUntil.set(model, Date.now() + V2_COOLDOWN_MS);
+}
+
+function markV2ModelHealthy(model: string): void {
+  v2ModelCooldownUntil.delete(model);
+}
+
 /**
  * Downward-only single-pass V2 server model chain:
- * - smfta-max: gemini-4-hydrogen -> gemini-3.8-flash -> gemini-3.5-flash-lite
- * - smfta-v2-pro: gemini-3.8-flash -> gemini-3.5-flash-lite
- * - smfta-v5: gemini-3.5-flash-lite only (never escalates upward)
+ * - smfta-max: gemini-4-hydrogen -> gemini-3-flash-preview -> gemini-3.1-flash-lite
+ * - smfta-v2-pro: gemini-4-hydrogen -> gemini-3-flash-preview -> gemini-3.1-flash-lite
+ * - smfta-v5: gemini-3.1-flash-lite -> gemini-flash-lite-latest
  */
 export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const spec = getV2ModelSpec(modelId);
   const primary = spec.serverGeminiModel;
-  if (modelId === 'smfta-v5') {
-    return ['gemini-3.5-flash-lite'];
-  }
-  if (modelId === 'smfta-v2-pro') {
-    return Array.from(new Set([primary, 'gemini-3.5-flash-lite']));
-  }
-  return Array.from(new Set([primary, 'gemini-3.8-flash', 'gemini-3.5-flash-lite']));
+  const raw =
+    modelId === 'smfta-v5'
+      ? ['gemini-3.1-flash-lite', 'gemini-flash-lite-latest']
+      : modelId === 'smfta-v2-pro'
+        ? Array.from(
+            new Set([primary, 'gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'])
+          )
+        : Array.from(
+            new Set([
+              primary,
+              'gemini-4-hydrogen',
+              'gemini-3-flash-preview',
+              'gemini-3.1-flash-lite',
+              'gemini-flash-lite-latest',
+            ])
+          );
+  const healthy = raw.filter((m) => !isV2ModelInCooldown(m));
+  const cooled = raw.filter((m) => isV2ModelInCooldown(m));
+  return [...healthy, ...cooled];
 }
 
 export interface V2GenAiStreamClientLike {
@@ -816,7 +850,7 @@ export interface V2StreamResult {
   resumedAfterDrop?: boolean;
 }
 
-const V2_FIRST_ANSWER_FAST_MS = 16_000;
+const V2_FIRST_ANSWER_FAST_MS = 7_500;
 const V2_FIRST_ANSWER_FINAL_MS = 28_000;
 const V2_CHUNK_IDLE_MS = 18_000;
 
@@ -840,12 +874,11 @@ export async function streamV2FirebaseModel(params: {
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   emitThinking?: (chunk: string) => void;
   emitDelta: (delta: string) => void;
-  webSearch?: boolean;
   genAiClientOverride?: V2GenAiStreamClientLike | null;
   firstAnswerTimeoutMs?: number;
   idleChunkTimeoutMs?: number;
 }): Promise<V2StreamResult> {
-  const spec = { ...getV2ModelSpec(params.modelId), useSearchGrounding: params.webSearch === true };
+  const spec = getV2ModelSpec(params.modelId);
   const ai =
     params.genAiClientOverride !== undefined
       ? params.genAiClientOverride
@@ -1103,6 +1136,9 @@ export async function streamV2FirebaseModel(params: {
       }
 
       if (attemptRes.emittedAnswer || params.signal.aborted) {
+        if (attemptRes.emittedAnswer) {
+          markV2ModelHealthy(candidateModel);
+        }
         const primaryModel = spec.serverGeminiModel;
         const fallbackUsed = candidateModel !== primaryModel;
         return {
@@ -1154,14 +1190,19 @@ export async function streamV2FirebaseModel(params: {
 
       lastError = activeTimedOutReason ? new Error(activeTimedOutReason) : err;
       const errParsed = extractCleanV2ErrorMessage(lastError);
+      const isTimeoutErr =
+        activeTimedOutReason !== null || /timed out|stalled/i.test(errParsed.message);
+      if (errParsed.isTransient503 || errParsed.httpStatus === 404 || isTimeoutErr) {
+        markV2ModelUnhealthy(candidateModel);
+      }
       if (
         hasNextCandidate &&
-        (activeTimedOutReason !== null ||
+        (isTimeoutErr ||
           isTransientV2UpstreamError(lastError) ||
           errParsed.isRateLimit ||
           errParsed.httpStatus === 400 ||
           errParsed.httpStatus === 404 ||
-          /timed out|stalled|aborted|abort/i.test(errParsed.message))
+          /aborted|abort/i.test(errParsed.message))
       ) {
         continue;
       }

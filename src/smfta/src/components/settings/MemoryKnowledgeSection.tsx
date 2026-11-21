@@ -71,7 +71,7 @@ export const MemoryKnowledgeSection: React.FC<MemoryKnowledgeSectionProps> = ({
 
   const isMemoryPaused = draft.memoryPaused === true;
   const isV2Active =
-    isV2ModelId(draft.externalModel);
+    isV2ModelId(draft.externalModel) || (draft.provider as string) === 'firebase_v2';
   const filteredMemory = searchMemoryFacts(memory, memorySearchQuery);
 
   const fetchV2State = async () => {

@@ -51,6 +51,7 @@ export interface LovableStreamParams {
   emitThinking?: (thinking: string) => void;
   maxTokens?: number;
   temperature?: number;
+  thinkingEnabled?: boolean;
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   endpointUrl?: string;
   fetchImpl?: typeof fetch;
@@ -261,6 +262,9 @@ export async function streamFromLovableAi(
   let totalEmittedText = '';
   let resumedAfterDrop = false;
 
+  const resolvedThinkingEffort =
+    params.thinkingEnabled === false ? 'off' : params.thinkingEffort;
+
   const firstPass = await runSingleLovablePass({
     url: gatewayUrl,
     apiKey,
@@ -269,7 +273,7 @@ export async function streamFromLovableAi(
     signal: parentSignal,
     maxTokens: params.maxTokens,
     temperature: params.temperature,
-    thinkingEffort: params.thinkingEffort,
+    thinkingEffort: resolvedThinkingEffort,
     fetchImpl: params.fetchImpl,
     onChunkText: (chunk) => {
       totalEmittedText += chunk;

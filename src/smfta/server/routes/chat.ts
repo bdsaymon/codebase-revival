@@ -4,7 +4,6 @@ import {
   buildXrahatPrompt,
   buildXrahatUrl,
   extractXrahatReply,
-  parseXrahatDelta,
   parseXrahatSseEvent,
   resolveEffectiveProvider,
   sanitizeProprietaryOutput,
@@ -51,8 +50,7 @@ import {
   mergeContinuationText,
   MAX_AUTO_CONTINUATIONS,
 } from '../../src/utils/streamGuard';
-import { parseExtractedMemoriesJson } from '../../src/utils/memoryBank';
-import { isLovableAiAvailable, streamFromLovableAi } from '../runtime/lovableAi';
+import { parseExtractedMemoriesJson, isSensitiveFact } from '../../src/utils/memoryBank';
 import {
   isV2ModelId,
   getV2ModelSpec,
@@ -66,6 +64,13 @@ import {
   streamV2FirebaseModel,
   updateServerV2QuotaConfig,
 } from '../v2FirebaseAi';
+import { Type } from '@google/genai';
+import {
+  generateGeminiStructuredJson,
+  isGeminiConfigured,
+  normalizeActiveGeminiModel,
+  streamGeminiChat,
+} from '../services/geminiService';
 import {
   retrieveRelevantV2Memories,
   retrieveV2RagContext,
@@ -905,7 +910,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     memoryPaused = false,
     incognito = false,
     thinkingEnabled = true,
-    includeThinkingDetails = true,
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
@@ -981,7 +985,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   let hasEmittedAnyThinking = false;
   const emitThinking = (thinkingChunk: string) => {
     if (
-      includeThinkingDetails === false ||
       !thinkingChunk ||
       requestedThinkingMode === 'off' ||
       clientClosed ||
@@ -1061,22 +1064,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     parsedKeys.length > 0 ||
     (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud');
 
-  const ensurePreResponseThinking = (modelLabelOverride?: string) => {
-    if (
-      requestedThinkingMode === 'off' ||
-      hasEmittedAnyThinking ||
-      INSTANT_GREETING_REGEX.test(lastUserText)
-    ) {
-      return;
-    }
-    const trace = buildContextualThinkingTrace(
-      lastUserText,
-      replyLang,
-      modelLabelOverride || activeCustomModelName || effectiveProvider,
-      requestedThinkingMode
-    );
-    emitThinking(trace);
-  };
+  // Real model thinking comes strictly from streaming reasoning chunks (`part.thought` / `<think>`).
 
   emitEvent({
     type: 'meta',
@@ -1182,7 +1170,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         activeV2SystemLabel
       );
       if (identityReply) {
-        ensurePreResponseThinking(activeV2SystemLabel);
         await emitChunkedDelta(identityReply);
         finishStream({
           type: 'done',
@@ -1446,7 +1433,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       activeSystemLabel
     );
     if (identityReply) {
-      ensurePreResponseThinking(activeSystemLabel);
       await emitChunkedDelta(identityReply);
       finishStream({
         type: 'done',
@@ -1464,7 +1450,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   // 1. Custom trained Q&A weight match (scoped per user - P0-03)
   const trainedMatch = matchTrainedWeights(lastUserText, scopedUserId);
   if (trainedMatch.exactReply && lastUserImgs.length === 0 && !isCustomProviderActive) {
-    ensurePreResponseThinking(activeSystemLabel);
     await emitChunkedDelta(trainedMatch.exactReply);
     finishStream({
       type: 'done',
@@ -1680,7 +1665,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       scopedUserId
     );
     if (cachedHit) {
-      ensurePreResponseThinking(activeCustomModelName || activeSystemLabel);
       await emitChunkedDelta(cachedHit);
       finishStream({
         type: 'done',
@@ -1774,23 +1758,124 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   let streamResAttempts: AttemptRecord[] = [];
   let nonStreamAttempts: AttemptRecord[] = [];
 
-  if (shouldTryEngineCandidates) {
-    const isolateCustom =
-      built.hasUserKeys ||
-      effectiveProvider === 'custom' ||
-      effectiveProvider === 'ollama' ||
-      effectiveProvider === 'lmstudio';
+  // 4. Primary @google/genai SDK Streaming Route (default, built-in Gemini, or Gemini custom)
+  const usesServerGeminiSdk =
+    (effectiveProvider === 'xrahat' ||
+      effectiveProvider === 'smfta_cloud' ||
+      effectiveProvider === 'gemini_custom' ||
+      effectiveProvider === 'gemini_openai') &&
+    parsedKeys.length === 0;
 
+  if (usesServerGeminiSdk) {
+    const geminiHistory =
+      normalizedHistory.length > 0
+        ? normalizedHistory
+        : [
+            {
+              role: 'user',
+              content: lastUserText || 'Hello',
+              imgs: lastUserImgs,
+            },
+          ];
+
+    const geminiRes = await streamGeminiChat({
+      model: activeCustomModelName || 'gemini-4-hydrogen',
+      systemInstruction: sysInstruction,
+      history: geminiHistory,
+      maxOutputTokens: effectiveMaxOutputTokens,
+      temperature:
+        typeof weightTemp === 'number' ? weightTemp : algoDecision.temperature,
+      topP: typeof topP === 'number' ? topP : algoDecision.topP,
+      thinkingEnabled: requestedThinkingMode !== 'off',
+      thinkingMode: requestedThinkingMode,
+      useSearchGrounding: Boolean(webSearchPermitted),
+      signal: upstreamAbortController.signal,
+      onThinking: (chunk) => emitThinking(chunk),
+      onDelta: (chunk) => emitDelta(chunk),
+    });
+
+    if (geminiRes.sources.length > 0) {
+      groundedSources = [
+        ...groundedSources,
+        ...geminiRes.sources.map((s) => ({ title: s.title, url: s.uri })),
+      ];
+      emitEvent({
+        type: 'sources',
+        sources: groundedSources,
+      });
+    }
+
+    if (geminiRes.ok && fullReplyAccumulator.trim()) {
+      streamSucceeded = true;
+      streamTruncated = Boolean(geminiRes.truncated);
+      actualProviderUsed = 'gemini';
+      actualModelUsed = geminiRes.modelUsed;
+    } else if (!clientClosed) {
+      if (geminiRes.error?.code === 'ABORTED') {
+        finishStream({
+          type: 'done',
+          ok: Boolean(fullReplyAccumulator.trim()),
+          aborted: true,
+          requestId,
+          providerUsed: 'gemini',
+          modelUsed: geminiRes.modelUsed,
+          latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+        });
+        return;
+      }
+
+      const code = geminiRes.error?.code || 'INTEGRATION_REQUIRED';
+      const errMsg =
+        geminiRes.error?.message ||
+        'Integration required: GEMINI_API_KEY must be configured on the server.';
+      emitEvent({
+        type: 'error',
+        ok: false,
+        code,
+        httpStatus: geminiRes.error?.httpStatus || 503,
+        integrationRequired: code === 'INTEGRATION_REQUIRED',
+        retryable: Boolean(geminiRes.error?.retryable),
+        requestId,
+        message: errMsg,
+        text: errMsg,
+        delta: errMsg,
+      });
+      finishStream();
+      return;
+    }
+  } else {
+    // 5. Explicit BYOK / Custom / Local Provider Route (OpenAI, Anthropic, Ollama, etc.)
+    const isLocalNoKey =
+      effectiveProvider === 'ollama' ||
+      effectiveProvider === 'lmstudio' ||
+      effectiveProvider === 'custom';
+    if (parsedKeys.length === 0 && !isLocalNoKey) {
+      const providerLabel = effectiveProvider.toUpperCase();
+      const missingMsg = `Integration required: Please enter your ${providerLabel} API key in Settings > Providers, or switch back to a Gemini model.`;
+      emitEvent({
+        type: 'error',
+        ok: false,
+        code: 'INTEGRATION_REQUIRED',
+        httpStatus: 401,
+        integrationRequired: true,
+        retryable: false,
+        requestId,
+        message: missingMsg,
+        text: missingMsg,
+        delta: missingMsg,
+      });
+      finishStream();
+      return;
+    }
+
+    const isolateCustom = true;
     const preferredModelForEngine =
       effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai'
         ? activeCustomModelName
           ? normalizeGeminiModelName(activeCustomModelName)
-          : 'gemini-3.8-flash'
-        : built.adHocProviders[0]?.provider.provider_id === 'gemini_server'
-        ? built.adHocProviders[0].provider.models[0]?.model_id || 'gemini-3.8-flash'
+          : 'gemini-4-hydrogen'
         : activeCustomModelName || undefined;
 
-    // 4a. Use SSE streaming when supportsStreaming !== false
     if (supportsStreaming !== false) {
       const streamRes = await engine.stream(
         {
@@ -1798,11 +1883,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           conversationId: String(sessionId || 'default-session').slice(0, 64),
           messages: canonicalMessages,
           preferredProviderId:
-            built.adHocProviders[0]?.provider.provider_id ||
-            (effectiveProvider === 'gemini_custom' ||
-            effectiveProvider === 'gemini_openai'
-              ? effectiveProvider
-              : undefined),
+            built.adHocProviders[0]?.provider.provider_id || effectiveProvider,
           preferredModelId: preferredModelForEngine,
           maxOutputTokens: effectiveMaxOutputTokens,
           maxUserMessageChars: 120_000,
@@ -1848,22 +1929,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         streamTruncated = Boolean(streamRes.truncated);
         actualProviderUsed = streamRes.providerId || effectiveProvider;
         actualModelUsed = streamRes.modelId || activeCustomModelName || 'default';
-      } else if (
-        streamRes.text === SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN &&
-        allowKeylessFallback === false
-      ) {
-        emitEvent({
-          type: 'error',
-          ok: false,
-          code: 'QUOTA_EXHAUSTED',
-          retryable: false,
-          requestId,
-          message: SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN,
-          text: SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN,
-          delta: SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN,
-        });
-        finishStream();
-        return;
       }
     }
 
@@ -1877,13 +1942,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       lastStreamFailClass === 'MODEL_UNAVAILABLE' ||
       lastStreamFailClass === 'PERMISSION_DENIED';
 
-    // 4b. Non-streaming execution when supportsStreaming === false, OR fallback when streaming failed due to gateway SSE incompatibility
     if (
       !streamSucceeded &&
       !clientClosed &&
-      (built.adHocProviders.length > 0 ||
-        effectiveProvider === 'gemini_custom' ||
-        effectiveProvider === 'gemini_openai') &&
+      built.adHocProviders.length > 0 &&
       (supportsStreaming === false || !isTerminalAuthOrModelFailure)
     ) {
       engine.resetEphemeralKeyPool();
@@ -1892,11 +1954,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         conversationId: String(sessionId || 'default-session').slice(0, 64),
         messages: canonicalMessages,
         preferredProviderId:
-          built.adHocProviders[0]?.provider.provider_id ||
-          (effectiveProvider === 'gemini_custom' ||
-          effectiveProvider === 'gemini_openai'
-            ? effectiveProvider
-            : undefined),
+          built.adHocProviders[0]?.provider.provider_id || effectiveProvider,
         preferredModelId: preferredModelForEngine,
         maxOutputTokens: effectiveMaxOutputTokens,
         maxUserMessageChars: 120_000,
@@ -1933,67 +1991,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       } else if (nonStreamRes.text) {
         lastErrorMessage = nonStreamRes.text;
       }
-    }
-  }
-
-  // 5. Keyless Xrahat engine ONLY when explicitly selected or when user explicitly consented to allowKeylessFallback (P1-05)
-  const canUseKeyless =
-    effectiveProvider === 'xrahat' ||
-    effectiveProvider === 'smfta_cloud' ||
-    allowKeylessFallback === true;
-
-  // 5a. Built-in SMFTA models: reliable gateway path first (no user key needed)
-  if (!streamSucceeded && !clientClosed && canUseKeyless && isLovableAiAvailable()) {
-    if (fullReplyAccumulator.length > 0) {
-      emitReset();
-    }
-    const gw = await streamFromLovableAi({
-      systemInstruction: sysInstruction,
-      history:
-        normalizedHistory.length > 0
-          ? normalizedHistory
-          : [{ role: 'user', content: lastUserText }],
-      requestedModel: activeCustomModelName,
-      signal: upstreamAbortController.signal,
-      emitDelta,
-      emitThinking,
-      thinkingEffort: requestedThinkingMode,
-      maxTokens: effectiveMaxOutputTokens,
-    });
-    if (gw.ok) {
-      streamSucceeded = true;
-      streamTruncated = Boolean(gw.truncated);
-      actualProviderUsed = 'smfta_cloud';
-      actualModelUsed = gw.model || activeCustomModelName || 'smfta-flash';
-      if (gw.fallbackNotice) {
-        gatewayFallbackNotice = gw.fallbackNotice;
-      }
-    } else if (fullReplyAccumulator.length > 0) {
-      emitReset();
-    }
-  }
-
-  if (!streamSucceeded && !clientClosed && canUseKeyless) {
-    if (fullReplyAccumulator.length > 0) {
-      emitReset();
-    }
-    const uid = getOrCreateSessionUid(
-      sessionId,
-      normalizedHistory.length <= 1
-    );
-    streamSucceeded = await streamFromXrahat(
-      sysInstruction,
-      normalizedHistory.length > 0
-        ? normalizedHistory
-        : [{ role: 'user', content: lastUserText }],
-      uid,
-      upstreamAbortController.signal,
-      emitDelta,
-      emitChunkedDelta
-    );
-    if (streamSucceeded) {
-      actualProviderUsed = 'xrahat';
-      actualModelUsed = 'SMFTA cloud fallback';
     }
   }
 
@@ -2555,9 +2552,12 @@ chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
       }
     );
 
+    const parsedItems = aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [];
+    const safeItems = parsedItems.filter((item) => !isSensitiveFact(item));
+
     return res.json({
       ok: true,
-      memories: aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [],
+      memories: safeItems,
     });
   } catch {
     return res.json({
@@ -2573,6 +2573,7 @@ chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
 chatRouter.post('/feedback', (req: Request, res: Response) => {
   const {
     messageId = '',
+    sessionId = '',
     conversationId = 'default',
     rating = '',
     reason = '',
@@ -2587,7 +2588,7 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
 
   const cleanMessageId =
     String(messageId || '').trim() || `msg_${Date.now().toString(36)}`;
-  const cleanConvId = String(conversationId || 'default').trim().slice(0, 128);
+  const cleanSessionId = String(sessionId || conversationId || 'default').trim().slice(0, 128);
   const cleanReason = String(reason || '').trim().slice(0, 500);
   const userId = String(req.userId || 'anonymous').slice(0, 128);
 
@@ -2595,7 +2596,7 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
     const engine = getSharedHardenedEngine();
     const record = engine.storage.saveMessageFeedback({
       messageId: cleanMessageId,
-      sessionId: cleanConvId,
+      sessionId: cleanSessionId,
       userId,
       rating,
       reason: cleanReason,
@@ -2610,4 +2611,192 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
       error: err instanceof Error ? err.message : 'Failed to save feedback.',
     });
   }
+});
+
+// ============================================================================
+// 6. AUTO-SUMMARIZATION FOR LONG CHAT MEMORY (/api/chat/summarize)
+// ============================================================================
+chatRouter.post('/chat/summarize', async (req: Request, res: Response) => {
+  const {
+    messages = [],
+    existingSummary = '',
+    provider,
+    externalKeys,
+    externalModel,
+    externalBaseUrl,
+  } = req.body || {};
+
+  const items = Array.isArray(messages)
+    ? messages
+        .slice(0, 40)
+        .map((m: { role?: string; text?: string; content?: string }) => ({
+          role: m?.role === 'user' ? 'User' : 'Assistant',
+          text: String(m?.text || m?.content || '').trim().slice(0, 1200),
+        }))
+        .filter((m) => m.text.length > 0)
+    : [];
+
+  if (items.length === 0) {
+    return res.status(400).json({ ok: false, error: 'messages array is required.' });
+  }
+
+  const transcript = items.map((m) => `${m.role}: ${m.text}`).join('\n');
+  const prompt = [
+    existingSummary ? `Previous Summary:\n${String(existingSummary).slice(0, 2000)}\n` : '',
+    `Turns to fold into concise working memory:\n${transcript}`,
+    '\nWrite an updated concise structured summary covering key goals, technical decisions, files touched, and user preferences (under 220 words).',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const parsedKeys = String(externalKeys || '')
+    .split(/[\n,;]+/)
+    .map((k: string) => k.trim())
+    .filter(Boolean);
+
+  if (isGeminiConfigured() && parsedKeys.length === 0) {
+    const schema = {
+      type: Type.OBJECT,
+      properties: {
+        summary: {
+          type: Type.STRING,
+          description: 'Concise factual summary of conversation history.',
+        },
+      },
+      required: ['summary'],
+    };
+    const gRes = await generateGeminiStructuredJson<{ summary?: string }>({
+      model: 'gemini-3.1-flash-lite',
+      systemInstruction:
+        'You summarize long chat transcripts into a crisp factual memory block.',
+      prompt,
+      schema: schema as unknown as Record<string, unknown>,
+      maxOutputTokens: 600,
+    });
+    if (gRes.ok && gRes.data?.summary) {
+      return res.json({ ok: true, summary: gRes.data.summary.trim() });
+    }
+    return res.status(gRes.error?.httpStatus || 502).json({
+      ok: false,
+      code: gRes.error?.code || 'SUMMARIZE_FAILED',
+      integrationRequired: gRes.error?.code === 'INTEGRATION_REQUIRED',
+      error: gRes.error?.message || 'Summarization failed.',
+    });
+  }
+
+  if (parsedKeys.length > 0) {
+    const aiRes = await callBackendEngine(
+      prompt,
+      'You summarize long chat transcripts concisely in under 220 words.',
+      {
+        maxTokens: 500,
+        preferredProvider: provider,
+        preferredModel: externalModel,
+        externalKeys: parsedKeys,
+        externalBaseUrl,
+        allowKeylessFallback: false,
+      }
+    );
+    if (aiRes.ok && aiRes.text.trim()) {
+      return res.json({ ok: true, summary: aiRes.text.trim() });
+    }
+    return res.status(502).json({
+      ok: false,
+      error: aiRes.error || 'Provider summarization failed.',
+    });
+  }
+
+  return res.status(503).json({
+    ok: false,
+    code: 'INTEGRATION_REQUIRED',
+    integrationRequired: true,
+    error: 'Integration required: Server GEMINI_API_KEY is needed to auto-summarize chat memory.',
+  });
+});
+
+// ============================================================================
+// 7. MIND MAP & FLOWCHART STRUCTURED JSON ENDPOINT (/api/diagram)
+// ============================================================================
+chatRouter.post('/diagram', async (req: Request, res: Response) => {
+  const promptText =
+    typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  const kind = req.body?.kind === 'mindmap' ? 'mindmap' : 'flowchart';
+  const model =
+    typeof req.body?.model === 'string' && req.body.model.trim()
+      ? req.body.model.trim()
+      : 'gemini-4-hydrogen';
+
+  if (!promptText || promptText.length > 2000) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Diagram prompt must be between 1 and 2000 characters.',
+    });
+  }
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      title: { type: Type.STRING, description: 'Short diagram title' },
+      nodes: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING, description: 'Short node ID e.g. n1' },
+            label: { type: Type.STRING, description: 'Concise node label' },
+            category: {
+              type: Type.STRING,
+              description: 'start | process | decision | concept | end',
+            },
+            note: { type: Type.STRING, description: 'Optional 1-line detail' },
+          },
+          required: ['id', 'label', 'category'],
+        },
+      },
+      edges: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING, description: 'Short edge ID e.g. e1' },
+            source: { type: Type.STRING, description: 'Source node ID' },
+            target: { type: Type.STRING, description: 'Target node ID' },
+            label: { type: Type.STRING, description: 'Optional edge label' },
+          },
+          required: ['id', 'source', 'target'],
+        },
+      },
+    },
+    required: ['title', 'nodes', 'edges'],
+  };
+
+  const result = await generateGeminiStructuredJson<{
+    title: string;
+    nodes: Array<{ id: string; label: string; category: string; note?: string }>;
+    edges: Array<{ id: string; source: string; target: string; label?: string }>;
+  }>({
+    model,
+    systemInstruction: `Generate a clear, well-structured ${kind} JSON graph with 5 to 14 meaningful nodes and connected directed edges. Match the user's language (English or Bengali).`,
+    prompt: `Create a ${kind} for: ${promptText}`,
+    schema: schema as unknown as Record<string, unknown>,
+    maxOutputTokens: 2048,
+  });
+
+  if (!result.ok || !result.data) {
+    const code = result.error?.code || 'INTEGRATION_REQUIRED';
+    return res.status(result.error?.httpStatus || 503).json({
+      ok: false,
+      code,
+      integrationRequired: code === 'INTEGRATION_REQUIRED',
+      error:
+        result.error?.message ||
+        'Integration required: GEMINI_API_KEY must be configured on the server for diagram generation.',
+    });
+  }
+
+  return res.json({
+    ok: true,
+    kind,
+    diagram: result.data,
+  });
 });

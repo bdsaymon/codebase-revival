@@ -57,10 +57,10 @@ describe('V2 Special Firebase AI System', () => {
       defaultDailyLimit: 100,
       temperature: 0.7,
       maxOutputTokens: 8192,
-      thinkingLevel: 'MINIMAL',
+      thinkingLevel: 'LOW',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.5-flash-lite',
-      firebaseAiModel: 'gemini-3.5-flash-lite',
+      serverGeminiModel: 'gemini-3.1-flash-lite',
+      firebaseAiModel: 'gemini-3.1-flash-lite',
     });
 
     const pro = getV2ModelSpec('smfta-v2-pro');
@@ -68,10 +68,10 @@ describe('V2 Special Firebase AI System', () => {
       defaultDailyLimit: 40,
       temperature: 0.4,
       maxOutputTokens: 16384,
-      thinkingLevel: 'LOW',
+      thinkingLevel: 'MEDIUM',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.8-flash',
-      firebaseAiModel: 'gemini-3.8-flash',
+      serverGeminiModel: 'gemini-4-hydrogen',
+      firebaseAiModel: 'gemini-4-hydrogen',
     });
 
     const max = getV2ModelSpec('smfta-max');
@@ -96,15 +96,15 @@ describe('V2 Special Firebase AI System', () => {
     expect('topK' in hydrogenCfg).toBe(false);
     expect(Array.isArray(hydrogenCfg.tools)).toBe(true);
 
-    const flash38Cfg = buildV2GenAiRequestConfig({
-      modelName: 'gemini-3.8-flash',
-      spec: getV2ModelSpec('smfta-v2-pro'),
+    const flash31Cfg = buildV2GenAiRequestConfig({
+      modelName: 'gemini-3.1-flash-lite',
+      spec: getV2ModelSpec('smfta-v5'),
       fullSystemInstruction: 'Write clean TypeScript',
     });
-    expect(flash38Cfg.temperature).toBe(0.4);
-    expect(flash38Cfg.maxOutputTokens).toBe(16384);
-    expect(flash38Cfg.thinkingConfig).toBeDefined();
-    expect('tools' in flash38Cfg).toBe(false);
+    expect(flash31Cfg.temperature).toBe(0.7);
+    expect(flash31Cfg.maxOutputTokens).toBe(8192);
+    expect(flash31Cfg.thinkingConfig).toBeDefined();
+    expect('tools' in flash31Cfg).toBe(false);
   });
 
   it('sanitizes server & Firebase AI contents without empty turns or messages[1] failures', () => {

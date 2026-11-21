@@ -28,6 +28,7 @@ async function buildApp(): Promise<AppChain> {
     { mcpRouter },
     { dbBridgeRouter },
     { v2Router },
+    { previewRouter },
     { APP_VERSION },
     { createIpRateLimiter, parseTrustProxyHops },
     { createApiIdentityMiddleware, redactSecrets },
@@ -42,6 +43,7 @@ async function buildApp(): Promise<AppChain> {
     import('../routes/mcp'),
     import('../routes/dbBridge'),
     import('../routes/v2'),
+    import('../routes/preview'),
     import('../../src/version'),
     import('../rateLimit'),
     import('../engine/security'),
@@ -74,6 +76,7 @@ async function buildApp(): Promise<AppChain> {
   root.use('/api', mcpRouter as never);
   root.use('/api', dbBridgeRouter as never);
   root.use('/api', v2Router as never);
+  root.use(previewRouter as never);
   root.use(oauthRouter as never);
   return { root, redactSecrets };
 }

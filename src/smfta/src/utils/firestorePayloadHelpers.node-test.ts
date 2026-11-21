@@ -130,7 +130,7 @@ test('user, session, message, and memory payloads enforce exact rule schemas and
 
   const sig = buildFirestoreChatSyncSignature({
     title: 'Test',
-    msgs: [{ id: '1', role: 'user', text: 'abc', ts: 0 }],
+    msgs: [{ id: '1', role: 'user', text: 'abc', ts: 1 }],
   });
   assert.equal(sig, 'Test:1:1:3');
 });

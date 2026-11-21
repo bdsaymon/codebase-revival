@@ -2,10 +2,10 @@
  * V2-only RAG Ingestion, Vector Retrieval, and Persistent Memory Store.
  * Strictly isolated from V1 chat/memory routing.
  */
-import type { Database, Json } from '../../integrations/supabase/types';
 import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { supabaseAdmin } from '../../integrations/supabase/client.server';
+import type { Json } from '../../integrations/supabase/types';
 import { isSupabaseV2Configured } from './v2FirebaseAi';
 import {
   extractTextFromDocxAsync,
@@ -25,7 +25,7 @@ export interface V2DocumentChunkRecord {
   chunkIndex: number;
   content: string;
   embedding: number[];
-  metadata: Record<string, Json>;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -150,7 +150,9 @@ export async function embedV2Text(text: string): Promise<{
       contents: clean,
       config: { outputDimensionality: V2_EMBEDDING_DIMS },
     });
-    const values = res.embeddings?.[0]?.values;
+    const values =
+      res?.embeddings?.[0]?.values ||
+      (res as { embedding?: { values?: number[] } })?.embedding?.values;
     if (Array.isArray(values) && values.length > 0) {
       return {
         embedding: values.slice(0, V2_EMBEDDING_DIMS),
@@ -337,7 +339,7 @@ export async function ingestV2Document(params: {
       chunk_index: r.chunkIndex,
       content: r.content,
       embedding: toPgVectorLiteral(r.embedding),
-      metadata: r.metadata,
+      metadata: r.metadata as Json,
       created_at: r.createdAt,
     }));
     const { error } = await supabaseAdmin.from('smfta_v2_document_chunks').insert(rows);
@@ -385,7 +387,7 @@ export async function listV2DocumentSummaries(userId?: string | null): Promise<
         chunkIndex: Number(row.chunk_index) || 0,
         content: String(row.content || ''),
         embedding: [],
-        metadata: (row.metadata as Record<string, Json>) || {},
+        metadata: (row.metadata as Record<string, unknown>) || {},
         createdAt: String(row.created_at || ''),
       }));
     }
@@ -528,7 +530,7 @@ export async function retrieveV2RagContext(params: {
         chunkIndex: Number(r.chunk_index) || 0,
         content: String(r.content || ''),
         embedding: parsePgVector(r.embedding),
-        metadata: (r.metadata as Record<string, Json>) || {},
+        metadata: (r.metadata as Record<string, unknown>) || {},
         createdAt: String(r.created_at || ''),
       }));
     }
@@ -702,7 +704,12 @@ export async function updateV2Memory(params: {
   }
 
   if (isSupabaseV2Configured()) {
-    const patch: Database['public']['Tables']['smfta_v2_memories']['Update'] = { updated_at: new Date().toISOString() };
+    const patch: {
+      updated_at: string;
+      content?: string;
+      embedding?: string;
+      pinned?: boolean;
+    } = { updated_at: new Date().toISOString() };
     if (nextContent !== undefined && nextEmbedding) {
       patch.content = nextContent;
       patch.embedding = toPgVectorLiteral(nextEmbedding);

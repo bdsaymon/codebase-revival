@@ -245,12 +245,19 @@ export function interceptIdentityQuery(
   // Always intercept hacking topics cleanly before generic identity or length limits
   if (clean.length <= 4000 && HACKING_TOPIC_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I don't know about these things. If you need any assistance, please speak with the development team.`;
+      return `I don't know about these things. If you need any assistance, please speak with the development team.\n\n${CONTACT_BUTTONS_TOKEN}`;
     }
-    return `আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।`;
+    return `আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।\n\n${CONTACT_BUTTONS_TOKEN}`;
   }
 
   if (clean.length > 220) return null;
+
+  if (SECURITY_CONTACT_REGEX.test(clean)) {
+    if (preferEnglish) {
+      return `For any security, system, or technical issue on **${sysName}** (**SMFTA AI Pro**), please contact the developer **${CREATOR_NAME}** or the development team directly.\n\n${CONTACT_BUTTONS_TOKEN}`;
+    }
+    return `**${sysName}** (**SMFTA AI Pro**)-এর যেকোনো সিকিউরিটি বা সিস্টেম সমস্যার জন্য সরাসরি ডেভেলপার **${CREATOR_NAME}** অথবা ডেভেলপমেন্ট টিমের সাথে যোগাযোগ করুন।\n\n${CONTACT_BUTTONS_TOKEN}`;
+  }
 
   if (PRIVACY_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
@@ -261,9 +268,9 @@ export function interceptIdentityQuery(
 
   if (CREATOR_QUERY_REGEX.test(clean)) {
     if (preferEnglish) {
-      return `I am **${sysName}**, the active AI system on the **SMFTA AI Pro** platform — built and developed by **${CREATOR_NAME}**.`;
+      return `I am **${sysName}**, the active AI system on the **SMFTA AI Pro** platform — built and developed by **${CREATOR_NAME}**.\n\n${CONTACT_BUTTONS_TOKEN}`;
     }
-    return `আমি **${sysName}** — **SMFTA AI Pro** প্ল্যাটফর্মের সক্রিয় AI সিস্টেম। আমাকে তৈরি ও ডেভেলপ করেছেন **${CREATOR_NAME}**।`;
+    return `আমি **${sysName}** — **SMFTA AI Pro** প্ল্যাটফর্মের সক্রিয় AI সিস্টেম। আমাকে তৈরি ও ডেভেলপ করেছেন **${CREATOR_NAME}**।\n\n${CONTACT_BUTTONS_TOKEN}`;
   }
 
   if (IDENTITY_BN_REGEX.test(clean) || IDENTITY_EN_REGEX.test(clean)) {

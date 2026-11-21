@@ -14,117 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      smfta_v2_usage: {
-        Row: {
-          user_id: string
-          date_riyadh: string
-          used_by_model: Json
-          testing_used_by_model: Json
-          updated_at: string
-        }
-        Insert: {
-          user_id: string
-          date_riyadh: string
-          used_by_model?: Json
-          testing_used_by_model?: Json
-          updated_at?: string
-        }
-        Update: {
-          user_id?: string
-          date_riyadh?: string
-          used_by_model?: Json
-          testing_used_by_model?: Json
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      smfta_v2_quota_config: {
-        Row: {
-          user_id: string
-          config_json: Json
-          updated_at: string
-        }
-        Insert: {
-          user_id: string
-          config_json?: Json
-          updated_at?: string
-        }
-        Update: {
-          user_id?: string
-          config_json?: Json
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      smfta_v2_document_chunks: {
-        Row: {
-          id: string
-          user_id: string
-          doc_id: string
-          file_name: string
-          mime_type: string | null
-          chunk_index: number
-          content: string
-          embedding: string | null
-          metadata: Json
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          doc_id: string
-          file_name: string
-          mime_type?: string | null
-          chunk_index: number
-          content: string
-          embedding?: string | null
-          metadata?: Json
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          doc_id?: string
-          file_name?: string
-          mime_type?: string | null
-          chunk_index?: number
-          content?: string
-          embedding?: string | null
-          metadata?: Json
-          created_at?: string
-        }
-        Relationships: []
-      }
-      smfta_v2_memories: {
-        Row: {
-          id: string
-          user_id: string
-          content: string
-          embedding: string | null
-          pinned: boolean
-          updated_at: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          content: string
-          embedding?: string | null
-          pinned?: boolean
-          updated_at?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          content?: string
-          embedding?: string | null
-          pinned?: boolean
-          updated_at?: string
-          created_at?: string
-        }
-        Relationships: []
-      }
       smfta_chat_sessions: {
         Row: {
           created_at: string
@@ -269,28 +158,147 @@ export type Database = {
         }
         Relationships: []
       }
+      smfta_v2_document_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          doc_id: string
+          embedding: string | null
+          file_name: string
+          id: string
+          metadata: Json
+          mime_type: string | null
+          user_id: string
+        }
+        Insert: {
+          chunk_index: number
+          content: string
+          created_at?: string
+          doc_id: string
+          embedding?: string | null
+          file_name: string
+          id?: string
+          metadata?: Json
+          mime_type?: string | null
+          user_id: string
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          doc_id?: string
+          embedding?: string | null
+          file_name?: string
+          id?: string
+          metadata?: Json
+          mime_type?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_memories: {
+        Row: {
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          pinned: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          pinned?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          pinned?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_quota_config: {
+        Row: {
+          config_json: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          config_json?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          config_json?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      smfta_v2_usage: {
+        Row: {
+          date_riyadh: string
+          testing_used_by_model: Json
+          updated_at: string
+          used_by_model: Json
+          user_id: string
+        }
+        Insert: {
+          date_riyadh: string
+          testing_used_by_model?: Json
+          updated_at?: string
+          used_by_model?: Json
+          user_id: string
+        }
+        Update: {
+          date_riyadh?: string
+          testing_used_by_model?: Json
+          updated_at?: string
+          used_by_model?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
       match_v2_document_chunks: {
-        Args: { query_embedding: string; match_user_id: string; match_count?: number }
+        Args: {
+          match_count?: number
+          match_user_id: string
+          query_embedding: string
+        }
         Returns: {
-          id: string
-          doc_id: string
-          file_name: string
           chunk_index: number
           content: string
+          doc_id: string
+          file_name: string
+          id: string
           metadata: Json
           similarity: number
         }[]
       }
       match_v2_memories: {
-        Args: { query_embedding: string; match_user_id: string; match_count?: number }
+        Args: {
+          match_count?: number
+          match_user_id: string
+          query_embedding: string
+        }
         Returns: {
-          id: string
           content: string
+          id: string
           pinned: boolean
           similarity: number
         }[]

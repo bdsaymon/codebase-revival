@@ -103,6 +103,9 @@ export function builtinTierForModel(
       desc: 'Firebase AI Logic · Deeper analysis & demanding tasks',
     };
   }
+  if (m === 'gemini-3.1-flash-lite') return BUILTIN_TIERS[0];
+  if (m === 'gemini-4-hydrogen') return BUILTIN_TIERS[1];
+  if (m === 'gemini-4-neon' || m === 'gemini-4-carbon') return BUILTIN_TIERS[2];
   if (mode === 'fast') return BUILTIN_TIERS[0];
   if (mode === 'power') return BUILTIN_TIERS[2];
   return BUILTIN_TIERS[1];
@@ -125,12 +128,12 @@ export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   inceptionlabs: 'mercury-3',
   xrahat: '',
   smfta_cloud: '',
-  unorouter: 'google/gemini-3.8-flash',
-  codecraft: 'gemini-3.8-flash',
-  gemini_custom: 'gemini-3.8-flash',
-  gemini_openai: 'gemini-3.8-flash',
+  unorouter: 'google/gemini-4-hydrogen',
+  codecraft: 'gemini-4-hydrogen',
+  gemini_custom: 'gemini-4-hydrogen',
+  gemini_openai: 'gemini-4-hydrogen',
   anthropic: 'claude-sonnet-4-20250514',
-  openrouter: 'google/gemini-3.8-flash',
+  openrouter: 'google/gemini-4-hydrogen',
   groq: 'llama-3.3-70b-versatile',
   deepseek: 'deepseek-chat',
   openai: 'gpt-4o-mini',
@@ -196,38 +199,34 @@ export const QUICK_PROVIDER_CHIPS: Record<string, string[]> = {
   mercury: ['mercury-3', 'mercury', 'mercury-coder'],
   inceptionlabs: ['mercury-3', 'mercury', 'mercury-coder'],
   xrahat: [
-    'deepseek-r1',
-    'gpt-4o',
-    'claude-3.5-sonnet',
-    'gemini-3.8-flash',
-    'qwen-2.5-coder',
-    'llama-3.3-70b',
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+    'gemini-4-neon',
+    'gemini-4-carbon',
   ],
   smfta_cloud: [
-    'deepseek-r1',
-    'gpt-4o',
-    'claude-3.5-sonnet',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
-    'qwen-2.5-coder',
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+    'gemini-4-neon',
+    'gemini-4-carbon',
   ],
   unorouter: [
-    'google/gemini-3.8-flash',
-    'google/gemini-3.5-flash-lite',
+    'google/gemini-4-hydrogen',
+    'google/gemini-3.1-flash-lite',
     'anthropic/claude-3.5-sonnet',
     'openai/gpt-4o-mini',
   ],
   codecraft: [
-    'gemini-3.8-flash',
+    'gemini-4-hydrogen',
     'deepseek-v4-flash-0731',
     'claude-sonnet-5',
     'claude-opus-4.8',
   ],
-  gemini_custom: ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-hydrogen'],
-  gemini_openai: ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-hydrogen'],
+  gemini_custom: ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-4-neon', 'gemini-4-carbon'],
+  gemini_openai: ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-4-neon', 'gemini-4-carbon'],
   anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-haiku-latest'],
   openrouter: [
-    'google/gemini-3.8-flash',
+    'google/gemini-4-hydrogen',
     'openai/gpt-4o-mini',
     'deepseek/deepseek-chat',
     'deepseek/deepseek-r1',
@@ -258,7 +257,7 @@ export const QUICK_PROVIDER_CHIPS: Record<string, string[]> = {
   cloudflare: ['@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
   lmstudio: ['local-model'],
   ollama: ['llama3.2', 'qwen2.5', 'deepseek-r1'],
-  custom: ['mercury-3', 'gpt-4o-mini', 'deepseek-r1', 'gemini-3.8-flash', 'claude-3.5-sonnet'],
+  custom: ['gpt-4o-mini', 'claude-sonnet-4-20250514', 'gemini-4-hydrogen', 'deepseek-r1'],
 };
 
 export const PROVIDER_HELP_BN: Record<string, string> = {
@@ -338,12 +337,12 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   },
   {
     id: 'gemini_custom',
-    label: 'Google Gemini',
+    label: 'Google Gemini (Server SDK)',
     short: 'Gemini',
-    group: 'popular',
-    keyHint: 'AIza...',
+    group: 'builtin',
+    keyless: true,
     docsUrl: 'https://aistudio.google.com/apikey',
-    note: 'Gemini 2.5',
+    note: 'Gemini 4 / 3.1 (Server Secret)',
   },
   {
     id: 'openai',
@@ -365,19 +364,19 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   },
   {
     id: 'xrahat',
-    label: 'SMFTA Core Engine',
-    short: 'SMFTA Core',
+    label: 'Gemini Server Engine',
+    short: 'Gemini',
     group: 'builtin',
     keyless: true,
-    note: 'Built-in free engine',
+    note: 'Server Gemini SDK',
   },
   {
     id: 'smfta_cloud',
-    label: 'SMFTA Cloud',
-    short: 'SMFTA Cloud',
+    label: 'SMFTA Cloud (Gemini)',
+    short: 'Cloud',
     group: 'builtin',
     keyless: true,
-    note: 'Built-in cloud engine',
+    note: 'Server Gemini SDK',
   },
   {
     id: 'codecraft',
@@ -716,36 +715,47 @@ export function applyKeyToDraft(
 
 export const SAVED_PROFILES_KEY = 'smfta_provider_profiles';
 
+export const GEMINI_ACTIVE_MODELS = [
+  'gemini-4-hydrogen',
+  'gemini-3.1-flash-lite',
+  'gemini-4-neon',
+  'gemini-4-carbon',
+];
+
 export const DEFAULT_BUILTIN_PROFILE: SavedProviderProfile = {
   id: 'default-builtin',
-  name: 'Msfta shop ai',
-  provider: 'xrahat',
+  name: 'Google Gemini (Server)',
+  provider: 'gemini_custom',
   externalKeys: '',
-  externalModel: 'smfta-pro',
+  externalModel: 'gemini-4-hydrogen',
   externalBaseUrl: '',
-  availableModels: [...BUILTIN_TIER_MODELS],
+  availableModels: [...GEMINI_ACTIVE_MODELS],
   verified: true,
-  statusMessage: 'Built-in Engine · Connected',
+  statusMessage: 'Server Gemini SDK',
   quotaExhausted: false,
 };
 
-/**
- * Migrate profiles written by older builds: built-in keyless engines used to
- * carry fabricated vendor model IDs (gpt-4o-mini, claude-…, gemini-…). Normalise
- * them to the honest SMFTA tier list so no fake model ever reaches the UI.
- */
 export function normalizeProviderProfile(
   p: SavedProviderProfile
 ): SavedProviderProfile {
-  if (!isBuiltinProviderId(p.provider)) return p;
-  const current = (p.externalModel || '').trim();
-  return {
-    ...p,
-    availableModels: [...BUILTIN_TIER_MODELS],
-    externalModel: isBuiltinTierModel(current)
-      ? current
-      : builtinTierForModel(current).model,
-  };
+  if (p.provider === 'gemini_custom' || isBuiltinProviderId(p.provider)) {
+    const current = (p.externalModel || '').trim();
+    const cleaned =
+      current === 'gemini-3.8-flash'
+        ? 'gemini-4-hydrogen'
+        : current === 'gemini-3.5-flash-lite'
+        ? 'gemini-3.1-flash-lite'
+        : current;
+    return {
+      ...p,
+      availableModels: [...GEMINI_ACTIVE_MODELS, ...BUILTIN_TIER_MODELS],
+      externalModel:
+        GEMINI_ACTIVE_MODELS.includes(cleaned) || isBuiltinTierModel(cleaned)
+          ? cleaned
+          : 'gemini-4-hydrogen',
+    };
+  }
+  return p;
 }
 
 export const VALID_CATALOG_PROVIDERS = new Set<string>(
@@ -999,8 +1009,8 @@ export function resolveActiveProfile(
 export function getModelsForProfile(
   profile?: SavedProviderProfile | null
 ): string[] {
-  if (!profile || isBuiltinProviderId(profile.provider)) {
-    return [...BUILTIN_TIER_MODELS];
+  if (!profile || profile.provider === 'gemini_custom' || isBuiltinProviderId(profile.provider)) {
+    return [...GEMINI_ACTIVE_MODELS];
   }
   const current = (profile.externalModel || '').trim();
   const discovered = Array.isArray(profile.availableModels)

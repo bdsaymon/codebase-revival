@@ -565,7 +565,10 @@ export function applyAutoRepairs(
     actions.push('Engine reset to default (invalid provider)');
   }
 
-  const keyless = next.provider === 'xrahat' || next.provider === 'smfta_cloud';
+  const keyless =
+    next.provider === 'xrahat' ||
+    next.provider === 'smfta_cloud' ||
+    (next.provider === 'gemini_custom' && !(next.externalKeys || '').trim());
   if (
     !keyless &&
     !(next.externalModel || '').trim() &&

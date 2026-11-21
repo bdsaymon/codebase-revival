@@ -40,9 +40,13 @@ const hasRe = (text: string, rx: RegExp) => rx.test(text);
 
 /** Verbs that turn a sentence into an order (guards against plain questions). */
 const ORDER_RX =
-  /(করো|করে\s*দাও|করে\s*দিন|বদলাও|পরিবর্তন|সেট\s*কর|চালু\s*কর|বন্ধ\s*কর|দিয়ে\s*দাও|তৈরি\s*কর|বানাও|কমাও|কমান|বাড়াও|বাড়ান|গোল\s*কর|সোজা\s*কর|make|set|change|switch|turn|enable|disable|do it|apply|create|build|reduce|increase)/i;
+  /(করো|করে\s*দাও|করে\s*দিন|বদলাও|পরিবর্তন|সেট\s*কর|চালু\s*কর|বন্ধ\s*কর|দিয়ে\s*দাও|তৈরি\s*কর|বানাও|কমাও|কমান|বাড়াও|বাড়ান|গোল\s*কর|সোজা\s*কর|রাখো|\bmake\b|\bset\b|\bchange\b|\bswitch\b|\bturn\b|\benable\b|\bdisable\b|\bdo it\b|\bapply\b|\bcreate\b|\bbuild\b|\breduce\b|\bincrease\b)/i;
 
-const QUESTION_RX = /(কী|কি|কেমন|কেন|কোথায়|কীভাবে|কিভাবে|কত|how|what|why|which|where|\?)/i;
+const OPEN_LAUNCH_RX =
+  /(খোলো|ওপেন|দেখাও|যাও|কানেক্ট|যুক্ত|সেটআপ|\bopen\b|\blaunch\b|\bconnect\b|\bsetup\b)/i;
+
+const QUESTION_RX =
+  /(?:(?<![\u0980-\u09FF])(?:কী|কি|কেমন|কেন|কোথায়|কীভাবে|কিভাবে|কত)(?![\u0980-\u09FF])|\bhow\b|\bwhat\b|\bwhy\b|\bwhich\b|\bwhere\b|\bwho\b|\bwhen\b|\bcan you\b|\bcould you\b|\bwould you\b|\?)/i;
 
 export function looksLikeOrder(text: string): boolean {
   return ORDER_RX.test(text || '');
@@ -103,14 +107,24 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   const order = looksLikeOrder(text);
   const question = hasRe(text, QUESTION_RX);
 
-  // ── Theme ────────────────────────────────────────────────────────────────
-  if (has(text, 'ডার্ক', 'কালো', 'অন্ধকার', 'dark')) {
+  // ── Theme (require UI/theme context or explicit dark/light mode phrasing) ─
+  const hasUiThemeTarget = has(
+    text,
+    'থিম', 'theme', 'মোড', 'mode', 'ব্যাকগ্রাউন্ড', 'background', 'ইন্টারফেস', 'ui', 'স্ক্রিন', 'screen'
+  );
+  if (
+    /(?:ডার্ক\s*মোড|ডার্ক\s*থিম|dark\s*mode|dark\s*theme|কালো\s*থিম)/i.test(text) ||
+    (order && hasUiThemeTarget && has(text, 'ডার্ক', 'কালো', 'অন্ধকার', 'dark'))
+  ) {
     actions.push({
       kind: 'settings',
       label: 'Theme → dark',
       patch: { theme: 'dark' },
     });
-  } else if (has(text, 'লাইট', 'সাদা', 'উজ্জ্বল', 'light mode', 'light theme')) {
+  } else if (
+    /(?:লাইট\s*মোড|লাইট\s*থিম|light\s*mode|light\s*theme|সাদা\s*থিম)/i.test(text) ||
+    (order && hasUiThemeTarget && has(text, 'লাইট', 'সাদা', 'উজ্জ্বল', 'light'))
+  ) {
     actions.push({
       kind: 'settings',
       label: 'Theme → light',
@@ -119,7 +133,10 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   }
 
   // ── Accent colour ────────────────────────────────────────────────────────
-  if (has(text, 'রঙ', 'কালার', 'color', 'colour', 'অ্যাকসেন্ট', 'accent', 'থিম')) {
+  if (
+    order &&
+    has(text, 'রঙ', 'রং', 'কালার', 'color', 'colour', 'অ্যাকসেন্ট', 'accent', 'থিম')
+  ) {
     const accent = detectAccent(text);
     if (accent) {
       actions.push({
@@ -133,13 +150,15 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   // ── UI shape (corners) — v18.4.0 ─────────────────────────────────────────
   if (
     order &&
-    (has(text, 'কর্নার', 'কোণা', 'গোল', 'শার্প') ||
+    (has(text, 'কর্নার', 'কোণা', 'গোল', 'শার্প', 'রেডিয়াস') ||
       /\b(corner|radius|round|rounded|sharp|square)\b/.test(text))
   ) {
     let radius: AppSettings['radius'] | undefined;
-    if (has(text, 'গোল', 'round', 'rounded', 'নরম', 'soft')) radius = 'round';
-    if (has(text, 'শার্প', 'sharp', 'সোজা', 'কোণা', 'square')) radius = 'sharp';
-    if (has(text, 'soft', 'নরম', 'মাঝারি', 'default')) radius = radius || 'soft';
+    if (has(text, 'গোল', 'নরম') || /\b(round|rounded|soft)\b/.test(text)) radius = 'round';
+    if (has(text, 'শার্প', 'সোজা', 'কোণা') || /\b(sharp|square)\b/.test(text)) radius = 'sharp';
+    if (!radius && /\b(soft|default)\b/.test(text) || has(text, 'মাঝারি', 'স্বাভাবিক')) {
+      radius = 'soft';
+    }
     if (radius) {
       actions.push({ kind: 'settings', label: `UI radius → ${radius}`, patch: { radius } });
     }
@@ -148,13 +167,19 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   // ── UI density (spacing) — v18.4.0 ───────────────────────────────────────
   if (
     order &&
-    (has(text, 'ঘন', 'স্পেসিং', 'ফাঁকা', 'জায়গা', 'ভিড়') ||
-      /\b(spacing|density|compact|cozy|spacious|tight|airy)\b/.test(text))
+    (has(text, 'কমপ্যাক্ট', 'ঘন', 'স্পেসিং', 'ফাঁকা', 'জায়গা বাঁচাও', 'ভিড়', 'স্পেসিয়াস', 'খোলামেলা') ||
+      /\b(spacing|density|compact|cozy|spacious|airy|dense)\b/.test(text))
   ) {
     let density: AppSettings['density'] | undefined;
-    if (has(text, 'কম', 'ছোট', 'compact', 'ঘন', 'tight', 'ভিড়')) density = 'compact';
-    if (has(text, 'বেশি', 'বড়', 'spacious', 'ফাঁকা', 'খোলামেলা', 'airy')) density = 'spacious';
-    if (has(text, 'স্বাভাবিক', 'normal', 'cozy', 'মাঝারি', 'default')) density = density || 'cozy';
+    if (has(text, 'কমপ্যাক্ট', 'ঘন', 'জায়গা বাঁচাও') || /\b(compact|tight|dense)\b/.test(text)) {
+      density = 'compact';
+    }
+    if (has(text, 'স্পেসিয়াস', 'খোলামেলা', 'ফাঁকা') || /\b(spacious|airy)\b/.test(text)) {
+      density = 'spacious';
+    }
+    if (!density && (has(text, 'স্বাভাবিক', 'মাঝারি') || /\b(cozy|normal|default)\b/.test(text))) {
+      density = 'cozy';
+    }
     if (density) {
       actions.push({
         kind: 'settings',
@@ -165,81 +190,41 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   }
 
   // ── Font size ────────────────────────────────────────────────────────────
-  if (has(text, 'ফন্ট', 'font', 'লেখা বড়', 'লেখা ছোট', 'text size')) {
-    if (has(text, 'বড়', 'large', 'bigger', 'increase')) {
+  if (order && has(text, 'ফন্ট', 'font', 'লেখা বড়', 'লেখা ছোট', 'text size')) {
+    if (has(text, 'বড়', 'বড়', 'large', 'bigger', 'increase')) {
       actions.push({ kind: 'settings', label: 'Font → large', patch: { fontsize: 'large' } });
-    } else if (has(text, 'ছোট', 'small', 'ছোট করো', 'decrease')) {
+    } else if (has(text, 'ছোট', 'small', 'decrease')) {
       actions.push({ kind: 'settings', label: 'Font → small', patch: { fontsize: 'small' } });
     } else if (has(text, 'স্বাভাবিক', 'normal', 'default')) {
       actions.push({ kind: 'settings', label: 'Font → normal', patch: { fontsize: 'normal' } });
     }
   }
 
-  // ── UI shape & density (v18.2.0 real UI/UX control) ───────────────────────
-  if (
-    has(text, 'কোণা', 'গোল', 'রেডিয়াস', 'radius', 'corner', 'rounded', 'শার্প', 'sharp')
-  ) {
-    if (has(text, 'গোল', 'round', 'rounded', 'নরম', 'soft corner')) {
-      actions.push({
-        kind: 'settings',
-        label: 'UI radius → round',
-        patch: { radius: 'round' },
-      });
-    } else if (has(text, 'শার্প', 'sharp', 'সোজা', 'সমকোণ')) {
-      actions.push({
-        kind: 'settings',
-        label: 'UI radius → sharp',
-        patch: { radius: 'sharp' },
-      });
-    } else if (has(text, 'স্বাভাবিক', 'normal', 'soft', 'ডিফল্ট')) {
-      actions.push({
-        kind: 'settings',
-        label: 'UI radius → soft',
-        patch: { radius: 'soft' },
-      });
-    }
-  }
-
-  if (
-    has(
-      text,
-      'কমপ্যাক্ট', 'ঘন', 'জায়গা বাঁচাও', 'compact', 'dense',
-      'স্পেসিয়াস', 'খোলামেলা', 'spacious', 'বড় করে দেখাও'
-    )
-  ) {
-    if (has(text, 'কমপ্যাক্ট', 'compact', 'ঘন', 'dense', 'জায়গা বাঁচাও')) {
-      actions.push({
-        kind: 'settings',
-        label: 'UI density → compact',
-        patch: { density: 'compact' },
-      });
-    } else if (has(text, 'স্পেসিয়াস', 'spacious', 'খোলামেলা', 'বড় করে দেখাও')) {
-      actions.push({
-        kind: 'settings',
-        label: 'UI density → spacious',
-        patch: { density: 'spacious' },
-      });
-    }
-  }
-
   // ── Engine mode ──────────────────────────────────────────────────────────
-  if (has(text, 'মোড', 'mode', 'ইঞ্জিন', 'engine', 'মডেল পাওয়ার')) {
-    if (has(text, 'পাওয়ার', 'power', 'গভীর', 'deep', 'ultra')) {
+  if (
+    (order || has(text, 'ইঞ্জিন মোড', 'engine mode', 'রিজনিং মোড', 'reasoning mode')) &&
+    has(text, 'মোড', 'mode', 'ইঞ্জিন', 'engine', 'মডেল পাওয়ার')
+  ) {
+    if (has(text, 'পাওয়ার', 'গভীর') || /\b(power|deep|ultra)\b/.test(text)) {
       actions.push({ kind: 'settings', label: 'Mode → power', patch: { mode: 'power' } });
-    } else if (has(text, 'ভারসাম্য', 'balanced', 'sonnet')) {
+    } else if (has(text, 'ভারসাম্য') || /\b(balanced|sonnet)\b/.test(text)) {
       actions.push({ kind: 'settings', label: 'Mode → balanced', patch: { mode: 'balanced' } });
-    } else if (has(text, 'দ্রুত', 'fast', 'flash', 'স্পিড')) {
+    } else if (has(text, 'দ্রুত', 'স্পিড') || /\b(fast|flash)\b/.test(text)) {
       actions.push({ kind: 'settings', label: 'Mode → fast', patch: { mode: 'fast' } });
     }
   }
 
-  // ── Answer length (the user's #1 complaint) ──────────────────────────────
+  // ── Answer length (explicit preference orders only — never normal prompts) ─
+  const hasAnswerPrefTarget = has(
+    text,
+    'উত্তর', 'answer', 'answers', 'response', 'responses', 'reply', 'replies', 'স্টাইল', 'style', 'সবসময়', 'সবসময়', 'always'
+  );
   if (
-    has(
-      text,
-      'সংক্ষিপ্ত', 'সংক্ষেপে', 'ছোট উত্তর', 'কম লিখো', 'বেশি লিখো না', 'বেশি লম্বা না',
-      'short', 'brief', 'concise', 'shorter', 'less words', 'to the point'
-    )
+    order &&
+    hasAnswerPrefTarget &&
+    (has(text, 'সংক্ষিপ্ত', 'ছোট উত্তর', 'কম লিখো', 'বেশি লিখো না', 'বেশি লম্বা না') ||
+      /\b(concise|shorter)\b/.test(text) ||
+      /(?:answers?|responses?|replies|style)\s+(?:be\s+|to\s+)?(?:short|brief|concise)/i.test(text))
   ) {
     actions.push({
       kind: 'settings',
@@ -247,7 +232,10 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
       patch: { style: 'concise' },
     });
   } else if (
-    has(text, 'বিস্তারিত', 'বড় উত্তর', 'ডিটেইল', 'detailed', 'in depth', 'elaborate', 'full answer')
+    order &&
+    hasAnswerPrefTarget &&
+    (has(text, 'বিস্তারিত', 'বড় উত্তর', 'ডিটেইল') ||
+      /\b(detailed|elaborate)\b/.test(text))
   ) {
     actions.push({
       kind: 'settings',
@@ -257,12 +245,18 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   }
 
   // ── Reply language ───────────────────────────────────────────────────────
-  if (has(text, 'বাংলায়', 'বাংলা ভাষায়', 'bengali', 'bangla')) {
-    actions.push({ kind: 'settings', label: 'Language → bn', patch: { replyLang: 'bn' } });
-  } else if (has(text, 'ইংরেজিতে', 'english only', 'in english', 'ইংরেজি ভাষায়')) {
-    actions.push({ kind: 'settings', label: 'Language → en', patch: { replyLang: 'en' } });
-  } else if (has(text, 'অটো ভাষা', 'auto language', 'যে ভাষায় লিখি')) {
-    actions.push({ kind: 'settings', label: 'Language → auto', patch: { replyLang: 'auto' } });
+  const hasLangPrefFrame =
+    order &&
+    (has(text, 'ভাষা', 'language', 'সবসময়', 'সবসময়', 'always', 'ডিফল্ট', 'default') ||
+      /(?:উত্তর|reply|respond|speak)\s*(?:দাও|করো|in)/i.test(text));
+  if (hasLangPrefFrame) {
+    if (has(text, 'বাংলায়', 'বাংলা ভাষায়', 'bengali only', 'in bangla', 'in bengali')) {
+      actions.push({ kind: 'settings', label: 'Language → bn', patch: { replyLang: 'bn' } });
+    } else if (has(text, 'ইংরেজিতে', 'english only', 'in english', 'ইংরেজি ভাষায়')) {
+      actions.push({ kind: 'settings', label: 'Language → en', patch: { replyLang: 'en' } });
+    } else if (has(text, 'অটো ভাষা', 'auto language', 'যে ভাষায় লিখি')) {
+      actions.push({ kind: 'settings', label: 'Language → auto', patch: { replyLang: 'auto' } });
+    }
   }
 
   // ── Work persona (specific keywords only — "পার্সোনা" alone is not a mode) ─
@@ -273,27 +267,34 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
     ],
     ['office', ['অফিস মোড', 'office mode', 'ব্যবসায়িক মোড', 'business mode', 'corporate mode']],
     ['content', ['কনটেন্ট মোড', 'content mode', 'মার্কেটিং মোড', 'marketing mode', 'লেখক মোড']],
-    ['academic', ['একাডেমিক', 'academic', 'পড়াশোনা মোড', 'student mode', 'tutor mode']],
-    ['allrounder', ['অলরাউন্ডার', 'allrounder', 'সব কাজের মোড']],
+    ['academic', ['একাডেমিক', 'academic mode', 'পড়াশোনা মোড', 'student mode', 'tutor mode']],
+    ['allrounder', ['অলরাউন্ডার', 'allrounder mode', 'সব কাজের মোড']],
   ];
-  for (const [personaId, words] of PERSONA_MAP) {
-    if (!has(text, ...words)) continue;
-    actions.push({
-      kind: 'settings',
-      label: `Persona → ${personaId}`,
-      patch: { workPersona: personaId },
-    });
-    break;
+  if (order) {
+    for (const [personaId, words] of PERSONA_MAP) {
+      if (!has(text, ...words)) continue;
+      actions.push({
+        kind: 'settings',
+        label: `Persona → ${personaId}`,
+        patch: { workPersona: personaId },
+      });
+      break;
+    }
   }
 
   // ── Creativity / sampling ────────────────────────────────────────────────
-  if (has(text, 'ক্রিয়েটিভ', 'creative', 'কল্পনাপ্রবণ')) {
-    actions.push({ kind: 'settings', label: 'Creativity → creative', patch: { creativity: 'creative' } });
-  } else if (has(text, 'নির্ভুল', 'precise', 'কম ক্রিয়েটিভ', 'deterministic')) {
-    actions.push({ kind: 'settings', label: 'Creativity → precise', patch: { creativity: 'precise' } });
+  if (
+    order &&
+    has(text, 'ক্রিয়েটিভিটি', 'creativity', 'টোন', 'tone', 'স্টাইল', 'style', 'মোড', 'mode', 'উত্তর', 'নিজেকে', 'তোমার')
+  ) {
+    if (has(text, 'ক্রিয়েটিভ', 'creative', 'কল্পনাপ্রবণ')) {
+      actions.push({ kind: 'settings', label: 'Creativity → creative', patch: { creativity: 'creative' } });
+    } else if (has(text, 'নির্ভুল', 'precise', 'কম ক্রিয়েটিভ', 'deterministic')) {
+      actions.push({ kind: 'settings', label: 'Creativity → precise', patch: { creativity: 'precise' } });
+    }
   }
   const tempMatch = text.match(/(?:temperature|তাপমাত্রা|টেম্প)\s*[:=]?\s*([01](?:\.\d+)?)/i);
-  if (tempMatch) {
+  if (tempMatch && order) {
     const v = Number(tempMatch[1]);
     if (Number.isFinite(v)) {
       actions.push({
@@ -315,76 +316,78 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
       actions.push({ kind: 'settings', label: `${label} → ${on ? 'ON' : 'OFF'}`, patch: { [key]: on } as Partial<AppSettings> });
     }
   };
-  if (has(text, 'অটো মেমোরি', 'auto memory', 'মনে রাখা')) {
+  if (order && has(text, 'অটো মেমোরি', 'auto memory')) {
     if (has(text, 'বন্ধ', 'off', 'disable', 'বন্ধ করো')) {
       switchFor(false, 'autoMemory', 'Auto-memory', ['অটো মেমোরি', 'auto memory']);
     } else if (has(text, 'চালু', 'on', 'enable')) {
       switchFor(true, 'autoMemory', 'Auto-memory', ['অটো মেমোরি', 'auto memory']);
     }
   }
-  if (has(text, 'স্মার্ট ফরম্যাট', 'smart formatting', 'সাজসজ্জা')) {
+  if (order && has(text, 'স্মার্ট ফরম্যাট', 'smart formatting')) {
     if (has(text, 'বন্ধ', 'off', 'disable')) {
       switchFor(false, 'smartFormatting', 'Smart formatting', ['স্মার্ট ফরম্যাট', 'smart formatting']);
     } else {
       switchFor(true, 'smartFormatting', 'Smart formatting', ['স্মার্ট ফরম্যাট', 'smart formatting']);
     }
   }
-  if (has(text, 'ভয়েস', 'voice', 'কণ্ঠ')) {
+  if (order && has(text, 'অটো ভয়েস', 'auto voice', 'ভয়েস মোড', 'voice mode')) {
     if (has(text, 'বন্ধ', 'off', 'disable')) {
-      switchFor(false, 'autoVoice', 'Auto voice', ['ভয়েস', 'voice']);
-    } else if (has(text, 'চালু', 'on', 'enable', 'পড়ে শোনাও')) {
-      switchFor(true, 'autoVoice', 'Auto voice', ['ভয়েস', 'voice']);
+      switchFor(false, 'autoVoice', 'Auto voice', ['অটো ভয়েস', 'auto voice', 'ভয়েস মোড', 'voice mode']);
+    } else if (has(text, 'চালু', 'on', 'enable')) {
+      switchFor(true, 'autoVoice', 'Auto voice', ['অটো ভয়েস', 'auto voice', 'ভয়েস মোড', 'voice mode']);
     }
   }
-  if (has(text, 'এন্টার', 'enter')) {
+  if (order && /(?:এন্টার|enter)\s*(?:টু সেন্ড|to send|কী|key)?\s*(?:চালু|বন্ধ|on|off|enable|disable)/i.test(text)) {
     if (has(text, 'বন্ধ', 'off', 'disable', 'নতুন লাইন')) {
       switchFor(false, 'sendOnEnter', 'Enter to send', ['এন্টার', 'enter']);
     } else if (has(text, 'চালু', 'on', 'enable', 'পাঠাও')) {
       switchFor(true, 'sendOnEnter', 'Enter to send', ['এন্টার', 'enter']);
     }
   }
-  if (has(text, 'মনো ফন্ট', 'mono font', 'কোডিং ফন্ট')) {
+  if (order && has(text, 'মনো ফন্ট', 'mono font', 'কোডিং ফন্ট')) {
     if (has(text, 'বন্ধ', 'off', 'disable')) {
-      switchFor(false, 'mono', 'Mono font', ['মনো ফন্ট', 'mono font']);
+      switchFor(false, 'mono', 'Mono font', ['মনো ফন্ট', 'mono font', 'কোডিং ফন্ট']);
     } else {
-      switchFor(true, 'mono', 'Mono font', ['মনো ফন্ট', 'mono font']);
+      switchFor(true, 'mono', 'Mono font', ['মনো ফন্ট', 'mono font', 'কোডিং ফন্ট']);
     }
   }
-  const voiceSpeed = text.match(/(?:ভয়েস স্পিড|voice speed|গতি)\s*[:=]?\s*([0-2](?:\.\d+)?)/i);
-  if (voiceSpeed) {
+  const voiceSpeed = text.match(/(?:ভয়েস স্পিড|voice speed)\s*[:=]?\s*([0-2](?:\.\d+)?)/i);
+  if (voiceSpeed && order) {
     const v = Number(voiceSpeed[1]);
     if (v >= 0.5 && v <= 2) {
       actions.push({ kind: 'settings', label: `Voice speed → ${v}x`, patch: { voiceSpeed: v } });
     }
   }
 
-  // ── Remaining advanced switches (every system is controllable) ───────────
+  // ── Remaining advanced switches ──────────────────────────────────────────
   const genericSwitches: Array<[keyof AppSettings, string, string[]]> = [
-    ['proactiveAuto', 'Proactive suggestions', ['প্রোঅ্যাকটিভ', 'proactive', 'সাজেশন']],
+    ['proactiveAuto', 'Proactive suggestions', ['প্রোঅ্যাকটিভ', 'proactive suggestions']],
     ['fastDecision', 'Fast decision', ['ফাস্ট ডিসিশন', 'fast decision', 'দ্রুত সিদ্ধান্ত']],
-    ['gpuAccel', 'Hardware accel', ['gpu', 'হার্ডওয়্যার', 'hardware accel', 'অ্যাক্সিলারেশন']],
-    ['memoryCache', 'Memory cache', ['মেমোরি ক্যাশ', 'memory cache', 'ক্যাশ']],
+    ['gpuAccel', 'Hardware accel', ['hardware accel', 'হার্ডওয়্যার অ্যাক্সিলারেশন']],
+    ['memoryCache', 'Memory cache', ['মেমোরি ক্যাশ', 'memory cache']],
   ];
-  for (const [key, label, words] of genericSwitches) {
-    if (!has(text, ...words)) continue;
-    if (has(text, 'বন্ধ', 'off', 'disable', 'নিষ্ক্রিয়')) {
-      actions.push({
-        kind: 'settings',
-        label: `${label} → OFF`,
-        patch: { [key]: false } as Partial<AppSettings>,
-      });
-    } else if (has(text, 'চালু', 'on', 'enable', 'সক্রিয়')) {
-      actions.push({
-        kind: 'settings',
-        label: `${label} → ON`,
-        patch: { [key]: true } as Partial<AppSettings>,
-      });
+  if (order) {
+    for (const [key, label, words] of genericSwitches) {
+      if (!has(text, ...words)) continue;
+      if (has(text, 'বন্ধ', 'off', 'disable', 'নিষ্ক্রিয়')) {
+        actions.push({
+          kind: 'settings',
+          label: `${label} → OFF`,
+          patch: { [key]: false } as Partial<AppSettings>,
+        });
+      } else if (has(text, 'চালু', 'on', 'enable', 'সক্রিয়')) {
+        actions.push({
+          kind: 'settings',
+          label: `${label} → ON`,
+          patch: { [key]: true } as Partial<AppSettings>,
+        });
+      }
     }
   }
 
   // ── Custom behaviour instruction ─────────────────────────────────────────
   const customInst = rawText.match(
-    /(?:নির্দেশনা|instruction|custom instruction|নিজের নিয়ম)\s*[:：]\s*([^\n]{3,400})/i
+    /^(?:কাস্টম\s*নির্দেশনা|custom instruction|নিজের নিয়ম)\s*[:：]\s*([^\n]{3,400})/i
   );
   if (customInst) {
     actions.push({
@@ -396,8 +399,9 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
 
   // ── Engine / provider / model ────────────────────────────────────────────
   const providerRequested =
-    has(text, 'প্রোভাইডার', 'provider', 'ইঞ্জিন বদল', 'switch engine', 'engine switch') || order;
-  if (providerRequested || has(text, 'ব্যবহার করো', 'use ')) {
+    has(text, 'প্রোভাইডার', 'provider', 'ইঞ্জিন বদল', 'switch engine', 'engine switch') ||
+    (order && has(text, 'ইঞ্জিন', 'engine', 'মডেল', 'model'));
+  if (providerRequested) {
     for (const [id, aliases] of PROVIDER_ALIASES) {
       if (!has(text, ...aliases)) continue;
       const base = DEFAULT_PROVIDER_BASE_URLS[id] || '';
@@ -414,13 +418,15 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
       break;
     }
   }
-  for (const [modelId, aliases] of MODEL_ALIASES) {
-    if (has(text, ...aliases)) {
-      actions.push({ kind: 'settings', label: `Model → ${modelId}`, patch: { externalModel: modelId } });
-      break;
+  if (order || has(text, 'মডেল', 'model')) {
+    for (const [modelId, aliases] of MODEL_ALIASES) {
+      if (order && has(text, ...aliases)) {
+        actions.push({ kind: 'settings', label: `Model → ${modelId}`, patch: { externalModel: modelId } });
+        break;
+      }
     }
   }
-  const modelQuoted = rawText.match(/model\s*[:=]\s*["'`]?([\w./:-]{3,60})/i);
+  const modelQuoted = rawText.match(/^\s*model\s*[:=]\s*["'`]?([\w./:-]{3,60})\s*$/i);
   if (modelQuoted) {
     actions.push({
       kind: 'settings',
@@ -432,7 +438,7 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   // ── Display name ─────────────────────────────────────────────────────────
   const nameMatch =
     rawText.match(/(?:তোমার|আপনার|নিজের)\s*নাম\s*["'“]?([^\n"”']{2,40}?)["'”']?\s*(?:রাখো|সেট|করো|হবে)/i) ||
-    rawText.match(/(?:your name is|rename yourself to)\s*["'“]?([^\n"”']{2,40})["'”']?/i);
+    rawText.match(/(?:rename yourself to|set your name to)\s*["'“]?([^\n"”']{2,40})["'”']?/i);
   if (nameMatch) {
     actions.push({
       kind: 'settings',
@@ -443,7 +449,7 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
 
   // ── Memory ───────────────────────────────────────────────────────────────
   const remember =
-    rawText.match(/(?:মনে\s*রাখো|মনে রাখুন|remember that|remember:|remember me that)\s*[:：]?\s*([^\n]{2,180})/i);
+    rawText.match(/^(?:মনে\s*রাখো|মনে রাখুন|remember that|remember:|remember me that)\s*[:：]?\s*([^\n]{2,180})/i);
   if (remember) {
     actions.push({
       kind: 'memory',
@@ -459,10 +465,11 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
 
   // ── Autonomy ─────────────────────────────────────────────────────────────
   if (
+    order &&
     has(text, 'সম্পূর্ণ নিয়ন্ত্রণ', 'ফুল কন্ট্রোল', 'full control', 'full autonomy', 'autonomy full')
   ) {
     actions.push({ kind: 'autonomy', label: 'Autonomy → FULL', autonomy: 'full' });
-  } else if (has(text, 'সেফ মোড', 'safe mode', 'safe autonomy', 'জিজ্ঞেস করে')) {
+  } else if (order && has(text, 'সেফ মোড', 'safe mode', 'safe autonomy')) {
     actions.push({ kind: 'autonomy', label: 'Autonomy → SAFE', autonomy: 'safe' });
   }
 
@@ -470,15 +477,14 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
   if (
     has(
       text,
-      'রিপেয়ার', 'repair', 'নিজেকে ঠিক', 'সেল্ফ চেক', 'self check', 'selfcheck', 'health check',
-      'স্বাস্থ্য পরীক্ষা', 'fix yourself', 'সারিয়ে ফেলো'
+      'নিজেকে রিপেয়ার', 'নিজেকে ঠিক', 'সেল্ফ চেক', 'self check', 'selfcheck', 'repair yourself', 'fix yourself', 'সারিয়ে ফেলো'
     )
   ) {
     actions.push({ kind: 'repair', label: 'Self-check & repair' });
   }
 
   // ── Web search ───────────────────────────────────────────────────────────
-  if (has(text, 'ওয়েব সার্চ', 'web search', 'ইন্টারনেট সার্চ', 'গুগল সার্চ')) {
+  if (order && has(text, 'ওয়েব সার্চ', 'web search', 'ইন্টারনেট সার্চ')) {
     if (has(text, 'বন্ধ', 'off', 'disable', 'নিষ্ক্রিয়')) {
       actions.push({ kind: 'launch', label: 'Web search → OFF', webSearch: false });
     } else if (has(text, 'চালু', 'on', 'enable', 'সক্রিয়')) {
@@ -486,18 +492,20 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
     }
   }
 
-  // ── Connectors / launchers ───────────────────────────────────────────────
-  if (has(text, 'drive', 'ড্রাইভ', 'গুগল ড্রাইভ')) {
-    actions.push({ kind: 'connector', label: 'Open Google Drive setup', connector: 'drive' });
-  }
-  if (has(text, 'github', 'গিটহাব')) {
-    actions.push({ kind: 'connector', label: 'Open GitHub setup', connector: 'github' });
-  }
-  if (has(text, 'নোটবুক', 'notebook', 'নোট লিখ')) {
-    actions.push({ kind: 'launch', label: 'Open AI Notebook', connector: 'notebook' });
-  }
-  if (has(text, 'সেটিংস', 'settings', 'কন্ট্রোল সেন্টার', 'control center')) {
-    actions.push({ kind: 'launch', label: 'Open Control Center', connector: 'settings' });
+  // ── Connectors / launchers (must explicitly ask to open/connect/setup) ───
+  if (OPEN_LAUNCH_RX.test(text) && !question) {
+    if (has(text, 'গুগল ড্রাইভ', 'google drive')) {
+      actions.push({ kind: 'connector', label: 'Open Google Drive setup', connector: 'drive' });
+    }
+    if (has(text, 'github', 'গিটহাব')) {
+      actions.push({ kind: 'connector', label: 'Open GitHub setup', connector: 'github' });
+    }
+    if (has(text, 'নোটবুক খোলো', 'open notebook', 'ai notebook')) {
+      actions.push({ kind: 'launch', label: 'Open AI Notebook', connector: 'notebook' });
+    }
+    if (has(text, 'সেটিংস খোলো', 'open settings', 'control center', 'কন্ট্রোল সেন্টার')) {
+      actions.push({ kind: 'launch', label: 'Open Control Center', connector: 'settings' });
+    }
   }
 
   // ── Skill creation ───────────────────────────────────────────────────────
@@ -518,7 +526,7 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
     });
   }
 
-  // Deduplicate identical setting patches (e.g. provider + alias words).
+  // Deduplicate identical setting patches.
   const seen = new Set<string>();
   const unique = actions.filter((a) => {
     const key = `${a.kind}:${a.label}`;
@@ -527,7 +535,6 @@ export function interpretSelfCommand(rawText: string): SelfAction[] {
     return true;
   });
 
-  // A question ("থিম কী?", "কীভাবে মডেল বদলাবো?") must not trigger a change.
   if (question && !order) return unique.filter((a) => a.kind !== 'settings');
   return unique;
 }
@@ -541,24 +548,20 @@ export function isPureSelfCommand(rawText: string, actions: SelfAction[]): boole
   if (!actions.length) return false;
   if (/[?？]/.test(text)) return false;
 
-  // Question words mean the user wants an explanation as well.
-  const hasQuestionWord =
-    /(কী|কি|কেমন|কেন|কোথায়|কীভাবে|কিভাবে|how|what|why|which|where|explain|বুঝিয়ে|জানাও)/i.test(
+  // Question or conversational/content verbs mean the user wants a real AI reply.
+  const hasQuestionOrPromptVerb =
+    /(?:(?<![\u0980-\u09FF])(?:কী|কি|কেমন|কেন|কোথায়|কীভাবে|কিভাবে|বলো|বলেন|বুঝিয়ে|জানাও|লিখো|লেখো|দেখাও|সাহায্য)(?![\u0980-\u09FF])|\bhow\b|\bwhat\b|\bwhy\b|\bwhich\b|\bwhere\b|\bwho\b|\bwhen\b|\bexplain\b|\bdefine\b|\bdescribe\b|\bsay\b|\btell\b|\bspeak\b|\bhello\b|\bhi\b|\bhey\b|\bhelp\b|\bgive\b|\bshow\b|\bcalculate\b|\bsearch\b|\bfind\b)/i.test(
       text
     );
-  if (hasQuestionWord) return false;
+  if (hasQuestionOrPromptVerb) return false;
 
-  // Content generation requests ("বাংলায় একটি গল্প লেখো", "বিস্তারিত রচনা লেখো", "একটি ওয়েবসাইট বানাও")
-  // must always reach the AI model even if they also mention a language/style preference.
+  // Content generation requests must always reach the AI model even if they mention a preference.
   const isContentGenerationRequest =
-    /(গল্প|কবিতা|রচনা|প্রবন্ধ|চিঠি|দরখাস্ত|আর্টিকেল|প্যারাগ্রাফ|ব্লগ|কোড|প্রোগ্রাম|ফাংশন|ওয়েবসাইট|ওয়েবসাইট|অ্যাপ|গেম|পেজ|ডিজাইন|অনুবাদ|সামারি|সারাংশ|ব্যাখ্যা|বিশ্লেষণ|তালিকা|সমাধান|সম্পর্কে|বর্ণনা|প্রশ্ন|উত্তর লেখো|গল্প লেখো|কবিতা লেখো|কোড লেখো|write a|story|poem|essay|article|letter|program|function|website|webpage|translate|summarize|summary|analyze|solve|describe|tell me about)/i.test(
+    /(গল্প|কবিতা|রচনা|প্রবন্ধ|চিঠি|দরখাস্ত|আর্টিকেল|প্যারাগ্রাফ|ব্লগ|কোড|প্রোগ্রাম|ফাংশন|ওয়েবসাইট|ওয়েবসাইট|অ্যাপ|গেম|পেজ|ডিজাইন|অনুবাদ|সামারি|সারাংশ|ব্যাখ্যা|বিশ্লেষণ|তালিকা|সমাধান|সম্পর্কে|বর্ণনা|প্রশ্ন|উত্তর লেখো|\bwrite\b|\bstory\b|\bpoem\b|\bessay\b|\barticle\b|\bletter\b|\bprogram\b|\bfunction\b|\bwebsite\b|\bwebpage\b|\btranslate\b|\bsummarize\b|\bsummary\b|\banalyze\b|\bsolve\b|\bsentence\b|\bparagraph\b)/i.test(
       text
     ) && !/(?:স্কিল|skill)\s*(?:বানাও|তৈরি করো|যোগ করো|create|build|add)/i.test(text);
   if (isContentGenerationRequest) return false;
 
-  if (text.length > 160) return false;
-  const hasActionContent = actions.some(
-    (a) => a.kind === 'connector' ? false : true
-  );
-  return hasActionContent;
+  if (text.length > 120) return false;
+  return actions.some((a) => a.kind !== 'connector');
 }

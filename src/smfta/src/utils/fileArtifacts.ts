@@ -1,4 +1,4 @@
-import { zipSync, strToU8 } from 'fflate';
+import JSZip from 'jszip';
 
 export interface FileArtifactItem {
   id: string;
@@ -9,15 +9,30 @@ export interface FileArtifactItem {
   isStreaming?: boolean;
 }
 
-export const FILE_ARTIFACT_SYSTEM_DIRECTIVE = `FILE & ARTIFACT OUTPUT PROTOCOL (CLAUDE.AI STYLE):
-When the user explicitly asks you to create a plan, document, report, website, code, or project AS A FILE (e.g. ".md file", ".html file", ".json", ".csv", ".py", ".zip", or multiple downloadable files):
-1. Emit each complete file inside an artifact tag:
-<smfta_artifact filename="exact-filename.ext" title="Short Human Title" type="markdown|html|code|json|text">
+export const FILE_ARTIFACT_SYSTEM_DIRECTIVE = `FILE ARTIFACT & AGENT WORKSPACE PROTOCOL (CLAUDE-STYLE):
+When producing code, apps, documents, data tables, charts, or multi-file projects:
+1. For creating or overwriting a complete file, wrap the ENTIRE file in:
+<file path="index.html" type="html">
 ...complete file content...
-</smfta_artifact>
-2. For large documents/plans in .md or full HTML/code files, place the ENTIRE content inside <smfta_artifact> and write only a concise 1–3 sentence summary outside the tag.
-3. If the user asks for a .zip archive or a multi-file project, emit a separate <smfta_artifact filename="path/file.ext" title="..." type="..."> block for every file in the project so the app packages them into a downloadable .zip automatically.
-4. Never truncate file contents or leave placeholders.`;
+</file>
+(Supported types/extensions: .md, .html, .css, .js, .ts, .tsx, .py, .json, .csv, .svg, .txt.)
+2. For targeted edits to an EXISTING workspace file, prefer emitting ONLY the changed parts using:
+<patch path="index.html">
+<find>
+exact existing lines
+</find>
+<replace>
+updated lines
+</replace>
+</patch>
+(You may include multiple <find>...</find><replace>...</replace> pairs inside one <patch>, and use <file_delete path="old-file.ts" /> to delete a file.)
+3. AGENT PLANNING MODE: Before non-trivial multi-file or large coding tasks, emit a concise checklist right at the start of your reply inside:
+<plan>
+- [ ] Inspect requirements and structure
+- [ ] Implement core modules
+- [ ] Wire UI & verify edge cases
+</plan>
+Keep explanations concise outside tags and NEVER truncate or leave '// ... existing code' placeholders inside <file>.`;
 
 function sanitizeArtifactFilename(rawName: string, fallbackExt = 'txt'): string {
   const cleaned = String(rawName || '')
@@ -102,7 +117,25 @@ export function extractFileArtifacts(
     return `\n\n[[SMFTA_ARTIFACT_${idx}]]\n\n`;
   };
 
-  // 1. Closed <smfta_artifact ...>...</smfta_artifact>
+  // 1a. Closed <file path="..." type="...">...</file>
+  working = working.replace(
+    /<file\b([^>]*)>([\s\S]*?)<\/file>/gi,
+    (_full, attrStr: string, inner: string) => {
+      const attrs = parseAttributes(attrStr);
+      const rawType = attrs.type || attrs.lang || 'txt';
+      const fallbackExt = defaultExtForLang(rawType);
+      const filename = sanitizeArtifactFilename(
+        attrs.path || attrs.filename || attrs.name || `file.${fallbackExt}`,
+        fallbackExt
+      );
+      const lang = inferLanguageFromFilenameOrType(filename, rawType);
+      const title = attrs.title || filename;
+      const content = String(inner || '').replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+      return pushArtifact({ filename, title, lang, content, isStreaming: false });
+    }
+  );
+
+  // 1b. Closed <smfta_artifact ...>...</smfta_artifact>
   working = working.replace(
     /<smfta_artifact\b([^>]*)>([\s\S]*?)<\/smfta_artifact>/gi,
     (_full, attrStr: string, inner: string) => {
@@ -120,7 +153,31 @@ export function extractFileArtifacts(
     }
   );
 
-  // 2. Unclosed streaming <smfta_artifact ...>...
+  // 2a. Unclosed streaming <file ...>...
+  working = working.replace(
+    /<file\b([^>]*)>([\s\S]*)$/i,
+    (_full, attrStr: string, inner: string) => {
+      const attrs = parseAttributes(attrStr);
+      const rawType = attrs.type || attrs.lang || 'txt';
+      const fallbackExt = defaultExtForLang(rawType);
+      const filename = sanitizeArtifactFilename(
+        attrs.path || attrs.filename || attrs.name || `file.${fallbackExt}`,
+        fallbackExt
+      );
+      const lang = inferLanguageFromFilenameOrType(filename, rawType);
+      const title = attrs.title || filename;
+      const content = String(inner || '').replace(/^\r?\n/, '');
+      return pushArtifact({
+        filename,
+        title,
+        lang,
+        content,
+        isStreaming: Boolean(options?.isStreaming),
+      });
+    }
+  );
+
+  // 2b. Unclosed streaming <smfta_artifact ...>...
   working = working.replace(
     /<smfta_artifact\b([^>]*)>([\s\S]*)$/i,
     (_full, attrStr: string, inner: string) => {
@@ -203,6 +260,11 @@ export function extractFileArtifacts(
     }
   );
 
+  // 5. Strip partial/incomplete opening tags at the tail of an active stream so raw tags never flash
+  if (options?.isStreaming) {
+    working = working.replace(/<(?:file|smfta_artifact)\b[^>]*$/i, '');
+  }
+
   return {
     artifacts,
     processedText: working.replace(/\n{3,}/g, '\n\n').trim(),
@@ -242,12 +304,12 @@ export function downloadSingleArtifactFile(artifact: {
   URL.revokeObjectURL(url);
 }
 
-export function downloadArtifactsAsZip(
+export async function downloadArtifactsAsZip(
   files: Array<{ filename: string; content: string }>,
   zipName = 'smfta-files.zip'
-): void {
+): Promise<void> {
   if (!files || files.length === 0) return;
-  const entries: Record<string, Uint8Array> = {};
+  const zip = new JSZip();
   const usedNames = new Set<string>();
   for (const f of files) {
     let name = sanitizeArtifactFilename(f.filename, 'txt');
@@ -260,10 +322,9 @@ export function downloadArtifactsAsZip(
       name = `${base}-${counter}${ext}`;
     }
     usedNames.add(name);
-    entries[name] = strToU8(f.content);
+    zip.file(name, f.content ?? '');
   }
-  const zipped = zipSync(entries, { level: 6 });
-  const blob = new Blob([new Uint8Array(zipped)], { type: 'application/zip' });
+  const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

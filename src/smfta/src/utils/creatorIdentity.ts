@@ -79,14 +79,14 @@ const TELEGRAM_HANDLE_RE =
 const SELF_VENDOR_LEAK_PATTERNS: Array<[RegExp, string]> = [
   [
     /\[(?:WhatsApp(?:\s+Now)?|হোয়াটসঅ্যাপ(?:ে\s+যোগাযোগ)?|Contact\s+WhatsApp|যোগাযোগ\s+করুন)[^\]]*\]\(https?:\/\/(?:wa\.me|api\.whatsapp\.com)[^)]*\)/gi,
-    '',
+    WHATSAPP_BUTTON_TOKEN,
   ],
   [
     /\[(?:Telegram(?:\s+Now)?|টেলিগ্রাম(?:ে\s+যোগাযোগ)?|Contact\s+Telegram)[^\]]*\]\(https?:\/\/(?:t\.me|telegram\.me)\/saymon_bd[^)]*\)/gi,
-    '',
+    TELEGRAM_BUTTON_TOKEN,
   ],
-  [RAW_PHONE_RE, ''],
-  [TELEGRAM_HANDLE_RE, ''],
+  [RAW_PHONE_RE, WHATSAPP_BUTTON_TOKEN],
+  [TELEGRAM_HANDLE_RE, TELEGRAM_BUTTON_TOKEN],
   [
     /(?:আমাকে|এই\s*(?:সিস্টেমটি|এআইটি|মডেলটি))\s+(?:OpenAI|ওপেনএআই|Google|গুগল|Gemini|জেমিনি|Anthropic|অ্যানথ্রপিক|Claude|ক্লড|Meta|মেটা|DeepSeek|ডিপসিক|Mistral|Microsoft|মাইক্রোসোফট|Pollinations|Xrahat)\s*(?:তৈরি\s*করেছে|বানিয়েছে|বানিয়েছে|ডেভেলপ\s*করেছে|দ্বারা\s*তৈরি|কর্তৃক\s*নির্মিত)/gi,
     `আমাকে **${CREATOR_NAME}** (**SMFTA AI Pro** প্ল্যাটফর্ম) তৈরি করেছেন`,

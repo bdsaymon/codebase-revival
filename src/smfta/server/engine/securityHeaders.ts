@@ -64,7 +64,12 @@ export const HSTS_VALUE = 'max-age=63072000; includeSubDomains';
 
 const CSP_BASE_DIRECTIVES: Readonly<Record<string, string[]>> = Object.freeze({
   'default-src': ["'self'"],
-  'script-src': ["'self'", 'https://accounts.google.com'],
+  'script-src': [
+    "'self'",
+    'https://accounts.google.com',
+    'https://cdn.jsdelivr.net',
+    'https://cdn.tailwindcss.com',
+  ],
   'style-src': [
     "'self'",
     "'unsafe-inline'",
@@ -78,7 +83,7 @@ const CSP_BASE_DIRECTIVES: Readonly<Record<string, string[]>> = Object.freeze({
   'connect-src': ["'self'", 'https:', 'data:', 'blob:'],
   // blob: is required: Live Preview and Code Workspace render blob: iframes.
   'frame-src': ["'self'", 'blob:', 'https://accounts.google.com'],
-  'worker-src': ["'self'", 'blob:'],
+  'worker-src': ["'self'", 'blob:', 'https://cdn.jsdelivr.net'],
   'media-src': ["'self'", 'blob:', 'data:'],
   'manifest-src': ["'self'"],
   'object-src': ["'none'"],

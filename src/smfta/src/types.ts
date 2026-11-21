@@ -171,6 +171,7 @@ export interface ChatMessageTiming {
 export interface MessageFeedback {
   rating: 'up' | 'down';
   reason?: string;
+  createdAt?: number;
   updatedAt: number;
 }
 
@@ -548,7 +549,7 @@ export interface AppSettings {
   trainingData?: string;
   // 2. Thinking Algorithm (Fast Decision Logic)
   fastDecision?: boolean;
-  thinkingMode?: 'off' | 'low' | 'medium' | 'high';
+  thinkingMode?: ThinkingEffortLevel;
   liveThinkingSummary?: boolean;
   // 3. Hardware Interface (GPU/CPU Speed Optimization)
   gpuAccel?: boolean;
@@ -644,7 +645,7 @@ export interface AppSettings {
   /** Global instructions (max 3000 chars) applied to every chat */
   globalInstructions?: string;
   /** Response style preset */
-  responseStyle?: 'normal' | 'concise' | 'explanatory' | 'formal' | 'custom';
+  responseStyle?: ResponseStylePreset;
   /** Optional user writing sample when custom style is active */
   customStyleSample?: string;
   /** Allow searching older chats when building context */
@@ -677,9 +678,11 @@ export interface AppSettings {
   simpleEntryPasscode?: string;
 }
 
+export type ResponseStylePreset =
+  | 'normal'
+  | 'concise'
+  | 'explanatory'
+  | 'formal'
+  | 'custom';
 
-
-
-
-export type ThinkingEffortLevel = NonNullable<AppSettings['thinkingMode']> | 'auto';
-export type ResponseStylePreset = NonNullable<AppSettings['responseStyle']>;
+export type ThinkingEffortLevel = 'off' | 'low' | 'medium' | 'high' | 'auto';

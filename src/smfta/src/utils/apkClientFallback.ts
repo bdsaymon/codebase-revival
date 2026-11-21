@@ -163,79 +163,14 @@ export async function runStandaloneClientSideAI(params: {
     params.systemPrompt ||
     `You are ${activeSystemName}, an intelligent, fast bilingual AI assistant. Reply naturally, clearly, and completely in the same language as the user (Bengali or English) once without duplicate translations. ${modeRule}${webBoundaryRule}\n\n${buildCreatorAndSecurityDirective(activeSystemName)}\n\n${FILE_ARTIFACT_SYSTEM_DIRECTIVE}\n\nWhenever the user asks you to update yourself, change your theme ("dark"|"light"), accent color ("indigo"|"emerald"|"rose"|"amber"|"sky"), font size ("small"|"normal"|"large"), mode ("fast"|"balanced"|"power"), style ("concise"|"detailed"), replyLang ("auto"|"bn"|"en"), customCss, customInst, or add/create a live widget/tool inside yourself, reply helpfully AND append a valid JSON block at the very end wrapped in ⟦SELF_UPDATE⟧{"theme":"dark","accent":"emerald","fontsize":"large","mode":"power","customCss":"...","widget":{"title":"Tool Name","description":"Short desc","code":"<!DOCTYPE html>...complete interactive HTML/CSS/JS..."},"summary":"What you updated"}⟦/SELF_UPDATE⟧ (include only keys being changed). When the user shares a personal fact, append ⟦MEMORY: concise fact⟧ at the end.`;
 
-  // 1. Keyless Default Unlimited Profile (Fast Real-Time SSE Streaming)
+  // 1. No silent keyless third-party proxies allowed: fail honestly if key missing
   if (
     (provider === 'xrahat' || provider === 'smfta_cloud') &&
     !apiKey
   ) {
-    const recentMsgs = params.messages.slice(-10).map((m) => ({
-      role: m.role === 'user' ? 'user' : 'assistant',
-      content: m.text || 'Hello',
-    }));
-
-    try {
-      const fastCtrl = new AbortController();
-      const timer = window.setTimeout(() => fastCtrl.abort(), 5500);
-      const onAbort = () => fastCtrl.abort();
-      params.signal?.addEventListener('abort', onAbort, { once: true });
-
-      try {
-        const res = await fetch('https://text.pollinations.ai/openai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'openai-fast',
-            messages: [
-              { role: 'system', content: sysInstruction },
-              ...recentMsgs,
-            ],
-            stream: Boolean(params.onDelta),
-          }),
-          signal: fastCtrl.signal,
-        });
-        window.clearTimeout(timer);
-        if (res.ok) {
-          const text = await consumeOpenAISseStream(res, params.onDelta);
-          if (text.trim()) return text.trim();
-        }
-      } finally {
-        window.clearTimeout(timer);
-        params.signal?.removeEventListener('abort', onAbort);
-      }
-    } catch {
-      if (params.signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError');
-      }
-    }
-
-    const lastUser =
-      [...recentMsgs].reverse().find((m) => m.role === 'user')?.content ||
-      'Hello';
-    const query = new URLSearchParams({
-      text: `${sysInstruction}\n\nUser: ${lastUser.slice(0, 2000)}`,
-      uid: 'smfta-apk',
-      stream: params.onDelta ? '1' : '0',
-    });
-    const backupRes = await fetch(
-      `https://xrahat-worm-ai.vercel.app/api/chat?${query.toString()}`,
-      { signal: params.signal }
+    throw new Error(
+      'Integration required: Connect to the app server with GEMINI_API_KEY configured, or configure an OpenAI/Anthropic API key in Settings > Providers.'
     );
-    if (!backupRes.ok) {
-      throw new Error(`HTTP ${backupRes.status}`);
-    }
-    if (params.onDelta && backupRes.body) {
-      const text = await consumeOpenAISseStream(backupRes, params.onDelta);
-      if (text.trim()) return text.trim();
-    }
-    const backupJson = await backupRes.json().catch(() => null);
-    const backupText = sanitizeProprietaryOutput(
-      String(backupJson?.reply || backupJson?.text || '').trim()
-    );
-    if (!backupText) {
-      throw new Error('Empty response from keyless engine');
-    }
-    params.onDelta?.(backupText);
-    return backupText;
   }
 
   // Canonical endpoint resolution shared with web server (P1-02)
@@ -253,7 +188,7 @@ export async function runStandaloneClientSideAI(params: {
       throw new Error('Gemini API key is missing. Add your key in AI Providers.');
     }
     const geminiModel =
-      model.startsWith('gemini-') ? model : 'gemini-3.8-flash';
+      model.startsWith('gemini-') ? model : 'gemini-4-hydrogen';
 
     let lastGemError: Error | null = null;
     for (const candidateKey of keyPool) {

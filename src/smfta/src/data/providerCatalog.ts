@@ -59,7 +59,7 @@ export const PRIMARY_PROVIDER_OPTIONS: Array<{
   defaultModel: string;
 }> = [
   { id: 'mercury', label: 'Mercury', short: 'Mercury', defaultModel: 'mercury-3' },
-  { id: 'gemini_custom', label: 'Gemini', short: 'Gemini', defaultModel: 'gemini-3.8-flash' },
+  { id: 'gemini_custom', label: 'Gemini', short: 'Gemini', defaultModel: 'gemini-4-hydrogen' },
   { id: 'openai', label: 'OpenAI', short: 'OpenAI', defaultModel: 'gpt-4o-mini' },
   { id: 'anthropic', label: 'Anthropic', short: 'Anthropic', defaultModel: 'claude-sonnet-4-20250514' },
   { id: 'deepseek', label: 'DeepSeek', short: 'DeepSeek', defaultModel: 'deepseek-chat' },

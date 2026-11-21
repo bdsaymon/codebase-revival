@@ -22,7 +22,6 @@ import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
 import {
   deriveInitialThinkingTopic,
   formatThinkingParagraphs,
-  formatThinkingTimerLabel,
   toBengaliDigits,
 } from '../utils/thinking';
 import { isPreviewableLanguage } from './ClaudeArtifactPanel';
@@ -41,6 +40,7 @@ import {
   WHATSAPP_BUTTON_TOKEN,
   getCreatorWhatsAppUrl,
 } from '../utils/creatorIdentity';
+import { extractAgentOperations } from '../services/patchEngine';
 
 interface InteractiveMessageContentProps {
   messageId: string;
@@ -88,7 +88,6 @@ interface InteractiveMessageContentProps {
   autoCollapseThinking?: boolean;
   /** Whether Thinking mode is enabled for the active AI turn. */
   thinkingEnabled?: boolean;
-  hideThinkingDetails?: boolean;
 }
 
 
@@ -627,12 +626,193 @@ const CODE_EXTS: Record<string, string> = {
   bash: 'sh',
 };
 
-export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps> = ({
+interface ThinkingAccordionProps {
+  thinkingText: string;
+  thinkingDurationSec?: number;
+  isReasoningNow: boolean;
+  isStreaming: boolean;
+  hasAnswerStarted: boolean;
+  liveThinkingSummary: boolean;
+  showThinkingTopic: boolean;
+  autoCollapseThinking: boolean;
+  thinkingSubject: string;
+  preferBengali: boolean;
+}
+
+const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
+  thinkingText,
+  thinkingDurationSec,
+  isReasoningNow,
+  isStreaming,
+  hasAnswerStarted,
+  liveThinkingSummary,
+  showThinkingTopic,
+  autoCollapseThinking,
+  thinkingSubject,
+  preferBengali,
+}) => {
+  const startRef = useRef<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [liveSec, setLiveSec] = useState<number>(0);
+  const [measuredSec, setMeasuredSec] = useState<number | undefined>(thinkingDurationSec);
+  const [userToggled, setUserToggled] = useState<boolean | null>(null);
+  const manualToggleRef = useRef<boolean>(false);
+
+  const activelyThinking = isReasoningNow || (isStreaming && !hasAnswerStarted);
+
+  // Calm 1s timer isolated solely inside this leaf component (never re-renders code blocks)
+  useEffect(() => {
+    if (activelyThinking) {
+      if (startRef.current === null) {
+        startRef.current = Date.now();
+      }
+      const update = () => {
+        if (startRef.current !== null) {
+          setLiveSec(Math.max(0, Math.floor((Date.now() - startRef.current) / 1000)));
+        }
+      };
+      update();
+      const id = window.setInterval(update, 1000);
+      return () => window.clearInterval(id);
+    } else if (startRef.current !== null) {
+      const finalSec = Math.max(1, Math.round((Date.now() - startRef.current) / 1000));
+      setMeasuredSec(finalSec);
+      startRef.current = null;
+      if (!manualToggleRef.current) {
+        setUserToggled(false);
+      }
+    }
+  }, [activelyThinking]);
+
+  // Auto-collapse once the answer begins streaming unless user explicitly expanded it
+  useEffect(() => {
+    if (hasAnswerStarted && !manualToggleRef.current) {
+      setUserToggled(false);
+    }
+  }, [hasAnswerStarted]);
+
+  const effectiveSec = activelyThinking
+    ? liveSec
+    : thinkingDurationSec ?? measuredSec ?? estimateThinkingSeconds(thinkingText, measuredSec);
+
+  const isExpanded =
+    userToggled !== null
+      ? userToggled
+      : activelyThinking
+        ? liveThinkingSummary !== false
+        : autoCollapseThinking === false && liveThinkingSummary !== false;
+
+  useEffect(() => {
+    if (isExpanded && activelyThinking && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [thinkingText, isExpanded, activelyThinking]);
+
+  const parsedSteps = React.useMemo(
+    () => (isExpanded && thinkingText ? formatThinkingParagraphs(thinkingText) : []),
+    [isExpanded, thinkingText]
+  );
+
+  const labelText = activelyThinking
+    ? preferBengali
+      ? effectiveSec > 0
+        ? `ভাবছি · ${toBengaliDigits(effectiveSec)} সে.`
+        : 'ভাবছি…'
+      : effectiveSec > 0
+        ? `Thinking · ${effectiveSec}s`
+        : 'Thinking…'
+    : preferBengali
+      ? `${toBengaliDigits(Math.max(1, Math.round(effectiveSec)))} সেকেন্ড ভেবেছে`
+      : `Thought for ${Math.max(1, Math.round(effectiveSec))}s`;
+
+  return (
+    <div data-testid="thinking-accordion" className="mt-0 mb-2.5 select-none">
+      <button
+        type="button"
+        data-testid="thinking-accordion-toggle"
+        aria-expanded={isExpanded}
+        onClick={() => {
+          manualToggleRef.current = true;
+          setUserToggled(!isExpanded);
+        }}
+        className="group inline-flex max-w-full items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[12.5px] font-medium text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]/70 transition-colors cursor-pointer text-left"
+      >
+        <Brain
+          className={`w-3.5 h-3.5 shrink-0 ${
+            activelyThinking
+              ? 'text-[var(--primary)] animate-pulse'
+              : 'text-[var(--ink-dim)] group-hover:text-[var(--ink)]'
+          }`}
+        />
+
+        <div
+          data-testid="thinking-accordion-headline"
+          className="flex items-center gap-1.5 min-w-0"
+        >
+          <span
+            className={`font-medium shrink-0 ${
+              activelyThinking
+                ? 'text-[var(--ink)]'
+                : 'text-[var(--ink-dim)] group-hover:text-[var(--ink)]'
+            }`}
+          >
+            {labelText}
+          </span>
+
+          {showThinkingTopic && thinkingSubject && thinkingSubject !== 'আপনার প্রশ্ন' && (
+            <span
+              data-testid="thinking-subject-label"
+              className="text-[12px] text-[var(--ink-dim)]/80 truncate max-w-[200px] sm:max-w-[300px]"
+            >
+              · {thinkingSubject}
+            </span>
+          )}
+        </div>
+
+        <ChevronRight
+          className={`w-3.5 h-3.5 shrink-0 text-[var(--ink-dim)] group-hover:text-[var(--ink)] transition-transform duration-150 ${
+            isExpanded ? 'rotate-90' : ''
+          }`}
+        />
+      </button>
+
+      {isExpanded && (
+        <div
+          ref={scrollRef}
+          data-testid="thinking-accordion-content"
+          className="mt-1 ml-2 pl-3 py-1 border-l-2 border-[var(--border)] max-h-56 overflow-y-auto space-y-2 select-text"
+        >
+          {parsedSteps.length > 0 ? (
+            parsedSteps.map((step, sIdx) => (
+              <div key={sIdx} className="space-y-0.5">
+                {step.title && (
+                  <div className="text-[12px] font-semibold text-[var(--ink)]/90 leading-snug">
+                    {step.title}
+                  </div>
+                )}
+                {step.body && (
+                  <div className="text-[12px] leading-[1.6] text-[var(--ink-dim)] font-normal whitespace-pre-line">
+                    {step.body}
+                  </div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="text-[12px] text-[var(--ink-dim)] italic">
+              {preferBengali ? 'চিন্তা বিশ্লেষণ হচ্ছে…' : 'Reasoning…'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> = ({
   messageId,
   text,
   thinking,
   thinkingDurationSec,
-  statusSteps = [],
   liveThinkingSummary = true,
   isStreaming = false,
   proactiveSuggestions = [],
@@ -641,17 +821,13 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   onDismissSuggestion,
   onAcceptSuggestion,
   onOpenCodeLab,
-  onInstallSelfWidget,
   onToast,
-  onOpenLivePreview,
-  onOpenCodeWorkspace,
   renderMarkdown = true,
   highlightCode = true,
   userPromptPreview = '',
   showThinkingTopic = true,
-  autoCollapseThinking = false,
+  autoCollapseThinking = true,
   thinkingEnabled = true,
-  hideThinkingDetails = false,
 }) => {
   const [activeBlockIdx, setActiveBlockIdx] = useState<number | null>(null);
   const [selectedSnippet, setSelectedSnippet] = useState<string>('');
@@ -662,152 +838,60 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
   const [isRewriting, setIsRewriting] = useState<boolean>(false);
   const [directEditIdx, setDirectEditIdx] = useState<number | null>(null);
   const [directEditValue, setDirectEditValue] = useState<string>('');
-  const [openHtmlPreviews, setOpenHtmlPreviews] = useState<Record<number, boolean>>({});
-  const [expandedCodeBlocks, setExpandedCodeBlocks] = useState<Record<number, boolean>>({});
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
   const [showRevisions, setShowRevisions] = useState<boolean>(false);
 
-  const { thinkingText, cleanResponse, isThinkingActive } = extractThinkingAndResponse(
-    text,
-    thinking
+  const { thinkingText, cleanResponse, isThinkingActive } = React.useMemo(
+    () => extractThinkingAndResponse(text, thinking),
+    [text, thinking]
   );
 
   const hasAnswerStarted = Boolean(cleanResponse.trim().length > 0);
   const isReasoningNow = Boolean(
     isThinkingActive ||
-      (isStreaming &&
-        (!hasAnswerStarted || statusSteps.length > 0) &&
-        (Boolean(thinkingText) || thinkingEnabled !== false))
+      (isStreaming && !hasAnswerStarted && thinkingEnabled !== false)
   );
-  const showInlineThinkingCard = !hideThinkingDetails && Boolean(
-    thinkingText ||
+  const showInlineThinkingCard = Boolean(
+    thinkingText.trim() ||
       isThinkingActive ||
-      (isStreaming && (thinkingEnabled !== false || statusSteps.length > 0))
+      (isStreaming && !hasAnswerStarted && thinkingEnabled !== false)
   );
-  const thinkingStartRef = useRef<number | null>(null);
-  const thinkingScrollRef = useRef<HTMLDivElement | null>(null);
-  const [liveElapsedMs, setLiveElapsedMs] = useState<number>(100);
-  const [measuredThinkSec, setMeasuredThinkSec] = useState<number | undefined>(
-    thinkingDurationSec
-  );
-  const [userToggledThinking, setUserToggledThinking] = useState<boolean | null>(
-    null
-  );
-  const userManualToggleRef = useRef<boolean>(false);
 
-  // Groq AI style 100ms precision timer while reasoning/streaming is active
-  useEffect(() => {
-    if (isReasoningNow || (isStreaming && showInlineThinkingCard)) {
-      if (thinkingStartRef.current === null) {
-        thinkingStartRef.current = Date.now();
-      }
-      const tick = () => {
-        if (thinkingStartRef.current !== null) {
-          setLiveElapsedMs(
-            Math.max(100, Date.now() - thinkingStartRef.current)
-          );
-        }
-      };
-      tick();
-      const interval = setInterval(tick, 100);
-      return () => clearInterval(interval);
-    } else if (thinkingStartRef.current !== null) {
-      const elapsedSec = Math.max(
-        0.2,
-        Math.round((Date.now() - thinkingStartRef.current) / 100) / 10
-      );
-      setMeasuredThinkSec(elapsedSec);
-      thinkingStartRef.current = null;
-      if (!userManualToggleRef.current && autoCollapseThinking === true) {
-        setUserToggledThinking(false);
-      }
+  const preferBengali = React.useMemo(
+    () => /[\u0980-\u09FF]/.test(`${userPromptPreview} ${thinkingText}`),
+    [userPromptPreview, thinkingText]
+  );
+
+  const thinkingSubject = React.useMemo(() => {
+    const rawThoughtTopic = thinkingText ? extractThinkingTopic(thinkingText) : '';
+    const initialPromptTopic = userPromptPreview
+      ? deriveInitialThinkingTopic(userPromptPreview)
+      : '';
+    if (initialPromptTopic && initialPromptTopic !== 'আপনার প্রশ্ন') {
+      return initialPromptTopic;
     }
-  }, [isReasoningNow, isStreaming, showInlineThinkingCard, autoCollapseThinking]);
-
-  const liveElapsedSec = Math.max(0.1, Math.round(liveElapsedMs / 100) / 10);
-
-  const effectiveDurationSec =
-    isReasoningNow || isStreaming
-      ? liveElapsedSec
-      : thinkingDurationSec ??
-        measuredThinkSec ??
-        estimateThinkingSeconds(thinkingText, measuredThinkSec);
-
-  const formattedGroqSeconds =
-    effectiveDurationSec < 10 && !Number.isInteger(effectiveDurationSec)
-      ? effectiveDurationSec.toFixed(1)
-      : String(Math.max(1, Math.round(effectiveDurationSec)));
-
-  const isThinkingExpanded =
-    userToggledThinking !== null
-      ? userToggledThinking
-      : isReasoningNow || isStreaming
-        ? liveThinkingSummary !== false
-        : autoCollapseThinking === true
-          ? false
-          : liveThinkingSummary !== false;
-
-  // Auto-scroll reasoning stream while thoughts are streaming in (Groq AI style)
-  useEffect(() => {
-    if (isThinkingExpanded && (isReasoningNow || isStreaming) && thinkingScrollRef.current) {
-      thinkingScrollRef.current.scrollTop = thinkingScrollRef.current.scrollHeight;
+    if (rawThoughtTopic && rawThoughtTopic !== 'Analyzing request') {
+      return rawThoughtTopic;
     }
-  }, [thinkingText, statusSteps.length, isThinkingExpanded, isReasoningNow, isStreaming]);
+    return '';
+  }, [thinkingText, userPromptPreview]);
 
-  const rawThoughtTopic = thinkingText ? extractThinkingTopic(thinkingText) : '';
-  const initialPromptTopic = userPromptPreview
-    ? deriveInitialThinkingTopic(userPromptPreview)
-    : '';
-  const thinkingSubject =
-    initialPromptTopic && initialPromptTopic !== 'আপনার প্রশ্ন'
-      ? initialPromptTopic
-      : rawThoughtTopic && rawThoughtTopic !== 'Analyzing request'
-        ? rawThoughtTopic
-        : 'আপনার প্রশ্ন';
+  const { artifacts, processedText } = React.useMemo(() => {
+    const agentOps = extractAgentOperations(cleanResponse, { isStreaming });
+    return extractFileArtifacts(agentOps.cleanedDisplayText, { isStreaming });
+  }, [cleanResponse, isStreaming]);
 
-  const thinkingHeadline = formatThinkingTimerLabel(
-    Math.max(1, Math.round(effectiveDurationSec)),
-    !(isReasoningNow || isStreaming)
-  );
-
-  const isWebCodeLang = (lang?: string): boolean => {
-    const l = (lang || '').toLowerCase().trim();
-    return [
-      'html',
-      'htm',
-      'xml',
-      'svg',
-      'css',
-      'scss',
-      'less',
-      'javascript',
-      'js',
-      'mjs',
-      'typescript',
-      'ts',
-      'jsx',
-      'tsx',
-      'react',
-    ].includes(l);
-  };
-
-  const { artifacts, processedText } = extractFileArtifacts(cleanResponse, {
-    isStreaming,
-  });
-
-  const normalizedForBlocks = (processedText || '')
-    .replace(
-      /(\[\[SMFTA_CONTACT_BUTTONS\]\]|\[\[WHATSAPP_NOW\]\]|\[\[TELEGRAM_NOW\]\])/g,
-      ''
-    )
-    .trim();
-
-  // v18.11 — markdown off: keep the raw text as one plain block (code fences
-  // are displayed literally, exactly as the model wrote them).
-  const blocks: ParsedBlock[] =
-    renderMarkdown === false
+  const blocks: ParsedBlock[] = React.useMemo(() => {
+    const normalizedForBlocks = (processedText || '')
+      .replace(
+        /(\[\[SMFTA_CONTACT_BUTTONS\]\]|\[\[WHATSAPP_NOW\]\]|\[\[TELEGRAM_NOW\]\])/g,
+        ''
+      )
+      .trim();
+    return renderMarkdown === false
       ? [{ type: 'text', content: processedText || cleanResponse }]
       : parseBlocks(normalizedForBlocks);
+  }, [processedText, cleanResponse, renderMarkdown]);
 
   const handleOpenInlineEditor = (idx: number, blockContent: string) => {
     if (isStreaming) return;
@@ -973,121 +1057,19 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
 
   return (
     <div className="msg-prose space-y-1.5 text-[var(--text)]">
-      {/* Groq AI Style Inline Thinking Stream — directly inside the AI response turn */}
       {showInlineThinkingCard && (
-        <div
-          data-testid="thinking-accordion"
-          className="mt-0 mb-2.5 select-none"
-        >
-          <button
-            type="button"
-            data-testid="thinking-accordion-toggle"
-            aria-expanded={isThinkingExpanded}
-            onClick={() => {
-              userManualToggleRef.current = true;
-              setUserToggledThinking(!isThinkingExpanded);
-            }}
-            className="group inline-flex max-w-full items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[13px] font-medium text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]/70 transition-colors cursor-pointer text-left"
-          >
-            <span
-              className={`relative inline-flex items-center justify-center w-4 h-4 rounded shrink-0 transition-colors ${
-                isReasoningNow || isStreaming
-                  ? 'text-[var(--primary)]'
-                  : 'text-[var(--ink-dim)] group-hover:text-[var(--ink)]'
-              }`}
-            >
-              <Brain
-                className={`w-3.5 h-3.5 ${
-                  isReasoningNow || isStreaming ? 'animate-pulse' : ''
-                }`}
-              />
-            </span>
-
-            <div
-              data-testid="thinking-accordion-headline"
-              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0"
-            >
-              <span
-                className={`font-semibold tracking-[-0.01em] shrink-0 ${
-                  isReasoningNow || isStreaming
-                    ? 'text-[var(--primary)] animate-pulse'
-                    : 'text-[var(--ink)]/90 group-hover:text-[var(--ink)]'
-                }`}
-              >
-                {isReasoningNow || isStreaming
-                  ? `Thinking... ${formattedGroqSeconds}s`
-                  : `Thought for ${formattedGroqSeconds}s`}
-              </span>
-
-              {showThinkingTopic !== false && (
-                <span
-                  data-testid="thinking-subject-label"
-                  className="text-[12.5px] font-medium text-[var(--ink-dim)] truncate max-w-[200px] sm:max-w-[320px]"
-                >
-                  · {thinkingSubject}
-                </span>
-              )}
-
-              <span className="text-[11.5px] text-[var(--text-3)] shrink-0 hidden sm:inline">
-                ({isReasoningNow || isStreaming ? 'চিন্তা করছি…' : thinkingHeadline})
-              </span>
-            </div>
-
-            <ChevronRight
-              className={`w-3.5 h-3.5 shrink-0 text-[var(--ink-dim)] group-hover:text-[var(--ink)] transition-transform duration-150 ${
-                isThinkingExpanded ? 'rotate-90' : ''
-              }`}
-            />
-          </button>
-
-          {isThinkingExpanded && (
-            <div
-              ref={thinkingScrollRef}
-              data-testid="thinking-accordion-content"
-              className="mt-1 ml-2 pl-3.5 py-1 border-l-2 border-[var(--primary)]/40 dark:border-[var(--primary)]/50 max-h-64 overflow-y-auto space-y-2 select-text"
-            >
-              {showThinkingTopic !== false && thinkingSubject && (
-                <div
-                  data-testid="thinking-topic-banner"
-                  className="text-[12px] font-medium text-[var(--ink-dim)] flex items-center gap-1.5"
-                >
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--primary)]/70 shrink-0" />
-                  <span>বিষয়: {thinkingSubject}</span>
-                </div>
-              )}
-              {thinkingText ? (
-                formatThinkingParagraphs(thinkingText).map((step, sIdx, arr) => (
-                  <div key={sIdx} className="space-y-0.5">
-                    {step.title && (
-                      <div className="text-[12.5px] font-semibold text-[var(--ink)]/90 leading-snug">
-                        {step.title}
-                      </div>
-                    )}
-                    {step.body && (
-                      <div className="text-[12.5px] leading-[1.65] text-[var(--ink-dim)] font-normal whitespace-pre-line">
-                        {step.body}
-                        {(isReasoningNow || isStreaming) && sIdx === arr.length - 1 && (
-                          <span
-                            aria-hidden="true"
-                            className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-[var(--primary)]/75 animate-pulse rounded-xs"
-                          />
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div className="text-[12.5px] text-[var(--ink-dim)] italic flex items-center gap-1.5">
-                  <span>{thinkingSubject} বিশ্লেষণ করে উত্তরের রূপরেখা তৈরি হচ্ছে…</span>
-                  <span
-                    aria-hidden="true"
-                    className="inline-block w-1.5 h-3.5 bg-[var(--primary)]/75 animate-pulse rounded-xs"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        <ThinkingAccordion
+          thinkingText={thinkingText}
+          thinkingDurationSec={thinkingDurationSec}
+          isReasoningNow={isReasoningNow}
+          isStreaming={isStreaming}
+          hasAnswerStarted={hasAnswerStarted}
+          liveThinkingSummary={liveThinkingSummary !== false}
+          showThinkingTopic={showThinkingTopic !== false}
+          autoCollapseThinking={autoCollapseThinking !== false}
+          thinkingSubject={thinkingSubject}
+          preferBengali={preferBengali}
+        />
       )}
 
       {/* Proactive Suggestions Banner if AI found inline improvements */}
@@ -1277,7 +1259,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                         Interactive {lang.toUpperCase()} Live Preview
                       </span>
                       <span className="block text-[11.5px] text-[var(--ink-dim)]">
-                        পাশাপাশি লাইভ প্রিভিউ ও কোড দেখতে ক্লিক করুন
+                        {preferBengali ? 'লাইভ প্রিভিউ ও কোড খুলতে ক্লিক করুন' : 'Click to open Live Preview & Code Editor'}
                       </span>
                     </span>
                   </span>
@@ -1306,32 +1288,21 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
             <div
               key={`art-${idx}-${art.id}`}
               data-testid="claude-file-artifact-card"
-              onClick={() =>
-                onOpenCodeLab(
-                  art.content,
-                  art.lang,
-                  art.filename,
-                  art.title,
-                  artifacts
-                )
-              }
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+              className="my-2.5 w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-2 transition-colors overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() =>
                   onOpenCodeLab(
                     art.content,
                     art.lang,
                     art.filename,
                     art.title,
                     artifacts
-                  );
+                  )
                 }
-              }}
-              className="my-2.5 w-full max-w-md px-3.5 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-3 min-w-0">
+                className="flex-1 min-w-0 px-3.5 py-3 flex items-center gap-3 text-left cursor-pointer"
+              >
                 <span className="w-9 h-9 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
                   {isMd ? (
                     <FileText className="w-4 h-4" />
@@ -1339,30 +1310,30 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                     <Code2 className="w-4 h-4" />
                   )}
                 </span>
-                <div className="min-w-0">
-                  <div className="text-[13.5px] font-medium text-[var(--ink)] truncate">
-                    {art.title || art.filename}
-                  </div>
-                  <div className="text-[11.5px] text-[var(--ink-dim)] truncate font-mono">
+                <span className="min-w-0 block">
+                  <span className="block text-[13.5px] font-medium text-[var(--ink)] truncate">
                     {art.isStreaming
                       ? `Writing ${art.filename}…`
-                      : `${art.filename} · ${extBadge} · ${formatArtifactSize(art.content)}`}
-                  </div>
-                </div>
-              </div>
+                      : `${art.filename}, created`}
+                  </span>
+                  <span className="block text-[11.5px] text-[var(--ink-dim)] truncate font-mono">
+                    {art.title && art.title !== art.filename ? `${art.title} · ` : ''}
+                    {extBadge} · {formatArtifactSize(art.content)}
+                  </span>
+                </span>
+              </button>
 
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-1 pr-2.5 shrink-0">
                 <button
                   type="button"
                   data-testid="artifact-card-download-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     downloadSingleArtifactFile({
                       filename: art.filename,
                       lang: art.lang,
                       content: art.content,
                     });
-                    onToast(`ডাউনলোড হয়েছে: ${art.filename}`);
+                    onToast(`Downloaded ${art.filename}`);
                   }}
                   className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer"
                   title={`Download ${art.filename}`}
@@ -1370,7 +1341,7 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
                 >
                   <Download className="w-4 h-4" />
                 </button>
-                <ChevronRight className="w-4 h-4 text-[var(--ink-dim)]" />
+                <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] pointer-events-none" />
               </div>
             </div>
           );
@@ -1509,3 +1480,6 @@ export const InteractiveMessageContent: React.FC<InteractiveMessageContentProps>
     </div>
   );
 };
+
+export const InteractiveMessageContent = React.memo(InteractiveMessageContentInner);
+

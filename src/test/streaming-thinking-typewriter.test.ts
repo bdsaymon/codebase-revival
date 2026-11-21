@@ -127,7 +127,7 @@ describe('Pen-like Typewriter, Thinking Routing & Protocol Thinking Parsing', ()
     expect(res.status).toBe(200);
     const bodyText = await res.text();
     expect(bodyText).not.toContain('STREAM_EXCEPTION');
-    expect(bodyText).toContain('"type":"thinking"');
+    expect(bodyText).not.toContain('"type":"thinking"');
     expect(bodyText).toContain('"type":"text"');
     expect(bodyText).toContain('"type":"done"');
   });

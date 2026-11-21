@@ -1,15 +1,22 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   Check,
   Code2,
   Copy,
   Download,
   Eye,
   FileArchive,
+  FolderTree,
+  Maximize2,
+  Minimize2,
   Monitor,
   RotateCw,
   Smartphone,
+  Sparkles,
   Tablet,
+  Terminal,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -17,19 +24,46 @@ import {
   downloadArtifactsAsZip,
   downloadSingleArtifactFile,
 } from '../utils/fileArtifacts';
+import type {
+  ArtifactVersion,
+  WorkspaceArtifactFile,
+} from '../services/artifactManager';
+import { ArtifactFileTree } from './artifacts/ArtifactFileTree';
+import { ArtifactCodeEditor } from './artifacts/ArtifactCodeEditor';
+import { ArtifactDiffViewer } from './artifacts/ArtifactDiffViewer';
+import { CsvTablePreview } from './artifacts/CsvTablePreview';
+import { JsonTreePreview } from './artifacts/JsonTreePreview';
+import { PyodideConsole } from './artifacts/PyodideConsole';
 
 export interface ArtifactPayload {
   title: string;
   filename?: string;
   lang: string;
   code: string;
+  isStreaming?: boolean;
   bundleFiles?: FileArtifactItem[];
+}
+
+export interface PreviewConsoleEntry {
+  id: string;
+  level: 'log' | 'info' | 'warn' | 'error';
+  message: string;
+  ts: number;
 }
 
 interface ClaudeArtifactPanelProps {
   artifact: ArtifactPayload | null;
+  workspaceFiles?: WorkspaceArtifactFile[];
+  artifactHistory?: Record<string, ArtifactVersion[]>;
+  isDarkTheme?: boolean;
   onClose: () => void;
   onSelectBundleFile?: (file: FileArtifactItem) => void;
+  onSelectWorkspacePath?: (path: string) => void;
+  onSaveFile?: (path: string, content: string, note?: string) => void;
+  onCreateFile?: (path: string, initialContent?: string) => void;
+  onRenameFile?: (oldPath: string, newPath: string) => void;
+  onDeleteFile?: (path: string) => void;
+  onFixWithAi?: (payload: { filename: string; code: string; error: string }) => void;
   onToast?: (msg: string) => void;
 }
 
@@ -52,6 +86,10 @@ const PREVIEWABLE_LANGS = new Set([
   'vue-html',
   'md',
   'markdown',
+  'csv',
+  'json',
+  'py',
+  'python',
 ]);
 
 export function normalizePreviewLang(rawLang?: string): string {
@@ -67,6 +105,9 @@ export function normalizePreviewLang(rawLang?: string): string {
   if (/\.css$/i.test(raw)) return 'css';
   if (/\.svg$/i.test(raw)) return 'svg';
   if (/\.md$/i.test(raw)) return 'markdown';
+  if (/\.csv$/i.test(raw)) return 'csv';
+  if (/\.json$/i.test(raw)) return 'json';
+  if (/\.py$/i.test(raw)) return 'python';
   if (/\.[cm]?[jt]s$/i.test(raw)) return 'javascript';
   return firstToken;
 }
@@ -297,6 +338,44 @@ function renderMarkdownToHtml(markdown: string): string {
   return html.join('\n');
 }
 
+const PREVIEW_TELEMETRY_SCRIPT = `<script>
+(function(){
+  if (window.__SMFTA_TELEMETRY_INSTALLED__) return;
+  window.__SMFTA_TELEMETRY_INSTALLED__ = true;
+  function send(level, args) {
+    try {
+      var msg = Array.prototype.slice.call(args).map(function(a){
+        if (a instanceof Error) return a.stack || a.message || String(a);
+        if (typeof a === 'object') { try { return JSON.stringify(a); } catch(_) { return String(a); } }
+        return String(a);
+      }).join(' ');
+      window.parent.postMessage({ source: 'smfta-preview', level: level, message: msg }, '*');
+    } catch (_) {}
+  }
+  ['log', 'info', 'warn', 'error'].forEach(function(lvl) {
+    var orig = console[lvl];
+    console[lvl] = function() {
+      send(lvl, arguments);
+      if (orig) try { orig.apply(console, arguments); } catch(_) {}
+    };
+  });
+  window.addEventListener('error', function(e) {
+    send('error', [e.message || (e.error && e.error.message) || 'Runtime error']);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason;
+    send('error', ['Unhandled Promise Rejection: ' + (reason && reason.message ? reason.message : String(reason))]);
+  });
+})();
+</script>`;
+
+function injectPreviewTelemetry(htmlDoc: string): string {
+  if (/<head[^>]*>/i.test(htmlDoc)) {
+    return htmlDoc.replace(/<head[^>]*>/i, (m) => `${m}\n${PREVIEW_TELEMETRY_SCRIPT}`);
+  }
+  return `${PREVIEW_TELEMETRY_SCRIPT}\n${htmlDoc}`;
+}
+
 const BUILTIN_UTILITY_CSS = `
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Bengali', sans-serif; color: #18181b; background: #ffffff; }
@@ -386,18 +465,12 @@ const BUILTIN_UTILITY_CSS = `
   .grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 `;
 
-/**
- * Lightweight JSX/TSX -> JavaScript (__h / React.createElement) transpiler
- * so React components run immediately inside the sandboxed iframe even without
- * external CDN access.
- */
 export function transpileReactArtifactCode(rawCode: string): {
   executableJs: string;
   componentName: string;
 } {
   let src = String(rawCode || '').replace(/\r\n/g, '\n');
 
-  // 1. Collect imported icon/helper names from third-party libraries (e.g. lucide-react)
   const stubbedIcons = new Set<string>();
   src = src.replace(
     /^\s*import\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
@@ -417,18 +490,16 @@ export function transpileReactArtifactCode(rawCode: string): {
   );
   src = src.replace(/^\s*import\s+['"][^'"]+['"]\s*;?/gm, '');
 
-  // 2. Strip TypeScript interface / type declarations and basic type annotations
   src = src.replace(/^\s*(?:export\s+)?interface\s+[A-Za-z0-9_]+[\s\S]*?^\s*\}/gm, '');
   src = src.replace(/^\s*(?:export\s+)?type\s+[A-Za-z0-9_]+\s*=[^;]+;/gm, '');
-  src = src.replace(/useState<[^>]+>\s*\(/g, 'useState(');
-  src = src.replace(/useRef<[^>]+>\s*\(/g, 'useRef(');
-  src = src.replace(/:\s*React\.FC(?:<[^>]+>)?/g, '');
+  // Strip balanced generic arguments on hooks (e.g. useState<Record<string, number>>(...))
+  src = src.replace(/\b(useState|useRef|useMemo|useCallback)<(?:[^<>]|<[^<>]*>)+>\s*\(/g, '$1(');
+  src = src.replace(/:\s*React\.FC(?:<(?:[^<>]|<[^<>]*>)+>)?/g, '');
   src = src.replace(
     /\(\s*([a-zA-Z0-9_{},\s]+)\s*:\s*[A-Za-z0-9_<>{}[\]\s|&]+\s*\)/g,
     '($1)'
   );
 
-  // 3. Detect root component name and strip `export default` / `export`
   let componentName = '';
   const exportDefaultFn = /export\s+default\s+function\s+([A-Z][A-Za-z0-9_]*)/.exec(src);
   if (exportDefaultFn) {
@@ -493,6 +564,7 @@ function buildReactSandboxHtml(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  ${PREVIEW_TELEMETRY_SCRIPT}
   <title>${escapeHtml(title)}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -524,12 +596,12 @@ function buildReactSandboxHtml(
         if (!errEl) return;
         errEl.style.display = 'block';
         errEl.textContent = 'Preview Error: ' + msg;
+        try { console.error(msg); } catch(_) {}
       }
       window.addEventListener('error', function(e) {
         showError(e.message || String(e.error || 'Runtime error'));
       });
 
-      // Built-in lightweight reactive JSX runtime (zero external CDN required)
       let hooks = [];
       let hookIdx = 0;
       let renderScheduled = false;
@@ -567,7 +639,7 @@ function buildReactSandboxHtml(
         if (changed) {
           hooks[idx] = { deps: deps };
           setTimeout(function() {
-            try { cb(); } catch (e) {}
+            try { cb(); } catch (e) { showError(e && e.message ? e.message : String(e)); }
           }, 0);
         }
       }
@@ -668,7 +740,6 @@ function buildReactSandboxHtml(
         return el;
       }
 
-      // Simple in-browser JSX-to-createElement compiler for offline execution
       function compileSimpleJsx(input) {
         let out = input;
         out = out.replace(/<>([\\s\\S]*?)<\\/>/g, '<div>$1</div>');
@@ -698,8 +769,6 @@ function buildReactSandboxHtml(
           const t = (inner || '').trim();
           if (!t) return '';
           const parts = [];
-          let last = 0;
-          const exprRx = /\\{([\\s\\S]*?)\\}|React\\.createElement\\([\\s\\S]*?\\)/g;
           let tokens = t.split(/(\\{[^{}]*\\})/g);
           tokens.forEach(function(tok) {
             if (!tok) return;
@@ -724,7 +793,6 @@ function buildReactSandboxHtml(
           });
           if (out === prev) break;
         }
-        // Unwrap top-level {React.createElement(...)} after return / => / =
         out = out.replace(/(return\\s*\\(?\\s*|=>\\s*\\(?\\s*|=\\s*)\\{(React\\.createElement\\([\\s\\S]*?\\))\\}/g, '$1$2');
         return out;
       }
@@ -806,12 +874,10 @@ export function buildArtifactSrcDoc(
     .map((c) => `/* ${c.filename} */\n${c.content}`)
     .join('\n\n');
 
-  // 1. React / JSX / TSX live component preview
   if (looksLikeReactOrJsxCode(trimmed, normalized)) {
     return buildReactSandboxHtml(code, combinedSiblingCss, 'React Component Preview');
   }
 
-  // 2. Full HTML document or HTML fragment
   if (
     normalized === 'html' ||
     normalized === 'htm' ||
@@ -828,7 +894,7 @@ export function buildArtifactSrcDoc(
     let enrichedHtml = isFullDoc
       ? code
       : `<!DOCTYPE html>
-<html lang="bn">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -866,10 +932,9 @@ ${code}
         enrichedHtml = `${enrichedHtml}\n<script>\n${combinedJs}\n</script>`;
       }
     }
-    return enrichedHtml;
+    return injectPreviewTelemetry(enrichedHtml);
   }
 
-  // 3. If user clicked Preview on a CSS or JS block that has an HTML sibling in bundleFiles, render the merged HTML!
   if (
     (normalized === 'css' ||
       normalized === 'js' ||
@@ -1010,12 +1075,13 @@ ${code}
     const looksLikeHtmlInside =
       trimmed.startsWith('<') && trimmed.includes('</');
     if (looksLikeHtmlInside) {
-      return code;
+      return injectPreviewTelemetry(code);
     }
     return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
+  ${PREVIEW_TELEMETRY_SCRIPT}
   <style>
     body {
       margin: 0;
@@ -1043,32 +1109,31 @@ ${code}
   <div id="console"></div>
   <script>
     const out = document.getElementById('console');
-    const write = (...args) => {
-      out.textContent += args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') + '\\n';
+    const origLog = console.log;
+    const origError = console.error;
+    const write = (prefix, args) => {
+      out.textContent += prefix + args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') + '\\n';
     };
-    console.log = write;
-    console.info = write;
-    console.warn = write;
-    console.error = write;
+    console.log = (...args) => { origLog(...args); write('', args); };
+    console.info = (...args) => { origLog(...args); write('', args); };
+    console.warn = (...args) => { origLog(...args); write('[warn] ', args); };
+    console.error = (...args) => { origError(...args); write('[error] ', args); };
     try {
-      ${code}
+      ${code.replace(/<\/script>/gi, '<\\/script>')}
     } catch (err) {
-      write('Error:', err && err.message ? err.message : String(err));
+      console.error(err && err.message ? err.message : String(err));
     }
   </script>
 </body>
 </html>`;
   }
 
-  // Fallback for HTML fragments / plain text
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    ${BUILTIN_UTILITY_CSS}
     body {
       margin: 0;
       padding: 24px;
@@ -1092,57 +1157,258 @@ ${
 
 export const ClaudeArtifactPanel: React.FC<ClaudeArtifactPanelProps> = ({
   artifact,
+  workspaceFiles = [],
+  artifactHistory = {},
+  isDarkTheme = true,
   onClose,
   onSelectBundleFile,
+  onSelectWorkspacePath,
+  onSaveFile,
+  onCreateFile,
+  onRenameFile,
+  onDeleteFile,
+  onFixWithAi,
   onToast,
 }) => {
+  const activeFilename = artifact?.filename || artifact?.title || 'untitled.txt';
+  const normalizedLang = normalizePreviewLang(artifact?.lang || activeFilename);
   const canPreview = useMemo(
     () => isPreviewableLanguage(artifact?.lang, artifact?.code),
     [artifact?.lang, artifact?.code]
   );
 
-  const [tab, setTab] = useState<'preview' | 'code'>(
+  const [tab, setTab] = useState<'preview' | 'code' | 'files'>(
     canPreview ? 'preview' : 'code'
   );
-  const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'mobile'>(
-    'desktop'
-  );
+  const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [copied, setCopied] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
+  const [showDiffHistory, setShowDiffHistory] = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState<PreviewConsoleEntry[]>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(true);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [splitPct, setSplitPct] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('smfta_artifact_split_pct'));
+      if (Number.isFinite(saved) && saved >= 28 && saved <= 72) return saved;
+    } catch {}
+    return 48;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const asideRef = React.useRef<HTMLElement | null>(null);
 
-  React.useEffect(() => {
+  const lastFileKeyRef = React.useRef<string>('');
+  const lastCodeRef = React.useRef<string>('');
+  const tabRef = React.useRef<'preview' | 'code' | 'files'>(tab);
+  tabRef.current = tab;
+
+  useEffect(() => {
+    if (!artifact) {
+      lastFileKeyRef.current = '';
+      lastCodeRef.current = '';
+      return;
+    }
+    const name = artifact.filename || artifact.title || '';
+    if (name && name !== lastFileKeyRef.current) {
+      lastFileKeyRef.current = name;
+      lastCodeRef.current = artifact.code;
+      if (tabRef.current !== 'files' || artifact.isStreaming) {
+        setTab(isPreviewableLanguage(artifact.lang, artifact.code) ? 'preview' : 'code');
+      }
+      setShowDiffHistory(false);
+      setConsoleLogs([]);
+      setConsoleOpen(false);
+      setOpenTabs((prev) => (prev.includes(name) ? prev : [...prev, name].slice(-8)));
+    } else if (artifact.code !== lastCodeRef.current) {
+      lastCodeRef.current = artifact.code;
+      // Clear stale errors whenever code is updated (e.g. after AI fix or manual edit)
+      setConsoleLogs([]);
+      setIframeKey((k) => k + 1);
+    }
+  }, [artifact?.filename, artifact?.title, artifact?.lang, artifact?.code, artifact?.isStreaming]);
+
+  useEffect(() => {
     if (!artifact) return;
-    setTab(isPreviewableLanguage(artifact.lang, artifact.code) ? 'preview' : 'code');
-  }, [artifact]);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [artifact, onClose]);
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as {
+        source?: string;
+        level?: PreviewConsoleEntry['level'];
+        message?: string;
+      } | null;
+      if (!data || data.source !== 'smfta-preview' || !data.message) return;
+      const lvl = data.level || 'log';
+      setConsoleLogs((prev) => [
+        ...prev.slice(-99),
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          level: lvl,
+          message: String(data.message),
+          ts: Date.now(),
+        },
+      ]);
+      if (lvl === 'error') {
+        setConsoleOpen(true);
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // Merge bundle files with project workspace files so sibling CSS/JS files always resolve
+  const mergedBundleFiles: FileArtifactItem[] = useMemo(() => {
+    const byName = new Map<string, FileArtifactItem>();
+    for (const wf of workspaceFiles) {
+      byName.set(wf.path, {
+        id: `ws-${wf.path}`,
+        filename: wf.path,
+        lang: wf.lang,
+        title: wf.path,
+        content: wf.content,
+        isStreaming: false,
+      });
+    }
+    for (const bf of artifact?.bundleFiles || []) {
+      byName.set(bf.filename, bf);
+    }
+    return Array.from(byName.values());
+  }, [workspaceFiles, artifact?.bundleFiles]);
+
+  const effectiveWorkspaceList: WorkspaceArtifactFile[] = useMemo(() => {
+    if (workspaceFiles.length > 0) return workspaceFiles;
+    if (mergedBundleFiles.length > 0) {
+      return mergedBundleFiles.map((f) => ({
+        path: f.filename,
+        lang: f.lang,
+        content: f.content,
+        updatedAt: Date.now(),
+      }));
+    }
+    return [
+      {
+        path: activeFilename,
+        lang: normalizedLang || 'txt',
+        content: artifact?.code || '',
+        updatedAt: Date.now(),
+      },
+    ];
+  }, [workspaceFiles, mergedBundleFiles, activeFilename, normalizedLang, artifact?.code]);
+
+  const isCsv = normalizedLang === 'csv' || activeFilename.toLowerCase().endsWith('.csv');
+  const isJson = normalizedLang === 'json' || activeFilename.toLowerCase().endsWith('.json');
+  const isPython =
+    normalizedLang === 'py' ||
+    normalizedLang === 'python' ||
+    activeFilename.toLowerCase().endsWith('.py');
+
+  const rawSrcDoc = useMemo(() => {
+    if (!artifact || isCsv || isJson || isPython) return '';
+    return buildArtifactSrcDoc(artifact.code, artifact.lang, mergedBundleFiles);
+  }, [artifact, mergedBundleFiles, isCsv, isJson, isPython]);
+
+  const [srcDoc, setSrcDoc] = useState<string>(rawSrcDoc);
+  useEffect(() => {
+    if (!rawSrcDoc) {
+      setSrcDoc('');
+      return;
+    }
+    if (!artifact?.isStreaming || !srcDoc) {
+      setSrcDoc(rawSrcDoc);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSrcDoc(rawSrcDoc);
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [rawSrcDoc, artifact?.isStreaming]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (e: PointerEvent) => {
+      const parentRect = asideRef.current?.parentElement?.getBoundingClientRect();
+      const totalWidth = parentRect?.width || window.innerWidth;
+      const rightEdge = parentRect?.right || window.innerWidth;
+      if (totalWidth <= 0) return;
+      const rawPct = ((rightEdge - e.clientX) / totalWidth) * 100;
+      const clamped = Math.min(72, Math.max(28, Math.round(rawPct * 10) / 10));
+      setSplitPct(clamped);
+    };
+    const onUp = () => {
+      setIsResizing(false);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [isResizing]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('smfta_artifact_split_pct', String(splitPct));
+    } catch {}
+  }, [splitPct]);
+
+  if (!artifact && workspaceFiles.length === 0) return null;
   if (!artifact) return null;
 
-  const bundleFiles = artifact.bundleFiles || [];
-  const srcDoc = buildArtifactSrcDoc(artifact.code, artifact.lang, bundleFiles);
+  const versionsForActive = artifactHistory[activeFilename] || [];
+  const runtimeErrors = consoleLogs.filter((c) => c.level === 'error');
+  const latestRuntimeError = runtimeErrors[runtimeErrors.length - 1]?.message || '';
 
   const handleCopy = () => {
     navigator.clipboard?.writeText(artifact.code);
     setCopied(true);
-    onToast?.('কপি করা হয়েছে');
+    onToast?.('Copied to clipboard');
     setTimeout(() => setCopied(false), 1600);
   };
 
   const handleDownload = () => {
     downloadSingleArtifactFile({
-      filename: artifact.filename,
+      filename: activeFilename,
       lang: artifact.lang,
       content: artifact.code,
     });
-    onToast?.(`ডাউনলোড শুরু হয়েছে: ${artifact.filename || 'file'}`);
+    onToast?.(`Downloaded ${activeFilename}`);
   };
 
-  const handleDownloadZip = () => {
-    if (bundleFiles.length === 0) return;
-    downloadArtifactsAsZip(
-      bundleFiles.map((f) => ({ filename: f.filename, content: f.content })),
-      'project-files.zip'
-    );
-    onToast?.('ZIP ডাউনলোড শুরু হয়েছে');
+  const handleDownloadZip = async () => {
+    const filesToZip = effectiveWorkspaceList.map((f) => ({
+      filename: f.path,
+      content: f.content,
+    }));
+    if (filesToZip.length === 0) return;
+    try {
+      await downloadArtifactsAsZip(filesToZip, 'project-files.zip');
+      onToast?.(`ZIP download started (${filesToZip.length} files)`);
+    } catch {
+      onToast?.('ZIP export failed');
+    }
+  };
+
+  const handleSelectFileByPath = (path: string) => {
+    setOpenTabs((prev) => (prev.includes(path) ? prev : [...prev, path].slice(-8)));
+    if (onSelectWorkspacePath && workspaceFiles.some((w) => w.path === path)) {
+      onSelectWorkspacePath(path);
+      return;
+    }
+    const found = mergedBundleFiles.find((bf) => bf.filename === path);
+    if (found && onSelectBundleFile) {
+      onSelectBundleFile(found);
+    }
   };
 
   const iframeWidthClass =
@@ -1153,209 +1419,431 @@ export const ClaudeArtifactPanel: React.FC<ClaudeArtifactPanelProps> = ({
         : 'w-full';
 
   return (
-    <aside
-      data-testid="claude-artifact-panel"
-      className="fixed inset-0 z-40 lg:static lg:z-auto w-full lg:w-[48%] xl:w-[50%] h-full min-h-0 border-l border-[var(--border)] bg-[var(--surface)] flex flex-col shrink-0 shadow-2xl lg:shadow-none"
+    <div
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      {/* Top Bar */}
-      <header className="h-13 px-3.5 border-b border-[var(--border)] flex items-center justify-between gap-2 bg-[var(--bg)] shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[13.5px] font-medium text-[var(--ink)] truncate">
-            {artifact.filename || artifact.title || 'Live Preview'}
-          </span>
-          <span className="px-2 py-0.5 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[10.5px] font-mono uppercase text-[var(--ink-dim)] shrink-0">
-            {normalizePreviewLang(artifact.lang) || 'code'}
-          </span>
+      <aside
+        ref={asideRef}
+        data-testid="claude-artifact-panel"
+        className={`w-full sm:max-w-5xl rounded-t-2xl sm:rounded-2xl border border-[var(--border)] bg-[var(--surface)] flex flex-col shrink-0 shadow-2xl overflow-hidden ${
+          mobileExpanded ? 'h-[94dvh] sm:h-[88dvh]' : 'h-[66dvh] sm:h-[88dvh]'
+        } transition-[height] duration-200`}
+      >
+        {/* Mobile Bottom Sheet Drag Indicator */}
+        <div className="sm:hidden flex justify-center pt-2 pb-0.5 bg-[var(--bg)] rounded-t-2xl shrink-0">
+          <div className="w-10 h-1 rounded-full bg-[var(--border)]" />
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          {canPreview && (
-            <div className="inline-flex items-center p-0.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-              <button
-                type="button"
-                data-testid="artifact-tab-preview"
-                onClick={() => setTab('preview')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                  tab === 'preview'
-                    ? 'bg-[var(--surface)] text-[var(--ink)] shadow-xs'
-                    : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Live</span>
-              </button>
-              <button
-                type="button"
-                data-testid="artifact-tab-code"
-                onClick={() => setTab('code')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                  tab === 'code'
-                    ? 'bg-[var(--surface)] text-[var(--ink)] shadow-xs'
-                    : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                }`}
-              >
-                <Code2 className="w-3.5 h-3.5" />
-                <span>Code</span>
-              </button>
-            </div>
-          )}
+      {/* Top Bar */}
+      <header className="min-h-12 px-2.5 sm:px-3 py-1.5 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 bg-[var(--bg)] shrink-0">
+        <div className="flex items-center justify-between gap-1.5 min-w-0 w-full sm:w-auto">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[12.5px] sm:text-[13px] font-medium text-[var(--ink)] truncate max-w-[180px] sm:max-w-[220px]">
+              {activeFilename}
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[10px] font-mono uppercase text-[var(--ink-dim)] shrink-0">
+              {normalizedLang || 'text'}
+            </span>
+          </div>
 
-          {tab === 'preview' && canPreview && (
-            <div className="hidden sm:inline-flex items-center p-0.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-              <button
-                type="button"
-                data-testid="artifact-viewport-desktop"
-                onClick={() => setViewport('desktop')}
-                className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
-                  viewport === 'desktop'
-                    ? 'bg-[var(--surface)] text-[var(--ink)]'
-                    : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                }`}
-                title="Desktop view"
-                aria-label="Desktop view"
-              >
-                <Monitor className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                data-testid="artifact-viewport-tablet"
-                onClick={() => setViewport('tablet')}
-                className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
-                  viewport === 'tablet'
-                    ? 'bg-[var(--surface)] text-[var(--ink)]'
-                    : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                }`}
-                title="Tablet view"
-                aria-label="Tablet view"
-              >
-                <Tablet className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                data-testid="artifact-viewport-mobile"
-                onClick={() => setViewport('mobile')}
-                className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
-                  viewport === 'mobile'
-                    ? 'bg-[var(--surface)] text-[var(--ink)]'
-                    : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
-                }`}
-                title="Mobile view"
-                aria-label="Mobile view"
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
+          <button
+            type="button"
+            aria-label={mobileExpanded ? 'Compact sheet' : 'Expand sheet'}
+            onClick={() => setMobileExpanded((v) => !v)}
+            className="sm:hidden w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer shrink-0"
+            title={mobileExpanded ? 'Compact sheet' : 'Expand sheet'}
+          >
+            {mobileExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+        </div>
 
-          {tab === 'preview' && canPreview && (
+        <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1 w-full sm:w-auto sm:ml-auto">
+          <div className="inline-flex items-center p-0.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
             <button
               type="button"
-              data-testid="artifact-refresh-btn"
-              onClick={() => setIframeKey((k) => k + 1)}
-              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
-              title="Refresh preview"
-              aria-label="Refresh preview"
+              data-testid="artifact-tab-preview"
+              disabled={!canPreview}
+              onClick={() => setTab('preview')}
+              className={`px-2 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-40 ${
+                tab === 'preview'
+                  ? 'bg-[var(--surface)] text-[var(--ink)] shadow-xs'
+                  : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+              }`}
             >
-              <RotateCw className="w-3.5 h-3.5" />
+              <Eye className="w-3.5 h-3.5" />
+              <span>Preview</span>
             </button>
-          )}
+            <button
+              type="button"
+              data-testid="artifact-tab-code"
+              onClick={() => setTab('code')}
+              className={`px-2 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                tab === 'code'
+                  ? 'bg-[var(--surface)] text-[var(--ink)] shadow-xs'
+                  : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Code</span>
+            </button>
+            <button
+              type="button"
+              data-testid="artifact-tab-files"
+              onClick={() => setTab('files')}
+              className={`px-2 py-1 rounded-md text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                tab === 'files'
+                  ? 'bg-[var(--surface)] text-[var(--ink)] shadow-xs'
+                  : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+              }`}
+            >
+              <FolderTree className="w-3.5 h-3.5" />
+              <span>Files ({effectiveWorkspaceList.length})</span>
+            </button>
+          </div>
 
-          <button
-            type="button"
-            data-testid="artifact-copy-btn"
-            onClick={handleCopy}
-            className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
-            title="Copy"
-            aria-label="Copy"
-          >
-            {copied ? (
-              <Check className="w-3.5 h-3.5 text-emerald-500" />
-            ) : (
-              <Copy className="w-3.5 h-3.5" />
+          <div className="flex items-center gap-1">
+            {tab === 'preview' && canPreview && !isCsv && !isJson && !isPython && (
+              <div className="hidden sm:inline-flex items-center p-0.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                <button
+                  type="button"
+                  data-testid="artifact-viewport-desktop"
+                  aria-label="Desktop view"
+                  onClick={() => setViewport('desktop')}
+                  className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
+                    viewport === 'desktop'
+                      ? 'bg-[var(--surface)] text-[var(--ink)]'
+                      : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                  }`}
+                  title="Desktop view"
+                >
+                  <Monitor className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  data-testid="artifact-viewport-tablet"
+                  aria-label="Tablet view"
+                  onClick={() => setViewport('tablet')}
+                  className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
+                    viewport === 'tablet'
+                      ? 'bg-[var(--surface)] text-[var(--ink)]'
+                      : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                  }`}
+                  title="Tablet view"
+                >
+                  <Tablet className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  data-testid="artifact-viewport-mobile"
+                  aria-label="Mobile view"
+                  onClick={() => setViewport('mobile')}
+                  className={`w-6 h-6 rounded inline-flex items-center justify-center cursor-pointer ${
+                    viewport === 'mobile'
+                      ? 'bg-[var(--surface)] text-[var(--ink)]'
+                      : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                  }`}
+                  title="Mobile view"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
-          </button>
 
-          <button
-            type="button"
-            data-testid="artifact-download-btn"
-            onClick={handleDownload}
-            className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
-            title={`Download ${artifact.filename || ''}`}
-            aria-label="Download file"
-          >
-            <Download className="w-3.5 h-3.5" />
-          </button>
+            {tab === 'preview' && canPreview && !isCsv && !isJson && !isPython && (
+              <button
+                type="button"
+                data-testid="artifact-refresh-btn"
+                aria-label="Refresh preview"
+                onClick={() => {
+                  setConsoleLogs([]);
+                  setIframeKey((k) => k + 1);
+                }}
+                className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+                title="Refresh preview"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+              </button>
+            )}
 
-          {bundleFiles.length > 1 && (
+            <button
+              type="button"
+              data-testid="artifact-copy-btn"
+              aria-label="Copy active file"
+              onClick={handleCopy}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+              title="Copy active file"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+
+            <button
+              type="button"
+              data-testid="artifact-download-btn"
+              aria-label={`Download ${activeFilename}`}
+              onClick={handleDownload}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+              title={`Download ${activeFilename}`}
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+
             <button
               type="button"
               data-testid="artifact-download-zip-btn"
               onClick={handleDownloadZip}
-              className="px-2 h-7 rounded-lg inline-flex items-center gap-1 text-xs font-medium bg-[var(--surface-2)] border border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer"
+              className="px-2 h-7 rounded-lg inline-flex items-center gap-1 text-xs font-medium bg-[var(--surface-2)] border border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-3)] cursor-pointer"
               title="Download all files as ZIP"
             >
               <FileArchive className="w-3.5 h-3.5 text-[var(--primary)]" />
-              <span>.zip</span>
+              <span className="hidden sm:inline">ZIP</span>
             </button>
-          )}
 
-          <button
-            type="button"
-            data-testid="artifact-close-btn"
-            onClick={onClose}
-            className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
-            title="Close panel"
-            aria-label="Close panel"
-          >
-            <X className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              aria-label={mobileExpanded ? 'Compact sheet' : 'Expand sheet'}
+              onClick={() => setMobileExpanded((v) => !v)}
+              className="hidden sm:inline-flex lg:hidden w-7 h-7 rounded-lg items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+              title={mobileExpanded ? 'Compact sheet' : 'Expand sheet'}
+            >
+              {mobileExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
+
+            <button
+              type="button"
+              data-testid="artifact-close-btn"
+              aria-label="Close Artifact Panel"
+              onClick={onClose}
+              className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer"
+              title="Close panel"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Multi-file switcher bar when response contains a project bundle */}
-      {bundleFiles.length > 1 && (
-        <div className="px-3 py-2 border-b border-[var(--border)] bg-[var(--surface)] flex items-center gap-1.5 overflow-x-auto shrink-0">
-          {bundleFiles.map((bf) => {
-            const isActive =
-              (artifact.filename || artifact.title) === bf.filename;
+      {/* Open File Tabs Bar */}
+      {(openTabs.length > 1 || effectiveWorkspaceList.length > 1) && (
+        <div
+          data-testid="artifact-open-tabs"
+          className="px-2.5 py-1.5 border-b border-[var(--border)] bg-[var(--surface)] flex items-center gap-1 overflow-x-auto shrink-0"
+        >
+          {(openTabs.length > 1
+            ? openTabs
+            : effectiveWorkspaceList.map((f) => f.path)
+          ).map((tabPath) => {
+            const isActive = tabPath === activeFilename;
             return (
-              <button
-                key={bf.id}
-                type="button"
-                onClick={() => onSelectBundleFile?.(bf)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono whitespace-nowrap cursor-pointer transition-colors ${
+              <div
+                key={tabPath}
+                className={`group inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono whitespace-nowrap cursor-pointer transition-colors ${
                   isActive
-                    ? 'bg-[var(--ink)] text-[var(--bg)] font-medium'
+                    ? 'bg-[var(--ink)] text-[var(--bg)] font-semibold'
                     : 'bg-[var(--surface-2)] text-[var(--ink-dim)] hover:text-[var(--ink)]'
                 }`}
+                onClick={() => handleSelectFileByPath(tabPath)}
               >
-                {bf.filename}
-              </button>
+                <span>{tabPath}</span>
+                {openTabs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenTabs((prev) => prev.filter((p) => p !== tabPath));
+                    }}
+                    className="opacity-60 hover:opacity-100 ml-0.5 cursor-pointer"
+                    aria-label={`Close tab ${tabPath}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 min-h-0 overflow-hidden bg-white dark:bg-[#141416] flex justify-center">
-        {tab === 'preview' && canPreview ? (
-          <iframe
-            key={iframeKey}
-            data-testid="artifact-preview-iframe"
-            title={artifact.title || 'Artifact Preview'}
-            srcDoc={srcDoc}
-            sandbox="allow-scripts allow-modals allow-forms"
-            className={`${iframeWidthClass} h-full border-0 bg-white block`}
+      <div className="flex-1 min-h-0 overflow-hidden bg-white dark:bg-[#141416] flex flex-col">
+        {tab === 'files' ? (
+          <ArtifactFileTree
+            files={effectiveWorkspaceList}
+            activePath={activeFilename}
+            onSelectFile={(path) => {
+              handleSelectFileByPath(path);
+              setTab(
+                isPreviewableLanguage(path) ? 'preview' : 'code'
+              );
+            }}
+            onCreateFile={onCreateFile}
+            onRenameFile={
+              onRenameFile
+                ? (oldPath, newPath) => {
+                    onRenameFile(oldPath, newPath);
+                    setOpenTabs((prev) =>
+                      prev.map((p) => (p === oldPath ? newPath : p))
+                    );
+                  }
+                : undefined
+            }
+            onDeleteFile={onDeleteFile}
+          />
+        ) : tab === 'code' || !canPreview ? (
+          showDiffHistory ? (
+            <div className="flex flex-col h-full min-h-0">
+              <div className="px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface-2)]/70 flex items-center justify-between text-xs">
+                <span className="font-semibold text-[var(--ink)]">
+                  Version History & Diff · {activeFilename}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowDiffHistory(false)}
+                  className="px-2 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--ink)] cursor-pointer"
+                >
+                  Back to Editor
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                <ArtifactDiffViewer
+                  filename={activeFilename}
+                  versions={versionsForActive}
+                  currentContent={artifact.code}
+                  onRestoreVersion={(ver) => {
+                    onSaveFile?.(
+                      activeFilename,
+                      ver.content,
+                      `Restored snapshot (${ver.id})`
+                    );
+                    setShowDiffHistory(false);
+                    onToast?.(`Restored ${activeFilename} snapshot`);
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            <ArtifactCodeEditor
+              filename={activeFilename}
+              lang={artifact.lang}
+              code={artifact.code}
+              isDarkTheme={isDarkTheme}
+              versionCount={versionsForActive.length}
+              showHistory={showDiffHistory}
+              onToggleHistory={() => setShowDiffHistory((v) => !v)}
+              onSaveCode={(nextCode) =>
+                onSaveFile?.(activeFilename, nextCode, 'Manual editor save')
+              }
+              onToast={onToast}
+            />
+          )
+        ) : isCsv ? (
+          <CsvTablePreview content={artifact.code} />
+        ) : isJson ? (
+          <JsonTreePreview content={artifact.code} />
+        ) : isPython ? (
+          <PyodideConsole
+            filename={activeFilename}
+            code={artifact.code}
+            onFixWithAi={onFixWithAi}
           />
         ) : (
-          <pre
-            data-testid="artifact-code-view"
-            className="w-full h-full m-0 p-4 overflow-auto font-mono text-[13px] leading-relaxed bg-[#18181b] text-slate-100"
+          <div className="flex-1 min-h-0 flex justify-center overflow-hidden">
+            <iframe
+              key={iframeKey}
+              data-testid="artifact-preview-iframe"
+              title={artifact.title || activeFilename}
+              srcDoc={srcDoc}
+              sandbox="allow-scripts"
+              className={`${iframeWidthClass} h-full border-0 bg-white block ${
+                isResizing ? 'pointer-events-none' : ''
+              }`}
+            />
+          </div>
+        )}
+
+        {/* Sandboxed Iframe Console & Runtime Errors Bar */}
+        {tab === 'preview' && !isCsv && !isJson && !isPython && (
+          <div
+            data-testid="preview-console-drawer"
+            className="border-t border-[var(--border)] bg-[var(--bg)] shrink-0"
           >
-            <code>{artifact.code}</code>
-          </pre>
+            <div className="px-3 py-1.5 flex items-center justify-between gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setConsoleOpen((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-[var(--ink-dim)] hover:text-[var(--ink)] font-mono cursor-pointer"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Console ({consoleLogs.length})</span>
+                {runtimeErrors.length > 0 && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-500 font-semibold">
+                    <AlertTriangle className="w-3 h-3" />
+                    {runtimeErrors.length} error{runtimeErrors.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              </button>
+
+              <div className="flex items-center gap-1.5">
+                {latestRuntimeError && onFixWithAi && (
+                  <button
+                    type="button"
+                    data-testid="preview-fix-with-ai-btn"
+                    onClick={() =>
+                      onFixWithAi({
+                        filename: activeFilename,
+                        code: artifact.code,
+                        error: latestRuntimeError,
+                      })
+                    }
+                    className="px-2.5 py-1 rounded-md bg-rose-500/15 border border-rose-500/35 text-rose-500 hover:bg-rose-500/25 text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Fix with AI</span>
+                  </button>
+                )}
+                {consoleLogs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setConsoleLogs([])}
+                    className="p-1 rounded text-[var(--ink-dim)] hover:text-[var(--ink)] cursor-pointer"
+                    title="Clear console"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {consoleOpen && (
+              <div className="max-h-36 overflow-y-auto px-3 pb-2.5 space-y-1 font-mono text-[11.5px]">
+                {consoleLogs.length === 0 ? (
+                  <div className="text-[var(--ink-dim)] py-1">
+                    No console output captured yet.
+                  </div>
+                ) : (
+                  consoleLogs.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`px-2 py-1 rounded whitespace-pre-wrap break-words ${
+                        entry.level === 'error'
+                          ? 'bg-rose-500/10 text-rose-500 border border-rose-500/25'
+                          : entry.level === 'warn'
+                            ? 'bg-amber-500/10 text-amber-500'
+                            : 'text-[var(--ink-muted)]'
+                      }`}
+                    >
+                      [{entry.level}] {entry.message}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </aside>
+    </div>
   );
 };

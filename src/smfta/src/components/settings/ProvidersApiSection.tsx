@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -145,6 +146,22 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
 
   return (
     <div className="space-y-3" data-testid="settings-section-providers">
+      {/* Explicit Browser-Storage Security Warning for 3P Keys */}
+      <div
+        data-testid="providers-browser-key-warning"
+        className="px-3.5 py-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-300 text-xs flex items-start gap-2.5"
+      >
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <div className="font-semibold">
+            Security Notice: Browser-Stored API Keys
+          </div>
+          <p className="opacity-90 leading-relaxed">
+            Google Gemini uses server-side <code>GEMINI_API_KEY</code> (never entered or stored in the browser). External keys for OpenAI, Anthropic Claude, or compatible endpoints are stored only in your browser and are not as secure as server secrets—use restricted keys only.
+          </p>
+        </div>
+      </div>
+
       {/* 1. Saved Providers List (Click to Activate) */}
       <SettingsCard title={`Providers (${orderedProfiles.length})`}>
         <div className="space-y-2 pt-1">
@@ -565,25 +582,31 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
             <div className="text-[11px] text-[var(--accent-amber)]">{discoveryWarning}</div>
           )}
 
-          {(!isKeylessProviderId(newProviderId) || newProviderId === 'custom') && (
-            <div className="flex items-center gap-2">
-              <input
-                type={showNewKey ? 'text' : 'password'}
-                data-testid="provider-api-key-input"
-                value={newApiKey}
-                onChange={(e) => onChangeNewApiKey(e.target.value)}
-                placeholder={providerEntry(newProviderId)?.keyHint || 'API Key'}
-                className="cs-input flex-1 font-mono text-xs py-1.5"
-              />
-              <button
-                type="button"
-                data-testid="provider-api-key-toggle"
-                onClick={() => setShowNewKey((v) => !v)}
-                className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] inline-flex items-center gap-1 cursor-pointer shrink-0"
-              >
-                {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              </button>
+          {newProviderId === 'gemini_custom' ? (
+            <div className="px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--ink-dim)]">
+              Gemini uses the server environment secret (<code>GEMINI_API_KEY</code>). Integration status can be checked in AI & Thinking settings.
             </div>
+          ) : (
+            (!isKeylessProviderId(newProviderId) || newProviderId === 'custom') && (
+              <div className="flex items-center gap-2">
+                <input
+                  type={showNewKey ? 'text' : 'password'}
+                  data-testid="provider-api-key-input"
+                  value={newApiKey}
+                  onChange={(e) => onChangeNewApiKey(e.target.value)}
+                  placeholder={providerEntry(newProviderId)?.keyHint || 'API Key'}
+                  className="cs-input flex-1 font-mono text-xs py-1.5"
+                />
+                <button
+                  type="button"
+                  data-testid="provider-api-key-toggle"
+                  onClick={() => setShowNewKey((v) => !v)}
+                  className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] inline-flex items-center gap-1 cursor-pointer shrink-0"
+                >
+                  {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            )
           )}
 
           {detectedProviderFromNewKey && detectedProviderFromNewKey !== newProviderId && (

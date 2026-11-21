@@ -10,6 +10,18 @@ export interface HostedWebsitePreview {
 
 const MAX_PREVIEW_HTML_CHARS = 3_000_000;
 
+interface StoredPreviewEntry extends HostedWebsitePreview {
+  ownerKey: string;
+}
+
+const memoryPreviews = new Map<string, StoredPreviewEntry>();
+
+function isSupabasePreviewConfigured(): boolean {
+  return Boolean(
+    process.env['SUPABASE_URL'] && process.env['SUPABASE_SERVICE_ROLE_KEY']
+  );
+}
+
 async function getAdmin() {
   const { supabaseAdmin } = await import('@/integrations/supabase/client.server');
   return supabaseAdmin;
@@ -26,6 +38,17 @@ async function ownerKeyFor(req: Request): Promise<string> {
 
 async function loadPreview(projectId: string): Promise<HostedWebsitePreview | null> {
   if (!projectId) return null;
+  if (!isSupabasePreviewConfigured()) {
+    const entry = memoryPreviews.get(projectId);
+    if (!entry) return null;
+    return {
+      projectId: entry.projectId,
+      title: entry.title,
+      html: entry.html,
+      files: entry.files,
+      updatedAt: entry.updatedAt,
+    };
+  }
   const admin = await getAdmin();
   const { data } = await admin
     .from('smfta_published_previews')
@@ -85,9 +108,34 @@ previewRouter.post('/api/preview/publish', async (req: Request, res: Response) =
     return;
   }
 
-  const admin = await getAdmin();
   const ownerKey = await ownerKeyFor(req);
   let storedId = projectId;
+  const now = Date.now();
+
+  if (!isSupabasePreviewConfigured()) {
+    const existing = memoryPreviews.get(projectId);
+    if (existing && existing.ownerKey !== ownerKey) {
+      storedId = `${projectId}-${ownerKey.slice(0, 8)}`.slice(0, 80);
+    }
+    memoryPreviews.set(storedId, {
+      projectId: storedId,
+      ownerKey,
+      title,
+      html,
+      files,
+      updatedAt: now,
+    });
+    res.json({
+      ok: true,
+      projectId: storedId,
+      previewUrl: `/preview/${storedId}`,
+      previewPath: `/preview/${storedId}`,
+      updatedAt: now,
+    });
+    return;
+  }
+
+  const admin = await getAdmin();
   const { data: existing } = await admin
     .from('smfta_published_previews')
     .select('owner_key')
@@ -110,7 +158,6 @@ previewRouter.post('/api/preview/publish', async (req: Request, res: Response) =
     return;
   }
 
-  const now = Date.now();
   res.json({
     ok: true,
     projectId: storedId,

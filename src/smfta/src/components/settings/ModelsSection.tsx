@@ -1,6 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { AppSettings, SavedProviderProfile } from '../../types';
-import { getAllVerifiedModelChoices } from '../../utils/providers';
+import {
+  GEMINI_ACTIVE_MODELS,
+  getAllVerifiedModelChoices,
+} from '../../utils/providers';
 import { SettingToggle, SettingsCard } from '../SettingsControls';
 
 export interface ModelsSectionProps {
@@ -20,6 +23,32 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
   onUpdateProfileModel,
   patch,
 }) => {
+  const [geminiStatus, setGeminiStatus] = useState<{
+    checked: boolean;
+    configured: boolean;
+    message?: string;
+  }>({ checked: false, configured: false });
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/models/status')
+      .then((r) => r.json())
+      .then((data: { configured?: boolean; message?: string }) => {
+        if (!active) return;
+        setGeminiStatus({
+          checked: true,
+          configured: Boolean(data?.configured),
+          message: data?.message,
+        });
+      })
+      .catch(() => {
+        if (active) setGeminiStatus({ checked: true, configured: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const verifiedModels = getAllVerifiedModelChoices(savedProfiles);
   const thinkingEnabled =
     draft.thinkingEnabled !== undefined
@@ -36,10 +65,13 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
     (draft.style === 'concise' ? 'short' : 'detailed');
   const currentStyle = draft.responseStyle || 'normal';
   const currentMaxTokens = draft.maxOutputTokens || 16384;
+  const activeModelId =
+    activeProfile.externalModel || draft.externalModel || 'gemini-4-hydrogen';
+  const isGemini4Model = /gemini-4/i.test(activeModelId);
+  const currentTemp =
+    typeof draft.weightTemp === 'number' ? draft.weightTemp : 0.7;
 
-  const currentSelectValue = `${activeProfile.id}::${
-    activeProfile.externalModel || draft.externalModel || 'smfta-flash'
-  }`;
+  const currentSelectValue = `${activeProfile.id}::${activeModelId}`;
 
   const handleModelSelectionChange = (encoded: string) => {
     const [profId, modId] = encoded.split('::');
@@ -57,6 +89,27 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
 
   return (
     <div className="space-y-3" data-testid="settings-section-models">
+      {/* Live Server Gemini Status Banner */}
+      {geminiStatus.checked && (
+        <div
+          data-testid="gemini-server-status-banner"
+          className={`px-3.5 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+            geminiStatus.configured
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              : 'border-amber-500/35 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+          }`}
+        >
+          <span className="font-medium">
+            {geminiStatus.configured
+              ? 'Gemini API Integration Active (Server-side @google/genai)'
+              : 'Integration required: GEMINI_API_KEY is not configured in server Secrets.'}
+          </span>
+          <span className="font-mono text-[10px] uppercase shrink-0">
+            {geminiStatus.configured ? 'Connected' : 'Missing Key'}
+          </span>
+        </div>
+      )}
+
       <SettingsCard>
         {/* Active Model */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
@@ -65,12 +118,12 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
               Active Model
             </span>
             <span className="text-[11.5px] text-[var(--ink-dim)]">
-              বর্তমানে যে AI মডেল বা কাস্টম প্রোভাইডার চ্যাটে উত্তর দেবে
+              Select Gemini model or connected custom provider profile
             </span>
           </div>
           <select
             data-testid="current-model-selector"
-            aria-label="বর্তমান মডেল সিলেক্টর"
+            aria-label="Current model selector"
             value={currentSelectValue}
             onChange={(e) => handleModelSelectionChange(e.target.value)}
             className="cs-input font-mono text-xs sm:text-[13px] py-1.5 px-2.5 max-w-[260px]"
@@ -83,13 +136,73 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
                 </option>
               );
             })}
+            {!verifiedModels.some((v) =>
+              GEMINI_ACTIVE_MODELS.includes(v.modelId as typeof GEMINI_ACTIVE_MODELS[number])
+            ) &&
+              GEMINI_ACTIVE_MODELS.map((gm) => (
+                <option key={`gemini-${gm}`} value={`${activeProfile.id}::${gm}`}>
+                  Gemini · {gm}
+                </option>
+              ))}
           </select>
+        </div>
+
+        {/* System Prompt */}
+        <div className="py-2.5 border-b border-[var(--border)] space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13.5px] font-medium text-[var(--ink)]">
+              System Prompt (Custom Instructions)
+            </span>
+            <span className="text-[11px] font-mono text-[var(--ink-dim)]">
+              {(draft.globalInstructions || '').length} chars
+            </span>
+          </div>
+          <textarea
+            rows={3}
+            data-testid="models-system-prompt-textarea"
+            value={draft.globalInstructions ?? draft.customInst ?? ''}
+            onChange={(e) =>
+              patch({
+                globalInstructions: e.target.value,
+                customInst: e.target.value,
+              })
+            }
+            placeholder="Define system persona, coding rules, formatting preferences, or tone…"
+            className="cs-textarea w-full text-xs"
+          />
+        </div>
+
+        {/* Temperature (Disabled on Gemini 4.* per official SDK policy) */}
+        <div className="py-2.5 border-b border-[var(--border)] space-y-1">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-[13.5px] font-medium text-[var(--ink)] block">
+                Temperature ({isGemini4Model ? 'Default 1.0 locked on Gemini 4' : currentTemp.toFixed(1)})
+              </span>
+              <span className="text-[11.5px] text-[var(--ink-dim)]">
+                {isGemini4Model
+                  ? 'Gemini 4 models use optimal native sampling; temperature override is disabled.'
+                  : 'Lower values make output deterministic; higher values increase creativity.'}
+              </span>
+            </div>
+            <input
+              type="range"
+              data-testid="models-temperature-slider"
+              min={0}
+              max={1.5}
+              step={0.1}
+              disabled={isGemini4Model}
+              value={isGemini4Model ? 1.0 : currentTemp}
+              onChange={(e) => patch({ weightTemp: Number(e.target.value) })}
+              className="w-36 accent-[var(--primary)] disabled:opacity-40 cursor-pointer"
+            />
+          </div>
         </div>
 
         {/* Extended Thinking Toggle */}
         <SettingToggle
           label="Extended Thinking (Claude-Style Reasoning)"
-          description="উত্তর দেওয়ার আগে ধাপে ধাপে গভীর চিন্তা ও বিশ্লেষণ করবে"
+          description="Enable Gemini native thinking trace above the response"
           checked={thinkingEnabled}
           testId="thinking-enabled-toggle"
           onChange={(enabled) =>
@@ -104,10 +217,10 @@ export const ModelsSection: React.FC<ModelsSectionProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
           <div>
             <span className="text-[13.5px] font-medium text-[var(--ink)] block">
-              Thinking Level (Reasoning Effort)
+              Thinking Budget / Level
             </span>
             <span className="text-[11.5px] text-[var(--ink-dim)]">
-              Low (দ্রুত) · Medium (ভারসাম্যপূর্ণ) · High (গভীর কোডিং ও বিশ্লেষণ)
+              Low (fast) · Medium (balanced) · High (deep coding & reasoning)
             </span>
           </div>
           <div className="cs-seg" data-testid="thinking-effort-selector">

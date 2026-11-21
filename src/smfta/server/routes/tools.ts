@@ -4,6 +4,7 @@ import { Router, Request, Response } from '../runtime/express';
 import { callBackendEngine, sanitizeErrorMsg } from '../aiClient';
 import { sanitizeProprietaryOutput } from '../providers';
 import { getV2GeminiApiKey } from '../v2FirebaseAi';
+import { generateOrEditGeminiImage } from '../services/geminiService';
 import { getNeuralStatus, retrainModelWeights } from '../intentRules';
 import {
   getResponseCacheSize,
@@ -417,49 +418,65 @@ toolsRouter.post('/generate-image', async (req: Request, res: Response) => {
     typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
   if (!rawPrompt || rawPrompt.length < 1 || rawPrompt.length > 1000) {
     return res.status(400).json({
+      ok: false,
       error: 'Prompt must be between 1 and 1000 characters.',
     });
   }
 
   const requestedSize = Number(req.body?.size);
   const size = [512, 768, 1024, 1536].includes(requestedSize) ? requestedSize : 1024;
+  const aspectRatio =
+    typeof req.body?.aspectRatio === 'string' && req.body.aspectRatio.trim()
+      ? req.body.aspectRatio.trim()
+      : '1:1';
   const styleHint =
     typeof req.body?.style === 'string' && req.body.style.trim()
       ? `, ${req.body.style.trim().slice(0, 60)} style`
       : '';
   const finalPrompt = `${rawPrompt}${styleHint}`;
-  const geminiKey = getV2GeminiApiKey();
-  if (geminiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const imgResp = await ai.models.generateContent({
-        model: 'gemini-nano-banana-2.1',
-        contents: finalPrompt,
-        config: {
-          responseModalities: ['IMAGE'],
-        },
-      });
-      const parts = imgResp.candidates?.[0]?.content?.parts || [];
-      for (const p of parts as Array<{ inlineData?: { mimeType?: string; data?: string } }>) {
-        if (p?.inlineData?.data) {
-          const mime = p.inlineData.mimeType || 'image/png';
-          return res.json({
-            url: `data:${mime};base64,${p.inlineData.data}`,
-            prompt: rawPrompt,
-            size,
-            modelUsed: 'gemini-nano-banana-2.1',
-          });
-        }
-      }
-    } catch {
-      // Fall through to keyless fallback if image endpoint is busy or rejects prompt
-    }
+  const referenceImageBase64 =
+    typeof req.body?.referenceImageBase64 === 'string'
+      ? req.body.referenceImageBase64.trim()
+      : undefined;
+  const referenceImageMimeType =
+    typeof req.body?.referenceImageMimeType === 'string'
+      ? req.body.referenceImageMimeType.trim()
+      : undefined;
+  const requestedModel =
+    req.body?.model === 'gemini-nano-banana-2.1' ||
+    req.body?.model === 'gemini-3.1-flash-lite-image'
+      ? req.body.model
+      : 'gemini-3.1-flash-lite-image';
+
+  const imgResult = await generateOrEditGeminiImage({
+    prompt: finalPrompt,
+    aspectRatio,
+    referenceImageBase64,
+    referenceImageMimeType,
+    model: requestedModel,
+  });
+
+  if (!imgResult.ok || !imgResult.url) {
+    const code = imgResult.error?.code || 'INTEGRATION_REQUIRED';
+    const status = imgResult.error?.httpStatus || 503;
+    return res.status(status).json({
+      ok: false,
+      code,
+      integrationRequired: code === 'INTEGRATION_REQUIRED',
+      error:
+        imgResult.error?.message ||
+        'Integration required: GEMINI_API_KEY must be configured on the server for Image Generation & Editing.',
+    });
   }
-  const seed = crypto.randomInt(1, 1_000_000_000);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-    finalPrompt
-  )}?width=${size}&height=${size}&seed=${seed}&nologo=true`;
-  return res.json({ url, prompt: rawPrompt, size, modelUsed: 'smfta-image-fallback' });
+
+  return res.json({
+    ok: true,
+    url: imgResult.url,
+    prompt: rawPrompt,
+    size,
+    aspectRatio,
+    modelUsed: imgResult.modelUsed || requestedModel,
+  });
 });
 
 // ============================================================================
@@ -531,7 +548,7 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
     `Transcribe the spoken audio accurately verbatim in its original spoken language (${languageHint}, supporting Bengali, English, and mixed Banglish). ` +
     'Output ONLY the transcribed words with natural punctuation and no explanation or labels. If there is only silence or background noise, return an empty string.';
 
-  const candidateModels = ['gemini-3.5-transcribe', 'gemini-3.5-flash-lite'];
+  const candidateModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
   let lastError = 'Transcription failed';
 
   for (const model of candidateModels) {
@@ -559,6 +576,119 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
         text,
         modelUsed: model,
       });
+    } catch (err) {
+      lastError = sanitizeErrorMsg(err);
+    }
+  }
+
+  return res.status(502).json({
+    ok: false,
+    error: lastError,
+  });
+});
+
+// ============================================================================
+// 3C. SERVER NATURAL HUMAN FEMALE VOICE TTS (gemini-3.8-flash-lite-tts)
+// ============================================================================
+export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr';
+
+export function resolveGeminiFemaleVoice(requested?: string): GeminiFemaleVoiceName {
+  const clean = String(requested || '').trim().toLowerCase();
+  if (clean === 'zephyr') return 'Zephyr';
+  return 'Kore';
+}
+
+export function sanitizeTextForTtsEndpoint(raw: unknown): string {
+  return String(raw || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+    .replace(/<file\b[^>]*>[\s\S]*?<\/file>/gi, ' Created a file. ')
+    .replace(/<patch\b[^>]*>[\s\S]*?<\/patch>/gi, ' Updated a file. ')
+    .replace(/```[\s\S]*?```/g, ' Here is the code snippet. ')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/^[ \t]*[#>]+\s*/gm, '')
+    .replace(/[*_~`]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1600);
+}
+
+toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
+  const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
+  if (!speechText) {
+    return res.status(400).json({ ok: false, error: 'text is required for speech synthesis.' });
+  }
+
+  const geminiKey = getV2GeminiApiKey();
+  if (!geminiKey) {
+    return res.status(503).json({
+      ok: false,
+      code: 'INTEGRATION_REQUIRED',
+      integrationRequired: true,
+      error:
+        'Integration required: Server GEMINI_API_KEY must be configured to enable Gemini natural female voice (gemini-3.8-flash-lite-tts).',
+    });
+  }
+
+  const voiceName = resolveGeminiFemaleVoice(
+    typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined
+  );
+  const customStyle =
+    typeof req.body?.style === 'string' && req.body.style.trim()
+      ? req.body.style.trim().slice(0, 200)
+      : 'Warm, natural, expressive human female conversational voice with clear articulation, gentle empathy, smooth natural cadence, never robotic';
+
+  const ai = new GoogleGenAI({
+    apiKey: geminiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  let lastError = 'Gemini TTS generation failed';
+
+  for (const model of ttsModels) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: speechText,
+                speechMetadata: {
+                  style: customStyle,
+                },
+              } as { text: string; speechMetadata?: { style?: string } },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
+          },
+        },
+      });
+
+      const parts = response.candidates?.[0]?.content?.parts || [];
+      const audioPart = parts.find(
+        (p) => Boolean(p?.inlineData?.data)
+      );
+      const audioBase64 = audioPart?.inlineData?.data;
+      const mimeType = audioPart?.inlineData?.mimeType || 'audio/wav';
+
+      if (audioBase64) {
+        return res.json({
+          ok: true,
+          audioBase64,
+          mimeType,
+          voiceName,
+          modelUsed: model,
+        });
+      }
+      lastError = `${model} returned no audio payload.`;
     } catch (err) {
       lastError = sanitizeErrorMsg(err);
     }

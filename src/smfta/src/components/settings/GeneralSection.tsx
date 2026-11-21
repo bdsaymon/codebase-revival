@@ -344,8 +344,8 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
 
         {/* Code Highlight & Artifact Preview */}
         <SettingToggle
-          label="Code syntax highlighting"
-          description="Highlight syntax in code blocks."
+          label="Code Syntax Highlight & Artifact Preview"
+          description="কোড ব্লকে সিনট্যাক্স হাইলাইটিং এবং লাইভ প্রিভিউ ও .zip ডাউনলোড সক্রিয় রাখবে"
           checked={draft.codeHighlight !== false}
           testId="highlight-code-toggle"
           onChange={(v) => patch({ codeHighlight: v })}

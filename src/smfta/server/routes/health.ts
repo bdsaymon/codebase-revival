@@ -5,6 +5,10 @@ import { getNeuralStatus } from '../intentRules';
 import { getResponseCacheSize } from '../responseCache';
 import { timingSafeTokenEqual } from '../engine/security';
 import { uidSessionStore } from './chat';
+import {
+  GEMINI_TEXT_MODELS,
+  isGeminiConfigured,
+} from '../services/geminiService';
 
 export const healthRouter = Router();
 
@@ -21,12 +25,15 @@ healthRouter.get('/health', (_req: Request, res: Response) => {
   const engine = getSharedHardenedEngine();
   const engineHealth = engine.getHealth();
   const neural = getNeuralStatus();
+  const geminiConfigured = isGeminiConfigured();
 
   return res.json({
     ok: true,
     status: engineHealth.killSwitchEnabled ? 'online' : 'maintenance',
     version: APP_VERSION,
     engine: `SMFTA Neural Core v${APP_VERSION}`,
+    geminiConfigured,
+    geminiModels: GEMINI_TEXT_MODELS,
     killSwitchEnabled: engineHealth.killSwitchEnabled,
     serverKeyDailyCap: engineHealth.serverKeyDailyCap,
     serverKeyDailyCount: engineHealth.serverKeyDailyCount,
@@ -34,6 +41,18 @@ healthRouter.get('/health', (_req: Request, res: Response) => {
     cacheEntries: getResponseCacheSize(),
     activeUidSessions: uidSessionStore.size,
     trainedPairs: neural.weights.pairsLearned,
+  });
+});
+
+healthRouter.get('/models/status', (_req: Request, res: Response) => {
+  const geminiConfigured = isGeminiConfigured();
+  return res.json({
+    ok: true,
+    geminiConfigured,
+    models: GEMINI_TEXT_MODELS,
+    message: geminiConfigured
+      ? 'Gemini API connected via server secret.'
+      : 'Integration required: GEMINI_API_KEY is not configured in server secrets.',
   });
 });
 

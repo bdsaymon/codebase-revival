@@ -1,5 +1,3 @@
 [install]
-saveTextLockfile = true
-prefer = "offline"
-
-
+# Bound concurrent registry sockets so container cold-boot installs never stall on SYN-SENT
+networkConcurrency = 8

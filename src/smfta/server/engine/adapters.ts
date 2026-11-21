@@ -331,14 +331,17 @@ export function toGeminiNativePayload(params: {
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: params.maxOutput,
   };
-  if (typeof params.temperature === 'number') {
-    generationConfig.temperature = params.temperature;
-  }
-  if (typeof params.topP === 'number') {
-    generationConfig.topP = params.topP;
-  }
-  if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
-    generationConfig.topK = Math.round(params.topK);
+  const isG4Model = /gemini-4/i.test(params.modelId);
+  if (!isG4Model) {
+    if (typeof params.temperature === 'number') {
+      generationConfig.temperature = params.temperature;
+    }
+    if (typeof params.topP === 'number') {
+      generationConfig.topP = params.topP;
+    }
+    if (typeof params.topK === 'number' && Number.isFinite(params.topK) && params.topK > 0) {
+      generationConfig.topK = Math.round(params.topK);
+    }
   }
   if (Array.isArray(params.stopSequences) && params.stopSequences.length > 0) {
     generationConfig.stopSequences = params.stopSequences.slice(0, 5);

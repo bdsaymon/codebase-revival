@@ -34,8 +34,8 @@ export const DEFAULT_TOOL_PERMISSIONS: Record<string, ToolPermissionMode> = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'light',
-  themeMode: 'system',
+  theme: 'dark',
+  themeMode: 'dark',
   mode: 'fast',
   style: 'concise',
   replyLang: 'auto',
@@ -64,10 +64,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workPersona: 'allrounder',
   voiceSpeed: 1.0,
   smartFormatting: true,
-  // Out-of-the-box engine: keyless free API (no setup needed at all).
-  provider: 'xrahat',
+  // Primary server-side @google/genai engine (uses server GEMINI_API_KEY).
+  provider: 'gemini_custom',
   externalKeys: '',
-  externalModel: '',
+  externalModel: 'gemini-4-hydrogen',
   externalBaseUrl: '',
   allowKeylessFallback: false,
   // Spec defaults: temperature 0.7 · top P 0.9 · max output tokens 16384.
@@ -223,9 +223,15 @@ export function sanitizeSettings(input: unknown): AppSettings {
 
   // A key prefix is not a reliable vendor identity; preserve the user's selection.
 
-  let externalModel = str(raw.externalModel, '').trim().slice(0, 200);
-  if (/^gemini-1\.5/i.test(externalModel)) {
-    externalModel = 'gemini-3.8-flash';
+  let externalModel = str(raw.externalModel, DEFAULT_SETTINGS.externalModel)
+    .trim()
+    .slice(0, 200);
+  if (
+    /^(?:gemini-1\.5|gemini-2\.0|gemini-pro|gemini-3\.8-flash)/i.test(externalModel)
+  ) {
+    externalModel = 'gemini-4-hydrogen';
+  } else if (/^gemini-3\.5-flash-lite/i.test(externalModel)) {
+    externalModel = 'gemini-3.1-flash-lite';
   }
 
   // Clamp (and round) instead of rejecting: an outdated/corrupt stored value

@@ -35,20 +35,51 @@ import {
   updateCustomPrompt,
 } from '../utils/customPrompts';
 
-// 1. IMAGE STUDIO MODAL
+// 1. IMAGE STUDIO MODAL (Generate & Edit via Gemini Image API)
 export const ImageStudioModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
-  onGenerate: (prompt: string, style: string, size: number) => void;
+  onGenerate: (
+    prompt: string,
+    style: string,
+    size: number,
+    referenceImage?: { base64: string; mimeType: string; name: string }
+  ) => void;
 }> = ({ isOpen, onClose, onGenerate }) => {
   const [prompt, setPrompt] = useState('');
   const [style, setStyle] = useState('photorealistic, cinematic lighting, 8k');
   const [size, setSize] = useState(768);
+  const [refImage, setRefImage] = useState<{
+    base64: string;
+    mimeType: string;
+    name: string;
+    dataUrl: string;
+  } | null>(null);
 
   if (!isOpen) return null;
 
+  const handlePickReference = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const res = String(reader.result || '');
+      const base64 = res.includes(',') ? res.split(',')[1] : '';
+      if (base64) {
+        setRefImage({
+          base64,
+          mimeType: file.type || 'image/png',
+          name: file.name,
+          dataUrl: res,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div
+      data-testid="image-studio-modal"
       className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-3 sm:p-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -56,10 +87,11 @@ export const ImageStudioModal: React.FC<{
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold flex items-center gap-2 text-[var(--text)]">
             <ImageIcon className="w-5 h-5 text-[var(--primary)]" />
-            <span>Image Studio</span>
+            <span>Image Studio (Generate & Edit)</span>
           </h3>
           <button
             type="button"
+            aria-label="Close Image Studio"
             onClick={onClose}
             className="text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
           >
@@ -70,15 +102,53 @@ export const ImageStudioModal: React.FC<{
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-semibold text-[var(--text-2)] uppercase mb-1">
-              Image Description
+              {refImage ? 'Edit Instruction' : 'Image Description'}
             </label>
             <input
               type="text"
+              data-testid="image-studio-prompt-input"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. Futuristic Dhaka skyline in monsoon rain at dusk"
+              placeholder={
+                refImage
+                  ? 'e.g. Change background to snowy mountains at golden hour'
+                  : 'e.g. Futuristic Dhaka skyline in monsoon rain at dusk'
+              }
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none focus:border-[var(--primary)]"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-2)] uppercase mb-1">
+              Reference Image (Optional — for editing)
+            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex-1 px-3 py-2 rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer truncate">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePickReference}
+                  className="hidden"
+                />
+                {refImage ? `Uploaded: ${refImage.name}` : 'Upload image to edit…'}
+              </label>
+              {refImage && (
+                <button
+                  type="button"
+                  onClick={() => setRefImage(null)}
+                  className="px-2.5 py-2 rounded-xl border border-[var(--border)] text-xs text-rose-500 cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {refImage && (
+              <img
+                src={refImage.dataUrl}
+                alt="Reference preview"
+                className="mt-2 h-24 rounded-lg border border-[var(--border)] object-cover"
+              />
+            )}
           </div>
 
           <div>
@@ -91,19 +161,19 @@ export const ImageStudioModal: React.FC<{
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none"
             >
               <option value="photorealistic, cinematic lighting, 8k">
-                📷 Cinematic Realism
+                Cinematic Realism
               </option>
               <option value="anime style, vibrant, studio ghibli inspired">
-                🌸 Anime & Illustration
+                Anime & Illustration
               </option>
               <option value="oil painting, artistic brush strokes, canvas texture">
-                🖌️ Fine Oil Painting
+                Fine Oil Painting
               </option>
               <option value="3d render, octane, unreal engine, soft studio light">
-                🧊 3D Octane Render
+                3D Octane Render
               </option>
               <option value="isometric vector illustration, clean flat colors">
-                📐 Isometric Vector Art
+                Isometric Vector Art
               </option>
             </select>
           </div>
@@ -114,22 +184,36 @@ export const ImageStudioModal: React.FC<{
               onChange={(e) => setSize(Number(e.target.value))}
               className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-2.5 text-sm text-[var(--text)] outline-none"
             >
-              <option value={512}>⚡ Fast (512×512)</option>
-              <option value={768}>✨ HD (768×768)</option>
-              <option value={1024}>💎 Ultra (1024×1024)</option>
+              <option value={512}>Fast (1:1 · 512)</option>
+              <option value={768}>HD (1:1 · 768)</option>
+              <option value={1024}>Ultra (1:1 · 1024)</option>
             </select>
 
             <button
               type="button"
+              data-testid="image-studio-generate-btn"
               onClick={() => {
                 if (!prompt.trim()) return;
-                onGenerate(prompt.trim(), style, size);
+                onGenerate(
+                  prompt.trim(),
+                  style,
+                  size,
+                  refImage
+                    ? {
+                        base64: refImage.base64,
+                        mimeType: refImage.mimeType,
+                        name: refImage.name,
+                      }
+                    : undefined
+                );
                 setPrompt('');
+                setRefImage(null);
                 onClose();
               }}
               className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] text-white px-4 py-2.5 text-sm font-semibold hover:opacity-90 cursor-pointer"
             >
-              <Sparkles className="w-4 h-4" /> Generate
+              <Sparkles className="w-4 h-4" />
+              <span>{refImage ? 'Edit Image' : 'Generate'}</span>
             </button>
           </div>
         </div>
@@ -502,7 +586,8 @@ export const CodeLabModal: React.FC<{
   isOpen: boolean;
   initialCode: string;
   onClose: () => void;
-}> = ({ isOpen, initialCode, onClose }) => {
+  onFixWithAi?: (payload: { filename: string; code: string; error: string }) => void;
+}> = ({ isOpen, initialCode, onClose, onFixWithAi }) => {
   const defaultCode = `<!DOCTYPE html>
 <html>
 <body style="font-family:sans-serif;text-align:center;padding:32px;background:#f8fafc;color:#0f172a;">
@@ -521,6 +606,7 @@ export const CodeLabModal: React.FC<{
   useEffect(() => {
     if (initialCode && initialCode.trim()) {
       setCode(initialCode);
+      setLogs([]);
     }
   }, [initialCode]);
 
@@ -540,30 +626,41 @@ export const CodeLabModal: React.FC<{
   const handleRun = () => {
     setLogs([]);
     const trimmed = code.trim();
-    if (!trimmed.includes('<') && trimmed.length > 0) {
-      const safeScript = trimmed.replace(/<\/script>/gi, '<\\/script>');
-      const jsRunnerHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"></head><body><script>
-        var S=function(t,a){parent.postMessage({smftaLab:1,t:t,a:a},"*")};
+    const labTelemetryScript = `<script>
+      (function(){
+        var S=function(t,a){try{parent.postMessage({smftaLab:1,t:t,a:a},"*")}catch(_){}};
         ["log","info","warn","error"].forEach(function(k){
+          var orig=console[k];
           console[k]=function(){
             S(k,Array.prototype.map.call(arguments,function(v){
               try{return typeof v==="object"?JSON.stringify(v):String(v)}catch(e){return String(v)}
             }).join(" "));
+            if(orig)try{orig.apply(console,arguments)}catch(_){}
           };
         });
-        window.onerror=function(m){S("error",String(m))};
+        window.addEventListener("error",function(e){S("error",e.message||(e.error&&e.error.message)||"Runtime error")});
+        window.addEventListener("unhandledrejection",function(e){var r=e.reason;S("error","Unhandled Promise: "+(r&&r.message?r.message:String(r)))});
+      })();
+    </script>`;
+
+    if (!trimmed.includes('<') && trimmed.length > 0) {
+      const safeScript = trimmed.replace(/<\/script>/gi, '<\\/script>');
+      const jsRunnerHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';">${labTelemetryScript}</head><body><script>
         try {
           ${safeScript}
         } catch(e) {
-          S("error", e && e.message ? e.message : String(e));
+          console.error(e && e.message ? e.message : String(e));
         }
       </script></body></html>`;
       setSrcDoc(jsRunnerHtml);
+    } else if (/<head[^>]*>/i.test(code)) {
+      setSrcDoc(code.replace(/<head[^>]*>/i, (m) => `${m}\n${labTelemetryScript}`));
     } else {
-      setSrcDoc(code);
+      setSrcDoc(`${labTelemetryScript}\n${code}`);
     }
   };
 
+  const firstError = logs.find((l) => l.type === 'error')?.text || '';
 
   if (!isOpen) return null;
 
@@ -595,13 +692,32 @@ export const CodeLabModal: React.FC<{
           placeholder="Write HTML/CSS or pure JavaScript (console.log) here..."
         />
 
-        <button
-          type="button"
-          onClick={handleRun}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] text-white py-2.5 text-sm font-semibold hover:opacity-90 cursor-pointer"
-        >
-          <Play className="w-4 h-4" /> Run Code
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleRun}
+            className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--primary)] text-white py-2.5 text-sm font-semibold hover:opacity-90 cursor-pointer"
+          >
+            <Play className="w-4 h-4" /> Run Code
+          </button>
+          {firstError && onFixWithAi && (
+            <button
+              type="button"
+              onClick={() => {
+                onFixWithAi({
+                  filename: code.trim().includes('<') ? 'index.html' : 'script.js',
+                  code,
+                  error: firstError,
+                });
+                onClose();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-500 hover:bg-rose-500/25 px-4 py-2.5 text-xs font-semibold cursor-pointer shrink-0"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Fix with AI</span>
+            </button>
+          )}
+        </div>
 
         {srcDoc.trim().length > 0 ? (
           <iframe
