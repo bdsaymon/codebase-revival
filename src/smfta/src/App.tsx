@@ -1250,6 +1250,8 @@ export default function App() {
       .visualViewport;
     if (!vv) return;
     const apply = () => {
+      // Pinch zoom must not resize the shell as if a keyboard opened.
+      if (Math.abs(vv.scale - 1) > 0.01) return;
       const h = Math.round(vv.height);
       if (h > 120) {
         document.documentElement.style.setProperty('--app-height', `${h}px`);
@@ -1257,10 +1259,9 @@ export default function App() {
     };
     apply();
     vv.addEventListener('resize', apply);
-    vv.addEventListener('scroll', apply);
     return () => {
       vv.removeEventListener('resize', apply);
-      vv.removeEventListener('scroll', apply);
+      document.documentElement.style.removeProperty('--app-height');
     };
   }, []);
 
@@ -5917,7 +5918,7 @@ export default function App() {
       )}
 
       {/* MAIN WORKSPACE COLUMN + SIDE-BY-SIDE ARTIFACT PREVIEW */}
-      <div className="flex-1 flex flex-row min-w-0 h-full overflow-hidden">
+      <div className="chat-shell-body flex-1 flex flex-row min-w-0 h-full overflow-hidden">
         {currentView === 'workspace' ? (
           <div className="flex-1 flex flex-col min-w-0 h-full">
             <CodeWorkspacePage
@@ -6120,7 +6121,7 @@ export default function App() {
             </header>
 
             {/* FULL-WIDTH RESPONSIVE CHAT PANEL */}
-            <div className="flex flex-col min-w-0 h-full overflow-hidden">
+            <div className="chat-transcript flex flex-col min-w-0 overflow-hidden">
               {/* IN-CHAT FLOATING SEARCH BAR */}
               {inChatSearchOpen && (
                 <div className="app-findbar shrink-0">
@@ -6736,8 +6737,8 @@ export default function App() {
               )}
             </div>
 
-            {/* VARIATION 2 COMPOSER & FOOTER METADATA */}
-            <div>
+            {/* Composer stays below the independently scrolling transcript. */}
+            <div className="chat-footer">
               <section className="composer-wrap">
                 {/* Connected services row — only shown once a service is actually linked */}
                 {Object.values(connections || {}).some((c: any) => c && c.connected) && (
@@ -6928,7 +6929,7 @@ export default function App() {
 
                       {/* Unified Composer Toolbar */}
                       <div className="composer-bar">
-                        <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="composer-tools flex items-center gap-1.5 min-w-0">
                           <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
@@ -6981,7 +6982,7 @@ export default function App() {
                           </button>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="composer-submit flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             data-testid="voice-mic-btn"
