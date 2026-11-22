@@ -444,6 +444,7 @@ export async function streamGeminiPcmSpeech(params: {
   ok: boolean;
   receivedAudio: boolean;
   integrationRequired?: boolean;
+  fallbackToBrowser?: boolean;
   error?: string;
 }> {
   const cleanText = formatTextForNaturalSpeech(params.text, 600);
@@ -463,15 +464,18 @@ export async function streamGeminiPcmSpeech(params: {
       }),
     });
 
-    if (!res.ok || !res.body) {
+    const contentType = res.headers.get('Content-Type') || '';
+    if (!res.ok || !res.body || contentType.includes('application/json')) {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         integrationRequired?: boolean;
+        fallbackToBrowser?: boolean;
       };
       return {
         ok: false,
         receivedAudio: false,
         integrationRequired: Boolean(data.integrationRequired || res.status === 503),
+        fallbackToBrowser: Boolean(data.fallbackToBrowser),
         error: data.error || `HTTP ${res.status}`,
       };
     }

@@ -1815,23 +1815,50 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
       for (const cand of fastVoiceCandidates) {
         if (clientClosed || upstreamAbortController.signal.aborted) break;
+        let receivedFirstChunk = false;
+        let candidateTimedOut = false;
+        let firstTokenTimer: ReturnType<typeof setTimeout> | null = null;
         try {
-          const fastStream = await fastAi.models.generateContentStream({
+          const streamPromise = fastAi.models.generateContentStream({
             model: cand.model,
             contents: voiceHistoryContents,
             config: {
               systemInstruction: liveVoiceSysInstruction,
-              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 320),
+              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 260),
               thinkingConfig: { thinkingLevel: cand.level },
             },
           });
 
+          const fastStream = await Promise.race([
+            streamPromise,
+            new Promise<never>((_, reject) => {
+              firstTokenTimer = setTimeout(() => {
+                candidateTimedOut = true;
+                reject(new Error(`Voice fast-lane ${cand.model} connect timeout`));
+              }, 6000);
+            }),
+          ]);
+
           for await (const chunk of fastStream) {
-            if (clientClosed || upstreamAbortController.signal.aborted) break;
+            if (clientClosed || upstreamAbortController.signal.aborted || candidateTimedOut) {
+              break;
+            }
             const deltaText = chunk.text || '';
             if (deltaText) {
+              if (!receivedFirstChunk) {
+                receivedFirstChunk = true;
+                if (firstTokenTimer) {
+                  clearTimeout(firstTokenTimer);
+                  firstTokenTimer = null;
+                }
+              }
               emitDelta(deltaText);
             }
+          }
+
+          if (firstTokenTimer) {
+            clearTimeout(firstTokenTimer);
+            firstTokenTimer = null;
           }
 
           if (fullReplyAccumulator.trim()) {
@@ -1849,6 +1876,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             return;
           }
         } catch {
+          if (firstTokenTimer) {
+            clearTimeout(firstTokenTimer);
+            firstTokenTimer = null;
+          }
           // Try next fast voice candidate or fall through to standard engine
         }
       }

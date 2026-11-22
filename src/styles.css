@@ -6997,61 +6997,132 @@ body {
   }
 }
 
-/* ── Live Voice Conversation Overlay (Glowing Blue Fluid Orb + Frosted Pill) ── */
-.live-voice-backdrop {
-  background-color: #02050e;
+/* ── SMFTA Live Voice Conversation Sanctuary (Cosmic Aurora Stage) ── */
+.live-voice-overlay {
+  isolation: isolate;
+  background-color: #02050d;
   background-image:
-    radial-gradient(ellipse 105% 58% at 50% 106%, rgba(49, 123, 240, 0.78) 0%, rgba(25, 78, 178, 0.42) 44%, rgba(6, 17, 46, 0.14) 70%, rgba(2, 5, 14, 0) 88%),
-    radial-gradient(circle at 50% 34%, rgba(30, 82, 180, 0.16) 0%, rgba(2, 5, 14, 0) 60%);
+    radial-gradient(ellipse 85% 48% at 50% 104%, rgba(37, 99, 235, 0.34) 0%, rgba(15, 23, 42, 0.18) 54%, rgba(2, 5, 13, 0) 86%),
+    radial-gradient(circle at 50% 38%, rgba(30, 64, 175, 0.18) 0%, rgba(2, 5, 13, 0) 64%);
+  transition: background-color 460ms ease, background-image 460ms ease;
 }
 
-.live-voice-pill {
-  background: linear-gradient(
-    135deg,
-    rgba(166, 208, 255, 0.28) 0%,
-    rgba(92, 158, 248, 0.36) 52%,
-    rgba(160, 206, 255, 0.28) 100%
+.live-voice-overlay.live-voice-state-listening {
+  background-image:
+    radial-gradient(ellipse 92% 54% at 50% 104%, rgba(16, 185, 129, 0.24) 0%, rgba(8, 145, 178, 0.32) 34%, rgba(6, 78, 59, 0.1) 60%, rgba(2, 5, 13, 0) 86%),
+    radial-gradient(circle at 50% 38%, rgba(6, 182, 212, 0.18) 0%, rgba(2, 5, 13, 0) 62%);
+}
+
+.live-voice-overlay.live-voice-state-speaking {
+  background-image:
+    radial-gradient(ellipse 96% 56% at 50% 104%, rgba(236, 72, 153, 0.22) 0%, rgba(109, 40, 217, 0.38) 38%, rgba(37, 99, 235, 0.16) 62%, rgba(2, 5, 13, 0) 86%),
+    radial-gradient(circle at 50% 38%, rgba(139, 92, 246, 0.2) 0%, rgba(2, 5, 13, 0) 64%);
+}
+
+.live-voice-overlay.live-voice-state-thinking {
+  background-image:
+    radial-gradient(ellipse 90% 52% at 50% 104%, rgba(79, 70, 229, 0.36) 0%, rgba(30, 27, 75, 0.2) 52%, rgba(2, 5, 13, 0) 85%),
+    radial-gradient(circle at 50% 38%, rgba(99, 102, 241, 0.18) 0%, rgba(2, 5, 13, 0) 62%);
+}
+
+.live-voice-overlay.live-voice-state-reconnecting {
+  background-image:
+    radial-gradient(ellipse 90% 52% at 50% 104%, rgba(180, 83, 9, 0.32) 0%, rgba(69, 26, 3, 0.14) 52%, rgba(2, 5, 13, 0) 84%),
+    radial-gradient(circle at 50% 38%, rgba(245, 158, 11, 0.14) 0%, rgba(2, 5, 13, 0) 60%);
+}
+
+.live-voice-overlay.live-voice-state-disconnected {
+  background-image:
+    radial-gradient(ellipse 90% 50% at 50% 104%, rgba(51, 65, 85, 0.28) 0%, rgba(15, 23, 42, 0.12) 52%, rgba(2, 5, 13, 0) 84%);
+}
+
+.live-voice-aurora-horizon {
+  position: absolute;
+  inset: auto -18% -140px -18%;
+  height: 260px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(56, 189, 248, 0.22) 0%,
+    rgba(139, 92, 246, 0.14) 42%,
+    rgba(2, 5, 13, 0) 74%
   );
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(205, 229, 255, 0.46);
+  filter: blur(42px);
+  opacity: 0.85;
+  transition: opacity 420ms ease, transform 520ms ease;
+}
+
+.live-voice-state-listening .live-voice-aurora-horizon {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(34, 211, 238, 0.26) 0%,
+    rgba(52, 211, 153, 0.16) 44%,
+    rgba(2, 5, 13, 0) 74%
+  );
+}
+
+.live-voice-state-speaking .live-voice-aurora-horizon {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(167, 139, 250, 0.3) 0%,
+    rgba(244, 114, 182, 0.18) 44%,
+    rgba(2, 5, 13, 0) 74%
+  );
+}
+
+.live-voice-dock {
+  background: rgba(9, 15, 30, 0.62);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
   box-shadow:
-    inset 0 1px 1px rgba(255, 255, 255, 0.35),
-    inset 0 -8px 20px rgba(32, 96, 212, 0.25),
-    0 18px 46px rgba(10, 44, 118, 0.55);
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    0 18px 44px rgba(0, 0, 0, 0.52);
 }
 
-.live-voice-wave-bars {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 20px;
+/* Preserve full keyboard accessibility with curved focus rings (no square boxes!) */
+.live-voice-overlay button,
+.live-voice-overlay select,
+.live-voice-overlay input {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.live-voice-wave-bars .wbar {
-  width: 2.2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  transform-origin: center;
-  animation: liveVoiceBarIdle 1.6s ease-in-out infinite;
+.live-voice-overlay .live-voice-control:focus-visible,
+.live-voice-overlay .live-voice-orb-trigger:focus-visible {
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.85), 0 0 0 5px rgba(56, 189, 248, 0.22);
 }
 
-.live-voice-wave-bars .wbar-1 { height: 8px; animation-delay: 0s; }
-.live-voice-wave-bars .wbar-2 { height: 15px; animation-delay: 0.16s; }
-.live-voice-wave-bars .wbar-3 { height: 19px; animation-delay: 0.32s; }
-.live-voice-wave-bars .wbar-4 { height: 13px; animation-delay: 0.48s; }
-.live-voice-wave-bars .wbar-5 { height: 8px; animation-delay: 0.64s; }
+.live-voice-overlay .live-voice-select-wrap:has(select:focus-visible) {
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.82);
+}
 
-@keyframes liveVoiceBarIdle {
-  0%, 100% {
-    transform: scaleY(0.68);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scaleY(1.06);
-    opacity: 1;
-  }
+.live-voice-overlay .live-voice-composer {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.live-voice-overlay .live-voice-composer:focus-within {
+  border-color: rgba(125, 211, 252, 0.55);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.22);
+}
+
+.live-voice-overlay .live-voice-input {
+  border: none;
+  box-shadow: none;
+}
+
+.live-voice-overlay .live-voice-transcript {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
+}
+
+.live-voice-overlay .live-voice-transcript::-webkit-scrollbar {
+  display: none;
 }
 
 .ref-model-series-label {

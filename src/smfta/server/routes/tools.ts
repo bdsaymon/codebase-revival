@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { Router, Request, Response } from '../runtime/express';
 import { callBackendEngine, sanitizeErrorMsg } from '../aiClient';
 import { sanitizeProprietaryOutput } from '../providers';
@@ -550,11 +550,17 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
     `Transcribe the spoken audio accurately verbatim in its original spoken language (${languageHint}, supporting Bengali, English, and mixed Banglish). ` +
     'Output ONLY the transcribed words with natural punctuation and no explanation or labels. If there is only silence or background noise, return an empty string.';
 
-  const candidateModels = ['gemini-3.5-transcribe', 'gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+  const candidateModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen', 'gemini-3.5-transcribe'];
   let lastError = 'Transcription failed';
 
   for (const model of candidateModels) {
     try {
+      const config =
+        model === 'gemini-3.1-flash-lite'
+          ? { maxOutputTokens: 256, thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+          : model === 'gemini-4-hydrogen'
+            ? { maxOutputTokens: 256, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+            : undefined;
       const resp = await ai.models.generateContent({
         model,
         contents: [
@@ -571,6 +577,7 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
             ],
           },
         ],
+        ...(config ? { config } : {}),
       });
       const text = cleanVoiceTranscriptResponse(resp.text || '');
       return res.json({
@@ -625,10 +632,21 @@ export function sanitizeTextForTtsEndpoint(raw: unknown): string {
     .slice(0, 1600);
 }
 
+let serverTtsQuotaCooldownUntil = 0;
+
 toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
   if (!speechText) {
     return res.status(400).json({ ok: false, error: 'text is required for speech synthesis.' });
+  }
+
+  if (Date.now() < serverTtsQuotaCooldownUntil) {
+    return res.status(200).json({
+      ok: false,
+      fallbackToBrowser: true,
+      code: 'TTS_QUOTA_FALLBACK',
+      error: 'Cloud voice quota temporarily reached; switched to instant device voice.',
+    });
   }
 
   const geminiKey = getV2GeminiApiKey();
@@ -660,24 +678,28 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
     httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
   });
 
-  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  const ttsModels = [
+    'gemini-3.8-flash-lite-tts',
+    'gemini-3.8-flash-tts',
+    'gemini-2.5-flash-preview-tts',
+  ];
   let lastError = 'Gemini TTS generation failed';
+  let sawQuotaError = false;
 
   for (const model of ttsModels) {
     try {
+      const partPayload = model.startsWith('gemini-3.8')
+        ? ({
+            text: speechText,
+            speechMetadata: { style: customStyle },
+          } as { text: string; speechMetadata?: { style?: string } })
+        : { text: speechText };
       const response = await ai.models.generateContent({
         model,
         contents: [
           {
             role: 'user',
-            parts: [
-              {
-                text: speechText,
-                speechMetadata: {
-                  style: customStyle,
-                },
-              } as { text: string; speechMetadata?: { style?: string } },
-            ],
+            parts: [partPayload],
           },
         ],
         config: {
@@ -709,7 +731,20 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
       lastError = `${model} returned no audio payload.`;
     } catch (err) {
       lastError = sanitizeErrorMsg(err);
+      if (/429|quota|rate.?limit|resource_exhausted/i.test(lastError)) {
+        sawQuotaError = true;
+      }
     }
+  }
+
+  if (sawQuotaError || /429|quota|rate.?limit|resource_exhausted/i.test(lastError)) {
+    serverTtsQuotaCooldownUntil = Date.now() + 60_000;
+    return res.status(200).json({
+      ok: false,
+      fallbackToBrowser: true,
+      code: 'TTS_QUOTA_FALLBACK',
+      error: 'Cloud voice quota temporarily reached; switched to instant device voice.',
+    });
   }
 
   return res.status(502).json({
@@ -722,6 +757,15 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
   if (!speechText) {
     return res.status(400).json({ ok: false, error: 'text is required for speech synthesis.' });
+  }
+
+  if (Date.now() < serverTtsQuotaCooldownUntil) {
+    return res.status(200).json({
+      ok: false,
+      fallbackToBrowser: true,
+      code: 'TTS_QUOTA_FALLBACK',
+      error: 'Cloud voice quota temporarily reached; switched to instant device voice.',
+    });
   }
 
   const geminiKey = getV2GeminiApiKey();
@@ -758,26 +802,30 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     clientClosed = true;
   });
 
-  const ttsStreamModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  const ttsStreamModels = [
+    'gemini-3.8-flash-lite-tts',
+    'gemini-3.8-flash-tts',
+    'gemini-2.5-flash-preview-tts',
+  ];
   let lastError = 'Gemini streaming TTS returned no audio chunks.';
+  let sawQuotaError = false;
 
   for (const model of ttsStreamModels) {
     if (clientClosed || req.signal?.aborted) break;
     let wroteAny = false;
     try {
+      const partPayload = model.startsWith('gemini-3.8')
+        ? ({
+            text: speechText,
+            speechMetadata: { style: customStyle },
+          } as { text: string; speechMetadata?: { style?: string } })
+        : { text: speechText };
       const responseStream = await ai.models.generateContentStream({
         model,
         contents: [
           {
             role: 'user',
-            parts: [
-              {
-                text: speechText,
-                speechMetadata: {
-                  style: customStyle,
-                },
-              } as { text: string; speechMetadata?: { style?: string } },
-            ],
+            parts: [partPayload],
           },
         ],
         config: {
@@ -838,6 +886,9 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
       lastError = `${model} returned no streaming audio chunks.`;
     } catch (err) {
       lastError = sanitizeErrorMsg(err);
+      if (/429|quota|rate.?limit|resource_exhausted/i.test(lastError)) {
+        sawQuotaError = true;
+      }
       if (wroteAny) {
         if (!res.writableEnded) {
           res.end();
@@ -848,6 +899,15 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   }
 
   if (!res.headersSent) {
+    if (sawQuotaError || /429|quota|rate.?limit|resource_exhausted/i.test(lastError)) {
+      serverTtsQuotaCooldownUntil = Date.now() + 60_000;
+      return res.status(200).json({
+        ok: false,
+        fallbackToBrowser: true,
+        code: 'TTS_QUOTA_FALLBACK',
+        error: 'Cloud voice quota temporarily reached; switched to instant device voice.',
+      });
+    }
     return res.status(502).json({
       ok: false,
       error: lastError,

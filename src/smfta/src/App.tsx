@@ -5157,7 +5157,13 @@ export default function App() {
       }));
 
       // Automatically open side-by-side Live Preview when previewable HTML/CSS/JS/React/SVG is generated
-      if (settings.autoOpenLivePreview !== false && finalCompletedMsg.text) {
+      // Never trigger automatic workspace/preview navigation during Live Voice Mode
+      if (
+        !isLiveVoiceTurn &&
+        !voiceCallOpenRef.current &&
+        settings.autoOpenLivePreview !== false &&
+        finalCompletedMsg.text
+      ) {
         const autoPreviewPayload = extractPreviewableArtifactFromMessage(
           finalCompletedMsg.text
         );
@@ -5249,21 +5255,24 @@ export default function App() {
         showToast(`ℹ️ ${responderMeta.fallbackNotice}`, 3800);
       }
 
-      // v18.11 — task-completion notification, gated by user settings.
-      notifyUser(
-        settings,
-        'taskDone',
-        'Response ready',
-        'Your AI reply has finished generating.'
-      );
+      // v18.11 — task-completion notification, suppressed during Live Voice Mode to prevent unwanted chimes.
+      if (!voiceCallOpenRef.current && !isLiveVoiceTurn) {
+        notifyUser(
+          settings,
+          'taskDone',
+          'Response ready',
+          'Your AI reply has finished generating.'
+        );
+      }
 
       if (
         finalText.trim() &&
         (settings.autoVoice || talkMode) &&
+        !voiceCallOpenRef.current &&
         !voiceCallOpen
       ) {
         speakText(finalText, aiMsgId, () => {
-          if (talkMode) {
+          if (talkMode && !voiceCallOpenRef.current) {
             setTimeout(() => toggleMic(), 400);
           }
         });
@@ -5301,7 +5310,9 @@ export default function App() {
             )
           );
         }
-        showToast('Generation stopped');
+        if (!voiceCallOpenRef.current) {
+          showToast('Generation stopped');
+        }
       } else {
         const rawMsg =
           err instanceof Error ? err.message : 'Connection interrupted';
@@ -5345,14 +5356,15 @@ export default function App() {
           return;
         }
 
-        // v18.11 — real browser notification for request failures (gated by
-        // the user's Notifications settings and browser permission).
-        notifyUser(
-          settings,
-          'errors',
-          'Reply failed',
-          rawMsg.slice(0, 140)
-        );
+        // v18.11 — real browser notification for request failures (suppressed in Live Voice Mode).
+        if (!voiceCallOpenRef.current) {
+          notifyUser(
+            settings,
+            'errors',
+            'Reply failed',
+            rawMsg.slice(0, 140)
+          );
+        }
 
         const isNetworkFetchErr = errCode === 'NETWORK_ERROR';
         // P1-08: Fix `isQuotaOrRateLimit || true` bug! Only set quotaExhausted on true QUOTA_EXHAUSTED / 402 billing evidence
@@ -6037,8 +6049,14 @@ export default function App() {
     : null;
 
   const openLiveVoiceSession = () => {
+    // Blur any focused composer input so mobile virtual keyboards never pop or click when entering Voice Mode
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    cancelVoiceDictation();
     unlockSharedLiveAudioContext();
     bilingualSpeechPlayer.stop();
+    window.speechSynthesis?.cancel();
     setVoiceCallOpen(true);
   };
 
@@ -7915,6 +7933,7 @@ export default function App() {
       <LiveVoiceOverlay
         isOpen={voiceCallOpen}
         userName={profile?.name || settings.displayName}
+        preferredLang={settings.vlang || settings.appLanguage || 'auto'}
         isListening={isListening}
         isGenerating={isGenerating}
         isTranscribing={isTranscribingVoice}
@@ -7924,10 +7943,14 @@ export default function App() {
         lastAiMessage={lastAiVoiceSnapshot}
         onToggleMic={toggleMic}
         onCancelMic={cancelVoiceDictation}
+        onAbortGeneration={() => {
+          abortRef.current?.abort();
+        }}
         onSendText={(text) => {
           void handleSend(text);
         }}
         onEndCall={() => {
+          abortRef.current?.abort();
           cancelVoiceDictation();
           bilingualSpeechPlayer.stop();
           setVoiceCallOpen(false);
