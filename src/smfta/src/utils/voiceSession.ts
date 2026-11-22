@@ -30,13 +30,13 @@ export interface VoiceStateInputs {
 export function deriveVoiceSessionState(
   inputs: VoiceStateInputs
 ): VoiceConnectionState {
-  if (inputs.isDisconnected) return 'disconnected';
   if (inputs.isOffline || inputs.isReconnecting) return 'reconnecting';
-  if (inputs.isConnecting) return 'connecting';
   if (inputs.isAiSpeaking) return 'speaking';
   if (inputs.isGenerating || inputs.isTranscribing || inputs.isSynthesizing) {
     return 'thinking';
   }
+  if (inputs.isDisconnected) return 'disconnected';
+  if (inputs.isConnecting) return 'connecting';
   if (inputs.isListening) return 'listening';
   return 'listening';
 }
@@ -50,10 +50,10 @@ export interface VadConfig {
 }
 
 export const DEFAULT_VAD_CONFIG: VadConfig = {
-  minSpeechThreshold: 0.011,
-  releaseRatio: 0.62,
-  minSpeechDurationMs: 170,
-  endOfSpeechSilenceMs: 720,
+  minSpeechThreshold: 0.0075,
+  releaseRatio: 0.58,
+  minSpeechDurationMs: 150,
+  endOfSpeechSilenceMs: 740,
   maxUtteranceMs: 20000,
 };
 
@@ -75,7 +75,7 @@ export interface VadStepResult {
   normalizedLevel: number;
 }
 
-export function createVadTracker(initialNoiseFloor = 0.005): VadTrackerState {
+export function createVadTracker(initialNoiseFloor = 0.004): VadTrackerState {
   return {
     noiseFloor: initialNoiseFloor,
     isVoiceActive: false,
@@ -102,6 +102,36 @@ export function computeRmsEnergy(samples: Uint8Array): number {
   return Math.min(1, Math.max(0, rms));
 }
 
+/**
+ * Combines time-domain RMS with human vocal-band frequency energy (bins 2..32)
+ * so quiet mobile microphones with aggressive hardware echo cancellation still
+ * register clear vocal energy when the user speaks.
+ */
+export function computeVocalEnergy(
+  timeDomainSamples: Uint8Array,
+  freqSamples?: Uint8Array
+): number {
+  const timeRms = computeRmsEnergy(timeDomainSamples);
+  if (!freqSamples || freqSamples.length < 8) return timeRms;
+  const startBin = 2;
+  const endBin = Math.min(32, freqSamples.length - 1);
+  if (endBin <= startBin) return timeRms;
+  let sum = 0;
+  let peakBin = 0;
+  for (let i = startBin; i <= endBin; i += 1) {
+    const val = freqSamples[i] || 0;
+    sum += val;
+    if (val > peakBin) peakBin = val;
+  }
+  const count = endBin - startBin + 1;
+  const avgNorm = sum / (count * 255);
+  const peakNorm = peakBin / 255;
+  // Require both vocal-band harmonic presence and a distinct formant peak above flat hiss
+  const freqEnergy =
+    peakNorm > 0.14 ? Math.min(1, avgNorm * 0.22 + Math.max(0, peakNorm - 0.14) * 0.08) : 0;
+  return Math.min(1, Math.max(timeRms, freqEnergy));
+}
+
 export function stepVadTracker(
   prev: VadTrackerState,
   rms: number,
@@ -117,14 +147,14 @@ export function stepVadTracker(
   // Adapt ambient noise floor gently only when NOT confirmed speaking
   let noiseFloor = prev.noiseFloor;
   if (!prev.isVoiceActive) {
-    const targetFloor = Math.min(0.035, Math.max(0.003, safeRms));
-    const alpha = targetFloor < noiseFloor ? 0.1 : 0.02;
+    const targetFloor = Math.min(0.014, Math.max(0.0025, safeRms));
+    const alpha = targetFloor < noiseFloor ? 0.12 : 0.018;
     noiseFloor = noiseFloor + (targetFloor - noiseFloor) * alpha;
   }
 
   const speechThreshold = Math.max(
     config.minSpeechThreshold,
-    noiseFloor * 1.85 + 0.006
+    noiseFloor * 1.6 + 0.004
   );
   const releaseThreshold = speechThreshold * config.releaseRatio;
 
@@ -132,7 +162,7 @@ export function stepVadTracker(
   const isAboveRelease = safeRms >= releaseThreshold;
   const normalizedLevel = Math.min(
     1,
-    Math.max(0, (safeRms - noiseFloor) / Math.max(0.05, speechThreshold * 2.4))
+    Math.max(0, (safeRms - noiseFloor) / Math.max(0.04, speechThreshold * 2.4))
   );
 
   let isVoiceActive = prev.isVoiceActive;

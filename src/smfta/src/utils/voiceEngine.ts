@@ -775,12 +775,18 @@ class BilingualSpeechPlayer {
       playNext(0);
     };
 
-    if (!params.skipServerTts && !wantMale && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+    if (!params.skipServerTts && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
       const ctrl = new AbortController();
       this.activeAbort = ctrl;
       const chosenVoice: GeminiFemaleVoiceName =
         params.geminiVoice ||
-        (params.voiceProfile === 'english_us_female' ? 'Zephyr' : 'Kore');
+        (wantMale
+          ? params.voiceProfile === 'english_us_male'
+            ? 'Charon'
+            : 'Puck'
+          : params.voiceProfile === 'english_us_female'
+            ? 'Zephyr'
+            : 'Kore');
 
       void requestGeminiFemaleSpeech({
         text: cleanText,

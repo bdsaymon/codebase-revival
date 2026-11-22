@@ -6997,86 +6997,156 @@ body {
   }
 }
 
-/* ── SMFTA Live Voice Conversation Sanctuary (Cosmic Aurora Stage) ── */
+/* ── SMFTA Live Voice Conversation Sanctuary (Quantum Holographic Stage) ── */
 .live-voice-overlay {
   isolation: isolate;
-  background-color: #02050d;
+  background-color: #02040b;
   background-image:
-    radial-gradient(ellipse 85% 48% at 50% 104%, rgba(37, 99, 235, 0.34) 0%, rgba(15, 23, 42, 0.18) 54%, rgba(2, 5, 13, 0) 86%),
-    radial-gradient(circle at 50% 38%, rgba(30, 64, 175, 0.18) 0%, rgba(2, 5, 13, 0) 64%);
-  transition: background-color 460ms ease, background-image 460ms ease;
+    radial-gradient(ellipse 88% 50% at 50% 104%, rgba(37, 99, 235, 0.36) 0%, rgba(15, 23, 42, 0.2) 54%, rgba(2, 4, 11, 0) 86%),
+    radial-gradient(circle at 50% 36%, rgba(56, 189, 248, 0.16) 0%, rgba(30, 58, 138, 0.1) 42%, rgba(2, 4, 11, 0) 68%);
+  transition: background-color 480ms ease, background-image 480ms ease;
 }
 
 .live-voice-overlay.live-voice-state-listening {
   background-image:
-    radial-gradient(ellipse 92% 54% at 50% 104%, rgba(16, 185, 129, 0.24) 0%, rgba(8, 145, 178, 0.32) 34%, rgba(6, 78, 59, 0.1) 60%, rgba(2, 5, 13, 0) 86%),
-    radial-gradient(circle at 50% 38%, rgba(6, 182, 212, 0.18) 0%, rgba(2, 5, 13, 0) 62%);
+    radial-gradient(ellipse 94% 55% at 50% 104%, rgba(16, 185, 129, 0.26) 0%, rgba(8, 145, 178, 0.34) 36%, rgba(6, 78, 59, 0.12) 62%, rgba(2, 4, 11, 0) 86%),
+    radial-gradient(circle at 50% 36%, rgba(16, 185, 129, 0.16) 0%, rgba(6, 182, 212, 0.14) 38%, rgba(2, 4, 11, 0) 66%);
 }
 
 .live-voice-overlay.live-voice-state-speaking {
   background-image:
-    radial-gradient(ellipse 96% 56% at 50% 104%, rgba(236, 72, 153, 0.22) 0%, rgba(109, 40, 217, 0.38) 38%, rgba(37, 99, 235, 0.16) 62%, rgba(2, 5, 13, 0) 86%),
-    radial-gradient(circle at 50% 38%, rgba(139, 92, 246, 0.2) 0%, rgba(2, 5, 13, 0) 64%);
+    radial-gradient(ellipse 98% 58% at 50% 104%, rgba(236, 72, 153, 0.24) 0%, rgba(124, 58, 237, 0.4) 38%, rgba(37, 99, 235, 0.18) 64%, rgba(2, 4, 11, 0) 86%),
+    radial-gradient(circle at 50% 36%, rgba(168, 85, 247, 0.22) 0%, rgba(236, 72, 153, 0.12) 40%, rgba(2, 4, 11, 0) 68%);
 }
 
 .live-voice-overlay.live-voice-state-thinking {
   background-image:
-    radial-gradient(ellipse 90% 52% at 50% 104%, rgba(79, 70, 229, 0.36) 0%, rgba(30, 27, 75, 0.2) 52%, rgba(2, 5, 13, 0) 85%),
-    radial-gradient(circle at 50% 38%, rgba(99, 102, 241, 0.18) 0%, rgba(2, 5, 13, 0) 62%);
+    radial-gradient(ellipse 92% 54% at 50% 104%, rgba(99, 102, 241, 0.38) 0%, rgba(49, 46, 129, 0.22) 52%, rgba(2, 4, 11, 0) 85%),
+    radial-gradient(circle at 50% 36%, rgba(129, 140, 248, 0.2) 0%, rgba(2, 4, 11, 0) 66%);
 }
 
 .live-voice-overlay.live-voice-state-reconnecting {
   background-image:
-    radial-gradient(ellipse 90% 52% at 50% 104%, rgba(180, 83, 9, 0.32) 0%, rgba(69, 26, 3, 0.14) 52%, rgba(2, 5, 13, 0) 84%),
-    radial-gradient(circle at 50% 38%, rgba(245, 158, 11, 0.14) 0%, rgba(2, 5, 13, 0) 60%);
+    radial-gradient(ellipse 90% 52% at 50% 104%, rgba(180, 83, 9, 0.32) 0%, rgba(69, 26, 3, 0.14) 52%, rgba(2, 4, 11, 0) 84%),
+    radial-gradient(circle at 50% 36%, rgba(245, 158, 11, 0.15) 0%, rgba(2, 4, 11, 0) 62%);
 }
 
 .live-voice-overlay.live-voice-state-disconnected {
   background-image:
-    radial-gradient(ellipse 90% 50% at 50% 104%, rgba(51, 65, 85, 0.28) 0%, rgba(15, 23, 42, 0.12) 52%, rgba(2, 5, 13, 0) 84%);
+    radial-gradient(ellipse 90% 50% at 50% 104%, rgba(51, 65, 85, 0.28) 0%, rgba(15, 23, 42, 0.12) 52%, rgba(2, 4, 11, 0) 84%);
+}
+
+.live-voice-ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 50% 36%, rgba(125, 211, 252, 0.08) 0%, transparent 58%),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 100% 100%, 56px 56px, 56px 56px;
+  mask-image: radial-gradient(ellipse 72% 62% at 50% 38%, rgba(0, 0, 0, 0.72) 0%, transparent 82%);
+  -webkit-mask-image: radial-gradient(ellipse 72% 62% at 50% 38%, rgba(0, 0, 0, 0.72) 0%, transparent 82%);
+  opacity: 0.75;
 }
 
 .live-voice-aurora-horizon {
   position: absolute;
-  inset: auto -18% -140px -18%;
-  height: 260px;
+  inset: auto -18% -135px -18%;
+  height: 270px;
   border-radius: 50%;
   background: radial-gradient(
     ellipse at center,
-    rgba(56, 189, 248, 0.22) 0%,
-    rgba(139, 92, 246, 0.14) 42%,
-    rgba(2, 5, 13, 0) 74%
+    rgba(56, 189, 248, 0.25) 0%,
+    rgba(139, 92, 246, 0.16) 44%,
+    rgba(2, 4, 11, 0) 75%
   );
-  filter: blur(42px);
-  opacity: 0.85;
+  filter: blur(44px);
+  opacity: 0.9;
   transition: opacity 420ms ease, transform 520ms ease;
 }
 
 .live-voice-state-listening .live-voice-aurora-horizon {
   background: radial-gradient(
     ellipse at center,
-    rgba(34, 211, 238, 0.26) 0%,
-    rgba(52, 211, 153, 0.16) 44%,
-    rgba(2, 5, 13, 0) 74%
+    rgba(52, 211, 153, 0.28) 0%,
+    rgba(34, 211, 238, 0.18) 45%,
+    rgba(2, 4, 11, 0) 75%
   );
 }
 
 .live-voice-state-speaking .live-voice-aurora-horizon {
   background: radial-gradient(
     ellipse at center,
-    rgba(167, 139, 250, 0.3) 0%,
-    rgba(244, 114, 182, 0.18) 44%,
-    rgba(2, 5, 13, 0) 74%
+    rgba(192, 132, 252, 0.34) 0%,
+    rgba(244, 114, 182, 0.2) 45%,
+    rgba(2, 4, 11, 0) 75%
   );
 }
 
-.live-voice-dock {
-  background: rgba(9, 15, 30, 0.62);
+.live-voice-hud-pill {
+  background: rgba(11, 18, 36, 0.62);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    0 10px 28px rgba(0, 0, 0, 0.38);
+}
+
+.live-voice-orb-pedestal {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(56, 189, 248, 0.16) 0%,
+    rgba(139, 92, 246, 0.08) 52%,
+    transparent 74%
+  );
+  filter: blur(26px);
+  transition: transform 380ms ease, opacity 380ms ease;
+  opacity: 0.72;
+}
+
+.live-voice-orb-pedestal.is-energized {
+  transform: scale(1.16);
+  opacity: 1;
+}
+
+.live-voice-headline-glow {
+  text-shadow: 0 2px 24px rgba(125, 211, 252, 0.22);
+}
+
+.live-voice-persona-chip {
+  background: rgba(15, 23, 42, 0.54);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+.live-voice-persona-chip.is-active {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.26) 0%, rgba(139, 92, 246, 0.28) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 4px 16px rgba(56, 189, 248, 0.2);
+}
+
+.live-voice-dialogue-card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.62) 0%, rgba(9, 14, 28, 0.72) 100%);
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(22px);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.11),
-    0 18px 44px rgba(0, 0, 0, 0.52);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 14px 36px rgba(0, 0, 0, 0.42);
+}
+
+.live-voice-dock {
+  background: rgba(10, 16, 32, 0.68);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 20px 48px rgba(0, 0, 0, 0.56);
 }
 
 /* Preserve full keyboard accessibility with curved focus rings (no square boxes!) */
@@ -7097,16 +7167,20 @@ body {
 }
 
 .live-voice-overlay .live-voice-composer {
-  background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  transition: border-color 180ms ease, box-shadow 180ms ease;
+  background: rgba(15, 23, 42, 0.76);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+  transition: box-shadow 180ms ease;
 }
 
 .live-voice-overlay .live-voice-composer:focus-within {
-  border-color: rgba(125, 211, 252, 0.55);
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(125, 211, 252, 0.45),
+    0 0 0 2px rgba(56, 189, 248, 0.28),
+    0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
 .live-voice-overlay .live-voice-input {
@@ -7117,8 +7191,6 @@ body {
 .live-voice-overlay .live-voice-transcript {
   scrollbar-width: none;
   -ms-overflow-style: none;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 12%, #000 88%, transparent 100%);
 }
 
 .live-voice-overlay .live-voice-transcript::-webkit-scrollbar {

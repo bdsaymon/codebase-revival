@@ -2885,6 +2885,11 @@ export default function App() {
 
   // Bilingual Speech synthesis (Bengali + English mixed segmentation)
   const speakText = (text: string, msgId?: string, onDone?: () => void) => {
+    // Never trigger main-chat TTS while Live Voice overlay is active
+    if (voiceCallOpenRef.current || voiceCallOpen) {
+      onDone?.();
+      return;
+    }
     bilingualSpeechPlayer.speak({
       text,
       msgId,
@@ -3583,7 +3588,10 @@ export default function App() {
       setGenStepDetail(null);
       const localMsgId = 'ai-' + Date.now();
       const shouldAnimate =
-        settings.streamingReveal !== false && replyText.length > 24;
+        !voiceCallOpenRef.current &&
+        !voiceCallOpen &&
+        settings.streamingReveal !== false &&
+        replyText.length > 24;
       const isThinkingOn =
         settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
       const localTopic = deriveInitialThinkingTopic(rawTxt);

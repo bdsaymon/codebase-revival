@@ -60,6 +60,7 @@ import {
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
   checkAndConsumeServerV2Quota,
+  formatGeminiContents,
   getAllV2ModelStatusesForUser,
   getV2GeminiApiKey,
   isServerAuthorizedTester,
@@ -1311,16 +1312,20 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             },
           ];
 
+    const effectiveV2SysInstruction = liveVoiceMode
+      ? `${v2SystemInstruction}\n\nLIVE VOICE CONVERSATION MODE: Reply naturally and warmly in 1 to 3 clear, concise spoken sentences in the exact language the user spoke (Bengali, English, or Banglish). Output pure spoken text with NO markdown tables, bullet lists, code blocks, URLs, or emojis.`
+      : v2SystemInstruction;
+
     let v2StreamRes = await streamV2FirebaseModel({
       modelId: v2ModelId,
-      systemInstruction: v2SystemInstruction,
+      systemInstruction: effectiveV2SysInstruction,
       history: baseV2History,
       signal: upstreamAbortController.signal,
       emitDelta,
       emitThinking,
-      thinkingEnabled: requestedThinkingMode !== 'off',
+      thinkingEnabled: !liveVoiceMode && requestedThinkingMode !== 'off',
       thinkingEffort:
-        requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
+        liveVoiceMode || requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
     });
 
     if (!v2StreamRes.ok && !clientClosed) {
@@ -1796,18 +1801,23 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     effectiveProvider !== 'xrahat' &&
     effectiveProvider !== 'smfta_cloud';
 
+  let fastVoiceTriedServerGemini = false;
   if (liveVoiceMode && !isCustomNonGeminiProvider && !clientClosed) {
     const fastGeminiKey =
       (parsedKeys.find((k) => k.startsWith('AIza')) || getV2GeminiApiKey() || '').trim();
     if (fastGeminiKey) {
+      if (!built.hasUserKeys) {
+        fastVoiceTriedServerGemini = true;
+      }
       const fastAi = new GoogleGenAI({
         apiKey: fastGeminiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
       });
-      const voiceHistoryContents = normalizedHistory.slice(-8).map((m) => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: String(m.content || '').slice(0, 2000) || ' ' }],
-      }));
+      const formattedTurns = formatGeminiContents(normalizedHistory.slice(-8));
+      const voiceHistoryContents =
+        formattedTurns.length > 0
+          ? formattedTurns
+          : [{ role: 'user' as const, parts: [{ text: lastUserText || 'Hello' }] }];
       const fastVoiceCandidates: Array<{ model: string; level: ThinkingLevel }> = [
         { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
         { model: 'gemini-4-hydrogen', level: ThinkingLevel.LOW },
@@ -1835,7 +1845,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
               firstTokenTimer = setTimeout(() => {
                 candidateTimedOut = true;
                 reject(new Error(`Voice fast-lane ${cand.model} connect timeout`));
-              }, 6000);
+              }, 3800);
             }),
           ]);
 
@@ -1888,8 +1898,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   // 4. Route through HardenedAIEngine.stream() when provider/server-key candidates exist
   const shouldTryEngineCandidates =
-    built.adHocProviders.length > 0 ||
-    (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud');
+    !fastVoiceTriedServerGemini &&
+    (built.adHocProviders.length > 0 ||
+      (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud'));
 
   let streamResAttempts: AttemptRecord[] = [];
   let nonStreamAttempts: AttemptRecord[] = [];
@@ -2068,7 +2079,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       emitReset();
     }
     const gw = await streamFromLovableAi({
-      systemInstruction: sysInstruction,
+      systemInstruction: effectiveSysInstruction,
       history:
         normalizedHistory.length > 0
           ? normalizedHistory
@@ -2102,7 +2113,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       normalizedHistory.length <= 1
     );
     streamSucceeded = await streamFromXrahat(
-      sysInstruction,
+      effectiveSysInstruction,
       normalizedHistory.length > 0
         ? normalizedHistory
         : [{ role: 'user', content: lastUserText }],

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildVoiceGreeting,
   computeRmsEnergy,
+  computeVocalEnergy,
   createBargeInState,
   createVadTracker,
   DEFAULT_VAD_CONFIG,
@@ -24,6 +25,12 @@ describe('voiceSession pure state & VAD logic', () => {
     }
     const energy = computeRmsEnergy(tone);
     assert.ok(energy > 0.25 && energy < 0.35, `unexpected energy ${energy}`);
+
+    // Vocal frequency bins boost compressed time-domain mobile mic input
+    const freq = new Uint8Array(64).fill(0);
+    for (let b = 4; b <= 18; b += 1) freq[b] = 95;
+    const boosted = computeVocalEnergy(silence, freq);
+    assert.ok(boosted >= 0.02, `expected vocal frequency boost >= 0.02, got ${boosted}`);
   });
 
   it('never commits on continuous silence or brief keyboard clicks', () => {
@@ -37,7 +44,7 @@ describe('voiceSession pure state & VAD logic', () => {
       assert.notEqual(res.action, 'commit');
     }
 
-    // Brief 100ms loud click/tap (below minSpeechDurationMs = 170ms)
+    // Brief 100ms loud click/tap (below minSpeechDurationMs = 150ms)
     for (let i = 0; i < 2; i += 1) {
       t += 50;
       const res = stepVadTracker(vad, 0.18, t);
@@ -55,34 +62,34 @@ describe('voiceSession pure state & VAD logic', () => {
     assert.equal(vad.speechConfirmed, false);
   });
 
-  it('reliably detects soft mobile microphone speech (RMS 0.018) and commits swiftly', () => {
-    let vad = createVadTracker(0.005);
+  it('reliably detects soft mobile microphone speech (RMS 0.011) and commits swiftly', () => {
+    let vad = createVadTracker(0.004);
     let t = 0;
     let sawSpeechStart = false;
     let committedAt = -1;
 
-    // 400ms of soft conversational phone-mic speech (RMS 0.018)
+    // 400ms of soft conversational phone-mic speech (RMS 0.011)
     for (let i = 0; i < 8; i += 1) {
       t += 50;
-      const res = stepVadTracker(vad, 0.018, t, DEFAULT_VAD_CONFIG);
+      const res = stepVadTracker(vad, 0.011, t, DEFAULT_VAD_CONFIG);
       vad = res.nextState;
       if (res.action === 'speech_start') sawSpeechStart = true;
     }
     assert.equal(sawSpeechStart, true);
     assert.equal(vad.speechConfirmed, true);
 
-    // 800ms trailing silence -> should auto-commit swiftly (~720ms)
+    // 800ms trailing silence -> should auto-commit swiftly (~740ms)
     const speechEnd = t;
     for (let i = 0; i < 20; i += 1) {
       t += 50;
-      const res = stepVadTracker(vad, 0.004, t, DEFAULT_VAD_CONFIG);
+      const res = stepVadTracker(vad, 0.003, t, DEFAULT_VAD_CONFIG);
       vad = res.nextState;
       if (res.action === 'commit') {
         committedAt = t - speechEnd;
         break;
       }
     }
-    assert.ok(committedAt >= 700 && committedAt <= 850, `expected crisp commit ~720ms, got ${committedAt}ms`);
+    assert.ok(committedAt >= 700 && committedAt <= 850, `expected crisp commit ~740ms, got ${committedAt}ms`);
   });
 
   it('detects real speech and auto-commits cleanly after end-of-speech silence', () => {
