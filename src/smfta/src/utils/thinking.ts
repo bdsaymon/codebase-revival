@@ -93,7 +93,14 @@ export function buildGeminiThinkingConfig(
   }
 
   const enabled = thinkingEnabled !== false && thinkingMode !== 'off';
+  const lowerModel = modelId.toLowerCase();
   if (!enabled) {
+    if (/gemini-4/.test(lowerModel)) {
+      return { thinkingLevel: 'LOW', includeThoughts: false };
+    }
+    if (/gemini-3\.1-flash-lite/.test(lowerModel)) {
+      return { thinkingLevel: 'MINIMAL', includeThoughts: false };
+    }
     return undefined;
   }
 

@@ -330,13 +330,15 @@ Return ONLY valid JSON in this exact format:
 toolsRouter.post('/proactive-review', async (req: Request, res: Response) => {
   const {
     text = '',
+    content = '',
     provider,
     externalKeys,
     externalModel,
     externalBaseUrl,
   } = req.body || {};
 
-  if (!text || String(text).trim().length < 20) {
+  const targetDocument = String(text || content || '').trim();
+  if (targetDocument.length < 20) {
     return res.json({ suggestions: [], overallFeedback: '' });
   }
 
@@ -346,7 +348,7 @@ Provide 1 short encouraging overall observation ("overallFeedback") and 2 to 3 c
 
 DOCUMENT:
 """
-${text}
+${targetDocument}
 """
 
 Return ONLY valid JSON:
@@ -588,13 +590,16 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
 });
 
 // ============================================================================
-// 3C. SERVER NATURAL HUMAN FEMALE VOICE TTS (gemini-3.8-flash-lite-tts)
+// 3C. SERVER NATURAL HUMAN VOICE TTS (gemini-3.8-flash-lite-tts)
 // ============================================================================
-export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr';
+export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
 
 export function resolveGeminiFemaleVoice(requested?: string): GeminiFemaleVoiceName {
   const clean = String(requested || '').trim().toLowerCase();
   if (clean === 'zephyr') return 'Zephyr';
+  if (clean === 'puck') return 'Puck';
+  if (clean === 'charon') return 'Charon';
+  if (clean === 'fenrir') return 'Fenrir';
   return 'Kore';
 }
 
@@ -625,17 +630,22 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
       code: 'INTEGRATION_REQUIRED',
       integrationRequired: true,
       error:
-        'Integration required: Server GEMINI_API_KEY must be configured to enable Gemini natural female voice (gemini-3.8-flash-lite-tts).',
+        'Integration required: Server GEMINI_API_KEY must be configured to enable Gemini natural voice (gemini-3.8-flash-lite-tts).',
     });
   }
 
   const voiceName = resolveGeminiFemaleVoice(
     typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined
   );
+  const isMaleVoice =
+    voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
+  const defaultStyle = isMaleVoice
+    ? 'Warm, natural, expressive human male conversational voice with clear articulation, steady calm energy, smooth cadence, never robotic'
+    : 'Warm, natural, expressive human female conversational voice with clear articulation, gentle empathy, smooth natural cadence, never robotic';
   const customStyle =
     typeof req.body?.style === 'string' && req.body.style.trim()
       ? req.body.style.trim().slice(0, 200)
-      : 'Warm, natural, expressive human female conversational voice with clear articulation, gentle empathy, smooth natural cadence, never robotic';
+      : defaultStyle;
 
   const ai = new GoogleGenAI({
     apiKey: geminiKey,
@@ -698,6 +708,117 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
     ok: false,
     error: lastError,
   });
+});
+
+toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
+  const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
+  if (!speechText) {
+    return res.status(400).json({ ok: false, error: 'text is required for speech synthesis.' });
+  }
+
+  const geminiKey = getV2GeminiApiKey();
+  if (!geminiKey) {
+    return res.status(503).json({
+      ok: false,
+      code: 'INTEGRATION_REQUIRED',
+      integrationRequired: true,
+      error:
+        'Integration required: Server GEMINI_API_KEY must be configured to enable Gemini natural voice (gemini-3.8-flash-lite-tts).',
+    });
+  }
+
+  const voiceName = resolveGeminiFemaleVoice(
+    typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined
+  );
+  const isMaleVoice =
+    voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
+  const defaultStyle = isMaleVoice
+    ? 'Warm, natural, expressive human male conversational voice with clear articulation and brisk natural cadence, never robotic'
+    : 'Warm, natural, expressive human female conversational voice with clear articulation and brisk natural cadence, never robotic';
+  const customStyle =
+    typeof req.body?.style === 'string' && req.body.style.trim()
+      ? req.body.style.trim().slice(0, 200)
+      : defaultStyle;
+
+  const ai = new GoogleGenAI({
+    apiKey: geminiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+
+  let clientClosed = false;
+  req.on('close', () => {
+    clientClosed = true;
+  });
+
+  try {
+    const responseStream = await ai.models.generateContentStream({
+      model: 'gemini-3.8-flash-lite-tts',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: speechText,
+              speechMetadata: {
+                style: customStyle,
+              },
+            } as { text: string; speechMetadata?: { style?: string } },
+          ],
+        },
+      ],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
+          },
+        },
+      },
+    });
+
+    let wroteAny = false;
+    for await (const chunk of responseStream) {
+      if (clientClosed || req.signal?.aborted) break;
+      const parts = chunk.candidates?.[0]?.content?.parts || [];
+      for (const p of parts) {
+        const b64 = p?.inlineData?.data;
+        if (!b64) continue;
+        const pcmBytes = Buffer.from(b64, 'base64');
+        if (pcmBytes.length === 0) continue;
+        if (!wroteAny) {
+          wroteAny = true;
+          res.status(200);
+          res.setHeader('Content-Type', 'audio/pcm; rate=24000; channels=1; encoding=signed-int');
+          res.setHeader('Cache-Control', 'no-cache, no-store');
+          res.setHeader('X-Voice-Sample-Rate', '24000');
+          res.flushHeaders();
+        }
+        res.write(pcmBytes);
+      }
+    }
+
+    if (!wroteAny && !res.headersSent) {
+      return res.status(502).json({
+        ok: false,
+        error: 'gemini-3.8-flash-lite-tts returned no streaming audio chunks.',
+      });
+    }
+    if (!res.writableEnded) {
+      res.end();
+    }
+    return;
+  } catch (err) {
+    if (!res.headersSent) {
+      return res.status(502).json({
+        ok: false,
+        error: sanitizeErrorMsg(err),
+      });
+    }
+    if (!res.writableEnded) {
+      res.end();
+    }
+    return;
+  }
 });
 
 // ============================================================================
@@ -1435,5 +1556,123 @@ toolsRouter.post('/execute-tool', async (req: Request, res: Response) => {
     ok: true,
     tool: toolName,
     output: sanitizeProprietaryOutput(llmRes.text),
+  });
+});
+
+// ============================================================================
+// 11. DIAGRAM STUDIO GENERATOR (Mind Maps & Flowcharts)
+// ============================================================================
+toolsRouter.post('/diagram', async (req: Request, res: Response) => {
+  const promptText = String(req.body?.prompt || '').trim();
+  const kind = req.body?.kind === 'flowchart' ? 'flowchart' : 'mindmap';
+
+  if (!promptText) {
+    return res.status(400).json({ ok: false, error: 'Please describe the diagram to generate.' });
+  }
+
+  const sysInstruction = `You are a diagram architect. Return ONLY valid JSON with no markdown fences and no commentary.
+Schema:
+{
+  "title": "Short descriptive title",
+  "nodes": [
+    { "id": "n1", "label": "Root or Start label", "note": "Optional short note", "x": 260, "y": 40 }
+  ],
+  "edges": [
+    { "id": "e1", "source": "n1", "target": "n2", "label": "optional edge label" }
+  ]
+}
+Rules:
+- Generate between 6 and 12 clean, well-spaced nodes for a ${kind}.
+- Coordinates (x: 40..900, y: 30..650) must avoid overlap (minimum 210px horizontal, 120px vertical spacing).
+- Keep every node label concise (2-6 words) in the same language as the user's request.`;
+
+  const llmRes = await Promise.race([
+    callBackendEngine(
+      `Create a ${kind} diagram for: ${promptText}`,
+      sysInstruction,
+      { maxTokens: 1600 }
+    ).catch(() => ({ ok: false as const, text: '' })),
+    new Promise<{ ok: false; text: string }>((resolve) =>
+      setTimeout(() => resolve({ ok: false, text: '' }), 10000)
+    ),
+  ]);
+
+  if (llmRes.ok && llmRes.text) {
+    const parsed = safeJsonExtract<{
+      title?: string;
+      nodes?: Array<{ id?: string; label?: string; note?: string; x?: number; y?: number }>;
+      edges?: Array<{ id?: string; source?: string; target?: string; label?: string }>;
+    }>(llmRes.text);
+
+    if (parsed && Array.isArray(parsed.nodes) && parsed.nodes.length > 0) {
+      const cleanNodes = parsed.nodes.slice(0, 20).map((n, idx) => ({
+        id: String(n.id || `n-${idx + 1}`),
+        label: String(n.label || `Step ${idx + 1}`).slice(0, 90),
+        note: typeof n.note === 'string' ? n.note.slice(0, 120) : undefined,
+        x: typeof n.x === 'number' && Number.isFinite(n.x) ? n.x : (idx % 3) * 240 + 50,
+        y: typeof n.y === 'number' && Number.isFinite(n.y) ? n.y : Math.floor(idx / 3) * 130 + 30,
+      }));
+      const nodeIds = new Set(cleanNodes.map((n) => n.id));
+      const cleanEdges = Array.isArray(parsed.edges)
+        ? parsed.edges
+            .filter((e) => e && nodeIds.has(String(e.source)) && nodeIds.has(String(e.target)))
+            .slice(0, 32)
+            .map((e, idx) => ({
+              id: String(e.id || `e-${idx + 1}`),
+              source: String(e.source),
+              target: String(e.target),
+              label: typeof e.label === 'string' && e.label.trim() ? e.label.trim().slice(0, 40) : undefined,
+            }))
+        : [];
+
+      return res.json({
+        ok: true,
+        title: String(parsed.title || promptText.slice(0, 60)),
+        nodes: cleanNodes,
+        edges: cleanEdges,
+      });
+    }
+  }
+
+  // Deterministic structured fallback when upstream LLM is unavailable
+  const topic = promptText.slice(0, 56);
+  const fallbackNodes =
+    kind === 'flowchart'
+      ? [
+          { id: 'n1', label: `Start: ${topic}`, x: 260, y: 30 },
+          { id: 'n2', label: 'Gather Inputs & Goals', x: 260, y: 150 },
+          { id: 'n3', label: 'Core Processing', x: 260, y: 270 },
+          { id: 'n4', label: 'Review & Validate', x: 100, y: 390 },
+          { id: 'n5', label: 'Deliver & Monitor', x: 420, y: 390 },
+        ]
+      : [
+          { id: 'n1', label: topic, x: 290, y: 40 },
+          { id: 'n2', label: 'Core Objectives', x: 60, y: 190 },
+          { id: 'n3', label: 'Key Components', x: 290, y: 190 },
+          { id: 'n4', label: 'Execution Plan', x: 520, y: 190 },
+          { id: 'n5', label: 'Risks & Safeguards', x: 170, y: 340 },
+          { id: 'n6', label: 'Success Metrics', x: 410, y: 340 },
+        ];
+  const fallbackEdges =
+    kind === 'flowchart'
+      ? [
+          { id: 'e1', source: 'n1', target: 'n2' },
+          { id: 'e2', source: 'n2', target: 'n3' },
+          { id: 'e3', source: 'n3', target: 'n4', label: 'Check' },
+          { id: 'e4', source: 'n3', target: 'n5', label: 'Launch' },
+        ]
+      : [
+          { id: 'e1', source: 'n1', target: 'n2' },
+          { id: 'e2', source: 'n1', target: 'n3' },
+          { id: 'e3', source: 'n1', target: 'n4' },
+          { id: 'e4', source: 'n3', target: 'n5' },
+          { id: 'e5', source: 'n3', target: 'n6' },
+        ];
+
+  return res.json({
+    ok: true,
+    title: topic,
+    nodes: fallbackNodes,
+    edges: fallbackEdges,
   });
 });

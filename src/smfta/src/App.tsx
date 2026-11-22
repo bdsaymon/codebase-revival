@@ -51,6 +51,12 @@ import {
   EyeOff,
   Brain,
   KeyRound,
+  AudioLines,
+  GitBranch,
+  NotebookPen,
+  Swords,
+  BarChart3,
+  Plug,
 } from 'lucide-react';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
@@ -175,8 +181,14 @@ import {
   CodeLabModal,
   ImageStudioModal,
   StatsAndWhatsNewModal,
-  VoiceCallOverlay,
 } from './components/ToolModals';
+import {
+  LiveVoiceOverlay,
+  LiveVoiceMessageSnapshot,
+  unlockSharedLiveAudioContext,
+} from './components/LiveVoiceOverlay';
+import { DiagramStudioModal } from './components/DiagramStudioModal';
+import { CoWriterDrawer } from './components/CoWriterDrawer';
 import { SettingsModal, SettingsTabId } from './components/SettingsHub';
 import { NotebookModal, createNote, sanitizeNotes } from './components/NotebookModal';
 import { ConnectionsModal } from './components/ConnectionsModal';
@@ -745,6 +757,10 @@ export default function App() {
   const [codeLabInit, setCodeLabInit] = useState('');
   const [battleOpen, setBattleOpen] = useState(false);
   const [voiceCallOpen, setVoiceCallOpen] = useState(false);
+  const [diagramOpen, setDiagramOpen] = useState(false);
+  const [coWriterOpen, setCoWriterOpen] = useState(false);
+  const [coWriterTitle, setCoWriterTitle] = useState('Untitled Document');
+  const [coWriterContent, setCoWriterContent] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>('general');
   const [infoModal, setInfoModal] = useState<'stats' | 'whatsnew' | null>(null);
@@ -780,6 +796,9 @@ export default function App() {
   const [feedbackReasonInput, setFeedbackReasonInput] = useState('');
 
   const abortRef = useRef<AbortController | null>(null);
+  const voiceCallOpenRef = useRef<boolean>(false);
+  voiceCallOpenRef.current = voiceCallOpen;
+  const voiceSilenceTimerRef = useRef<number | null>(null);
   const voiceDraftRef = useRef<string>('');
   const voiceFinalPrefixRef = useRef<string>('');
   const voiceSessionFinalRef = useRef<string>('');
@@ -2966,7 +2985,7 @@ export default function App() {
   const deliverCapturedVoiceText = (captured: string) => {
     const clean = captured.trim();
     if (!clean) return;
-    if (talkMode || voiceCallOpen) {
+    if (talkMode || voiceCallOpenRef.current || voiceCallOpen) {
       handleSend(clean);
     } else {
       setInputText((prev) => {
@@ -2977,12 +2996,42 @@ export default function App() {
     }
   };
 
+  const clearVoiceSilenceTimer = () => {
+    if (voiceSilenceTimerRef.current !== null) {
+      window.clearTimeout(voiceSilenceTimerRef.current);
+      voiceSilenceTimerRef.current = null;
+    }
+  };
+
+  const scheduleVoiceSilenceAutoCommit = () => {
+    clearVoiceSilenceTimer();
+    if (!voiceCallOpenRef.current) return;
+    voiceSilenceTimerRef.current = window.setTimeout(() => {
+      voiceSilenceTimerRef.current = null;
+      if (
+        !voiceCallOpenRef.current ||
+        !voiceListeningRef.current ||
+        voiceCancelledRef.current ||
+        voiceCommittedRef.current
+      ) {
+        return;
+      }
+      const hasSpeech = Boolean(
+        (voiceWebSpeechTextRef.current || voiceDraftRef.current || voiceRollingTextRef.current).trim()
+      );
+      if (hasSpeech) {
+        void confirmVoiceDictation();
+      }
+    }, 1050);
+  };
+
   // Bilingual Voice Recognition (Hybrid Web Speech + Rolling Live Cloud STT)
   const cancelVoiceDictation = () => {
     voiceCancelledRef.current = true;
     voiceCommittedRef.current = false;
     voiceListeningRef.current = false;
     clearVoiceRollingTimer();
+    clearVoiceSilenceTimer();
     voiceDraftRef.current = '';
     voiceFinalPrefixRef.current = '';
     voiceSessionFinalRef.current = '';
@@ -3006,6 +3055,7 @@ export default function App() {
     voiceCommittedRef.current = true;
     voiceListeningRef.current = false;
     clearVoiceRollingTimer();
+    clearVoiceSilenceTimer();
     const captured = mergeVoiceLiveTranscript(
       voiceWebSpeechTextRef.current || voiceDraftRef.current,
       voiceRollingTextRef.current
@@ -3126,6 +3176,9 @@ export default function App() {
           voiceDraftRef.current = merged;
           if (settings.voiceLiveCaptions !== false) {
             setVoiceLiveText(merged);
+          }
+          if (merged.trim().length >= 2) {
+            scheduleVoiceSilenceAutoCommit();
           }
         }
         setVoiceActivityAt(Date.now());
@@ -3274,6 +3327,9 @@ export default function App() {
                   );
                   voiceDraftRef.current = merged;
                   setVoiceLiveText(merged);
+                  if (merged.trim().length >= 2) {
+                    scheduleVoiceSilenceAutoCommit();
+                  }
                 }
               })
               .catch(() => {
@@ -4060,11 +4116,19 @@ export default function App() {
         text: clampMsgText(m.text, `message[${idx}]`),
       }));
 
-      const liveIntegrationContext = await buildLiveIntegrationContextForPrompt(
-        lastUserPrompt,
-        connections,
-        resolvedServiceContext
-      ).catch(() => '');
+      const isLiveVoiceTurn = Boolean(voiceCallOpenRef.current || voiceCallOpen);
+      const shouldFetchLiveIntegrations =
+        !isLiveVoiceTurn ||
+        /\b(github|repo|drive|google|supabase|vercel|deploy|database|file)\b/i.test(
+          lastUserPrompt
+        );
+      const liveIntegrationContext = shouldFetchLiveIntegrations
+        ? await buildLiveIntegrationContextForPrompt(
+            lastUserPrompt,
+            connections,
+            resolvedServiceContext
+          ).catch(() => '')
+        : '';
 
       const combinedProjectContext = [
         smartCtx?.envelopeBlock || '',
@@ -4090,27 +4154,36 @@ export default function App() {
         targetSession?.incognito || settings.conversationPrivacyMode
       );
 
+      const liveVoiceDirective =
+        'LIVE VOICE MODE: Respond immediately in natural, warm, spoken conversational language (1 to 3 concise sentences, plain spoken text with no markdown bullets or headings unless explicitly requested) so your answer sounds instant and human when spoken aloud.';
+      const effectiveGlobalInstructions = isLiveVoiceTurn
+        ? [liveVoiceDirective, settings.globalInstructions || settings.customInst || '']
+            .filter(Boolean)
+            .join('\n\n')
+        : settings.globalInstructions || settings.customInst || '';
+
       const buildRequestBody = (msgs: StreamMsg[]) =>
         JSON.stringify({
         messages: msgs,
-        mode: settings.mode,
-        style: settings.style,
+        liveVoiceMode: isLiveVoiceTurn,
+        mode: isLiveVoiceTurn ? 'fast' : settings.mode,
+        style: isLiveVoiceTurn ? 'concise' : settings.style,
         replyLang: settings.replyLang || 'auto',
         workPersona: settings.workPersona || 'allrounder',
         creativity: settings.creativity,
         customInst: settings.customInst,
         nickname: settings.nickname || profile.name || '',
-        globalInstructions: settings.globalInstructions || settings.customInst || '',
+        globalInstructions: effectiveGlobalInstructions,
         projectInstructions: activeChatProject?.instructions || '',
         projectName: activeChatProject?.name || '',
-        responseStyle: settings.responseStyle || 'normal',
+        responseStyle: isLiveVoiceTurn ? 'concise' : settings.responseStyle || 'normal',
         customStyleSample: settings.customStyleSample || '',
-        responseLength: settings.responseLength || 'normal',
+        responseLength: isLiveVoiceTurn ? 'concise' : settings.responseLength || 'normal',
         memoryPaused: Boolean(settings.memoryPaused),
         incognito: isIncognitoChat,
-        thinkingEnabled: settings.thinkingEnabled !== false,
-        liveThinkingSummary: settings.liveThinkingSummary !== false,
-        outputFormat: settings.outputFormat || 'auto',
+        thinkingEnabled: isLiveVoiceTurn ? false : settings.thinkingEnabled !== false,
+        liveThinkingSummary: isLiveVoiceTurn ? false : settings.liveThinkingSummary !== false,
+        outputFormat: isLiveVoiceTurn ? 'plain' : settings.outputFormat || 'auto',
         userProfileContext: settings.userProfileContext || '',
         knowledgeContext: kbResult.promptContext || '',
         mcpToolsContext: mcpToolsContext || '',
@@ -4142,19 +4215,21 @@ export default function App() {
         discoveredModels: profileSnapshot.availableModels || [],
         supportsStreaming: profileSnapshot.supportsStreaming !== false,
         allowKeylessFallback: Boolean(settings.allowKeylessFallback),
-        maxOutputTokens: profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens,
+        maxOutputTokens: isLiveVoiceTurn
+          ? Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1024, 380)
+          : profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens,
         contextWindow: profileSnapshot.contextWindow,
         weightTemp: settings.weightTemp ?? 0.7,
         topP: settings.topP ?? 0.9,
         topK: settings.topK,
         stopSequences: settings.stopSequences,
         thinkingMode:
-          settings.thinkingEnabled === false
+          isLiveVoiceTurn || settings.thinkingEnabled === false
             ? 'off'
             : settings.thinkingMode || 'medium',
         requestTimeoutSec: settings.requestTimeoutSec ?? 120,
         trainingData: settings.trainingData || '',
-        fastDecision: settings.fastDecision !== false,
+        fastDecision: isLiveVoiceTurn ? true : settings.fastDecision !== false,
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
         userName: settings.nickname || profile.name || MASTER_PROFILE_NAME,
         chatHistorySummary:
@@ -4397,9 +4472,10 @@ export default function App() {
           revealTarget = displayTxt;
           if (revealShown > revealTarget.length) revealShown = revealTarget.length;
         }
-        // v18.11 — Streaming Reveal off: render every chunk instantly, or paint immediately while thinking is streaming
+        // v18.11 — Streaming Reveal off or Live Voice active: render every chunk instantly so TTS starts immediately
         if (
           flushNow ||
+          isLiveVoiceTurn ||
           settings.streamingReveal === false ||
           (Boolean(liveThinking) && !displayTxt)
         ) {
@@ -4770,9 +4846,11 @@ export default function App() {
           window.clearTimeout(frameTimer);
         }
       }
-      flushStreamText();
+      flushStreamText(isLiveVoiceTurn);
       revealFinishing = true;
-      await drainReveal();
+      if (!isLiveVoiceTurn) {
+        await drainReveal();
+      }
       cancelReveal();
 
       const { edits: fileEdits, cleanText: textWithoutFileBlocks } =
@@ -5181,10 +5259,11 @@ export default function App() {
 
       if (
         finalText.trim() &&
-        (settings.autoVoice || talkMode || voiceCallOpen)
+        (settings.autoVoice || talkMode) &&
+        !voiceCallOpen
       ) {
         speakText(finalText, aiMsgId, () => {
-          if (talkMode || voiceCallOpen) {
+          if (talkMode) {
             setTimeout(() => toggleMic(), 400);
           }
         });
@@ -5946,8 +6025,30 @@ export default function App() {
 
   const lastUserMessage =
     [...activeChat.msgs].reverse().find((m) => m.role === 'user')?.text || '';
-  const lastAiMessage =
-    [...activeChat.msgs].reverse().find((m) => m.role === 'ai')?.text || '';
+  const latestAiMessageObj =
+    [...activeChat.msgs].reverse().find((m) => m.role === 'ai') || null;
+  const lastAiMessage = latestAiMessageObj?.text || '';
+  const lastAiVoiceSnapshot: LiveVoiceMessageSnapshot | null = latestAiMessageObj
+    ? {
+        id: latestAiMessageObj.id,
+        text: latestAiMessageObj.text,
+        isError: Boolean(latestAiMessageObj.isError),
+      }
+    : null;
+
+  const openLiveVoiceSession = () => {
+    unlockSharedLiveAudioContext();
+    bilingualSpeechPlayer.stop();
+    setVoiceCallOpen(true);
+  };
+
+  const openCoWriterStudio = () => {
+    if (!coWriterContent.trim() && lastAiMessage.trim()) {
+      setCoWriterTitle(activeChat.title || 'AI Draft');
+      setCoWriterContent(lastAiMessage);
+    }
+    setCoWriterOpen(true);
+  };
 
   return (
     <div className="app-shell flex h-[100dvh] w-full overflow-hidden bg-[var(--bg)] text-[var(--text)]">
@@ -6049,7 +6150,130 @@ export default function App() {
               )}
             </div>
 
-            <div className="pt-2 border-t border-[var(--border)] space-y-1">
+            <div className="pt-2 border-t border-[var(--border)] space-y-2 shrink-0">
+              <div className="px-1 flex items-center justify-between">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wider text-[var(--ink-dim)]">
+                  Studios &amp; Tools
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  data-testid="sidebar-live-voice-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    openLiveVoiceSession();
+                  }}
+                  className="col-span-2 px-3 py-2 rounded-xl text-[12.5px] font-semibold bg-sky-500/12 border border-sky-400/25 text-sky-300 hover:bg-sky-500/20 flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <AudioLines className="w-4 h-4 text-sky-400" />
+                    <span>Live Voice</span>
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-200">
+                    Live
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-image-studio-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setStudioOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
+                  <span className="truncate">Image Studio</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-diagram-studio-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setDiagramOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <GitBranch className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="truncate">Diagrams</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-cowriter-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    openCoWriterStudio();
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="truncate">Co-Writer</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-codelab-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setCodeLabOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <Code2 className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span className="truncate">Code Lab</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-notebook-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setNotebookOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <NotebookPen className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="truncate">Notebook</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-battle-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setBattleOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <Swords className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span className="truncate">AI Battle</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-connections-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setConnectionsOpen(true);
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <Plug className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="truncate">Connections</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="sidebar-stats-btn"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setInfoModal('stats');
+                  }}
+                  className="px-2.5 py-2 rounded-xl text-[12px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2 cursor-pointer transition-colors border border-transparent hover:border-[var(--border)]"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="truncate">Stats</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-[var(--border)] space-y-1 shrink-0">
               <button
                 type="button"
                 data-testid="sidebar-simple-entry-btn"
@@ -6308,6 +6532,88 @@ export default function App() {
                         <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
                         <span>New Chat</span>
                       </button>
+
+                      <div className="my-1 border-t border-[var(--border)]" />
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-live-voice"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          openLiveVoiceSession();
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-sky-300 hover:bg-sky-500/15 cursor-pointer transition-colors font-semibold"
+                      >
+                        <AudioLines className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Live Voice</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-image-studio"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          setStudioOpen(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <ImageIcon className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>Image Studio</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-diagram-studio"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          setDiagramOpen(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Diagram Studio</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-cowriter"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          openCoWriterStudio();
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Co-Writer</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-notebook"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          setNotebookOpen(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <NotebookPen className="w-3.5 h-3.5 text-violet-400" />
+                        <span>Notebook</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-connections"
+                        onClick={() => {
+                          setHeaderMenuOpen(false);
+                          setConnectionsOpen(true);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Plug className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Connections</span>
+                      </button>
+
+                      <div className="my-1 border-t border-[var(--border)]" />
 
                       <button
                         type="button"
@@ -7320,6 +7626,17 @@ export default function App() {
 
                           <button
                             type="button"
+                            data-testid="live-voice-launch-btn"
+                            onClick={openLiveVoiceSession}
+                            className="composer-icon text-sky-400 hover:bg-sky-500/15 hover:text-sky-300"
+                            title="Live Voice Conversation"
+                            aria-label="Live Voice Conversation"
+                          >
+                            <AudioLines className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
                             data-testid="send-btn"
                             onClick={() => {
                               if (isGenerating) {
@@ -7595,16 +7912,74 @@ export default function App() {
         usageToday={usageToday}
       />
 
-      <VoiceCallOverlay
+      <LiveVoiceOverlay
         isOpen={voiceCallOpen}
+        userName={profile?.name || settings.displayName}
         isListening={isListening}
         isGenerating={isGenerating}
+        isTranscribing={isTranscribingVoice}
+        liveTranscript={voiceLiveText}
+        micStream={voiceAudioStream}
         lastUserText={lastUserMessage}
-        lastAiText={lastAiMessage}
+        lastAiMessage={lastAiVoiceSnapshot}
         onToggleMic={toggleMic}
+        onCancelMic={cancelVoiceDictation}
+        onSendText={(text) => {
+          void handleSend(text);
+        }}
         onEndCall={() => {
+          cancelVoiceDictation();
+          bilingualSpeechPlayer.stop();
           setVoiceCallOpen(false);
           window.speechSynthesis?.cancel();
+        }}
+      />
+
+      <DiagramStudioModal
+        isOpen={diagramOpen}
+        onClose={() => setDiagramOpen(false)}
+        projectId={activeChat.projectId || `chat-${activeChat.id}`}
+        onToast={showToast}
+      />
+
+      <CoWriterDrawer
+        isOpen={coWriterOpen}
+        onClose={() => setCoWriterOpen(false)}
+        title={coWriterTitle}
+        onChangeTitle={setCoWriterTitle}
+        content={coWriterContent}
+        onChangeContent={setCoWriterContent}
+        onOpenCodeLab={(code) => {
+          setCodeLabInit(code);
+          setCodeLabOpen(true);
+        }}
+        onToast={showToast}
+      />
+
+      <NotebookModal
+        isOpen={notebookOpen}
+        onClose={() => setNotebookOpen(false)}
+        notes={notes}
+        onChange={setNotes}
+        connections={connections}
+        onUpdateConnections={handleUpdateConnections}
+        notify={showToast}
+        onAskAI={(promptText) => {
+          setNotebookOpen(false);
+          void handleSend(promptText);
+        }}
+      />
+
+      <ConnectionsModal
+        isOpen={connectionsOpen}
+        onClose={() => setConnectionsOpen(false)}
+        connections={connections}
+        onChange={handleUpdateConnections}
+        notes={notes}
+        notify={showToast}
+        onOpenNotebook={() => {
+          setConnectionsOpen(false);
+          setNotebookOpen(true);
         }}
       />
 

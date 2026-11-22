@@ -57,9 +57,11 @@ import {
   getV2ModelSpec,
   V2ModelId,
 } from '../../src/utils/v2UsageLimits';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import {
   checkAndConsumeServerV2Quota,
   getAllV2ModelStatusesForUser,
+  getV2GeminiApiKey,
   isServerAuthorizedTester,
   setServerV2UsageCountForTesting,
   streamV2FirebaseModel,
@@ -914,6 +916,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     memoryPaused = false,
     incognito = false,
     thinkingEnabled = true,
+    liveVoiceMode = false,
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
@@ -1494,7 +1497,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     ((enabledTools as Record<string, boolean>).web_search !== false &&
       (enabledTools as Record<string, boolean>).web_browse !== false);
   const webSearchPermitted =
-    webToolAllowed && shouldAutoTriggerLiveWeb(lastUserText, Boolean(webSearch));
+    webToolAllowed &&
+    (liveVoiceMode
+      ? Boolean(webSearch)
+      : shouldAutoTriggerLiveWeb(lastUserText, Boolean(webSearch)));
 
   const allowMemoryForV1 =
     Boolean(autoMemory) && !memoryPaused && !incognito;
@@ -1763,6 +1769,73 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
     emitStatus('চিন্তা করছি…', 'thinking', 'Reasoning in progress');
+  }
+
+  // 3B. Ultra-low-latency Live Voice Fast-Lane (sub-second TTFT via gemini-3.1-flash-lite)
+  const isCustomNonGeminiProvider =
+    Boolean(parsedKeys.length > 0) &&
+    effectiveProvider !== 'gemini_custom' &&
+    effectiveProvider !== 'gemini_openai' &&
+    effectiveProvider !== 'xrahat' &&
+    effectiveProvider !== 'smfta_cloud';
+
+  if (liveVoiceMode && !isCustomNonGeminiProvider && !clientClosed) {
+    const fastGeminiKey =
+      (parsedKeys.find((k) => k.startsWith('AIza')) || getV2GeminiApiKey() || '').trim();
+    if (fastGeminiKey) {
+      const fastAi = new GoogleGenAI({
+        apiKey: fastGeminiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      });
+      const voiceHistoryContents = normalizedHistory.slice(-10).map((m) => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        parts: [{ text: String(m.content || '').slice(0, 4000) || ' ' }],
+      }));
+      const fastVoiceCandidates: Array<{ model: string; level: ThinkingLevel }> = [
+        { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
+        { model: 'gemini-4-hydrogen', level: ThinkingLevel.LOW },
+      ];
+
+      for (const cand of fastVoiceCandidates) {
+        if (clientClosed || upstreamAbortController.signal.aborted) break;
+        try {
+          const fastStream = await fastAi.models.generateContentStream({
+            model: cand.model,
+            contents: voiceHistoryContents,
+            config: {
+              systemInstruction: sysInstruction,
+              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 380),
+              thinkingConfig: { thinkingLevel: cand.level },
+            },
+          });
+
+          for await (const chunk of fastStream) {
+            if (clientClosed || upstreamAbortController.signal.aborted) break;
+            const deltaText = chunk.text || '';
+            if (deltaText) {
+              emitDelta(deltaText);
+            }
+          }
+
+          if (fullReplyAccumulator.trim()) {
+            finishStream({
+              type: 'done',
+              ok: true,
+              requestId,
+              requestedProvider: effectiveProvider,
+              requestedModel: activeCustomModelName || cand.model,
+              providerUsed: 'gemini',
+              modelUsed: cand.model,
+              attemptCount: 1,
+              latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+            });
+            return;
+          }
+        } catch {
+          // Try next fast voice candidate or fall through to standard engine
+        }
+      }
+    }
   }
 
   // 4. Route through HardenedAIEngine.stream() when provider/server-key candidates exist

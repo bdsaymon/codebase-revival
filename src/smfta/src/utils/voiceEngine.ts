@@ -270,7 +270,7 @@ export function shouldPollRollingVoiceTranscript(params: {
   return params.totalChunkBytes >= 800;
 }
 
-export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr';
+export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
 
 export function formatTextForNaturalSpeech(rawText: string, maxChars = 1500): string {
   const cleaned = String(rawText || '')
@@ -355,6 +355,173 @@ export async function requestGeminiFemaleSpeech(params: {
     return {
       ok: false,
       error: err instanceof Error ? err.message : 'TTS request failed',
+    };
+  }
+}
+
+/**
+ * Incrementally splits a live-streaming AI reply into speakable sentence/clause chunks
+ * so TTS can start speaking within ~1 second while the rest of the reply is still streaming.
+ */
+export function extractReadySpeechChunks(
+  rawFullText: string,
+  alreadyConsumedChars: number,
+  flushFinal: boolean
+): { chunks: string[]; nextCursor: number } {
+  const full = String(rawFullText || '');
+  // Never speak unfinished <think> blocks
+  if (/<think>/i.test(full) && !/<\/think>/i.test(full)) {
+    return { chunks: [], nextCursor: alreadyConsumedChars };
+  }
+  const cleanFull = formatTextForNaturalSpeech(full, 2400);
+  if (cleanFull.length <= alreadyConsumedChars) {
+    return { chunks: [], nextCursor: alreadyConsumedChars };
+  }
+
+  let cursor = alreadyConsumedChars;
+  const chunks: string[] = [];
+
+  while (cursor < cleanFull.length) {
+    const remaining = cleanFull.slice(cursor);
+    if (!remaining.trim()) {
+      cursor = cleanFull.length;
+      break;
+    }
+
+    // Look for a strong sentence boundary (Bengali dari ।, ., ?, !, newline)
+    const sentenceMatch = remaining.match(/^(.{12,260}?[।.?!\n])(?:\s+|$)/);
+    if (sentenceMatch && sentenceMatch[1]) {
+      const piece = sentenceMatch[1].trim();
+      if (piece) chunks.push(piece);
+      cursor += sentenceMatch[0].length;
+      continue;
+    }
+
+    // For fast first-chunk start on long clauses, allow breaking on comma/semicolon/colon after 55 chars
+    const clauseMatch = remaining.match(/^(.{55,180}?[,;:—–])(?:\s+)/);
+    if (clauseMatch && clauseMatch[1]) {
+      const piece = clauseMatch[1].trim();
+      if (piece) chunks.push(piece);
+      cursor += clauseMatch[0].length;
+      continue;
+    }
+
+    // If a single uninterrupted run gets long (>140 chars), split cleanly at the last word boundary
+    if (remaining.length >= 140) {
+      const slice = remaining.slice(0, 140);
+      const lastSpace = slice.lastIndexOf(' ');
+      const cut = lastSpace >= 60 ? lastSpace : 140;
+      const piece = remaining.slice(0, cut).trim();
+      if (piece) chunks.push(piece);
+      cursor += cut;
+      while (cursor < cleanFull.length && cleanFull[cursor] === ' ') cursor += 1;
+      continue;
+    }
+
+    if (flushFinal) {
+      const piece = remaining.trim();
+      if (piece) chunks.push(piece);
+      cursor = cleanFull.length;
+    }
+    break;
+  }
+
+  return { chunks, nextCursor: cursor };
+}
+
+/**
+ * Streams headerless 24kHz 16-bit LE mono PCM audio chunks from POST /api/voice/tts-stream
+ * and yields Float32 samples incrementally for gapless AudioContext playback.
+ */
+export async function streamGeminiPcmSpeech(params: {
+  text: string;
+  voiceName?: GeminiFemaleVoiceName;
+  style?: string;
+  signal?: AbortSignal;
+  onPcmChunk: (samples: Float32Array, sampleRate: number) => void;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  ok: boolean;
+  receivedAudio: boolean;
+  integrationRequired?: boolean;
+  error?: string;
+}> {
+  const cleanText = formatTextForNaturalSpeech(params.text, 600);
+  if (!cleanText) {
+    return { ok: false, receivedAudio: false, error: 'Empty speech text.' };
+  }
+  const fetcher = params.fetchImpl || fetch;
+  try {
+    const res = await fetcher('/api/voice/tts-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: params.signal,
+      body: JSON.stringify({
+        text: cleanText,
+        voiceName: params.voiceName || 'Kore',
+        style: params.style,
+      }),
+    });
+
+    if (!res.ok || !res.body) {
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        integrationRequired?: boolean;
+      };
+      return {
+        ok: false,
+        receivedAudio: false,
+        integrationRequired: Boolean(data.integrationRequired || res.status === 503),
+        error: data.error || `HTTP ${res.status}`,
+      };
+    }
+
+    const sampleRate = Number(res.headers.get('X-Voice-Sample-Rate')) || 24000;
+    const reader = res.body.getReader();
+    let leftoverByte: Uint8Array | null = null;
+    let receivedAudio = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (params.signal?.aborted) {
+        void reader.cancel().catch(() => {});
+        return { ok: false, receivedAudio, error: 'Aborted' };
+      }
+      if (!value || value.byteLength === 0) continue;
+
+      let combined: Uint8Array;
+      if (leftoverByte && leftoverByte.byteLength > 0) {
+        combined = new Uint8Array(leftoverByte.byteLength + value.byteLength);
+        combined.set(leftoverByte, 0);
+        combined.set(value, leftoverByte.byteLength);
+        leftoverByte = null;
+      } else {
+        combined = value;
+      }
+
+      const evenBytes = combined.byteLength - (combined.byteLength % 2);
+      if (combined.byteLength % 2 === 1) {
+        leftoverByte = combined.slice(evenBytes);
+      }
+      if (evenBytes < 2) continue;
+
+      const sampleCount = evenBytes / 2;
+      const view = new DataView(combined.buffer, combined.byteOffset, evenBytes);
+      const float32 = new Float32Array(sampleCount);
+      for (let i = 0; i < sampleCount; i += 1) {
+        float32[i] = view.getInt16(i * 2, true) / 32768;
+      }
+      receivedAudio = true;
+      params.onPcmChunk(float32, sampleRate);
+    }
+
+    return { ok: receivedAudio, receivedAudio };
+  } catch (err) {
+    return {
+      ok: false,
+      receivedAudio: false,
+      error: err instanceof Error ? err.message : 'Streaming TTS failed',
     };
   }
 }
@@ -471,6 +638,7 @@ class BilingualSpeechPlayer {
     voiceProfile?: 'default' | 'bengali_female' | 'bengali_male' | 'english_us_female' | 'english_us_male';
     rate?: number;
     geminiVoice?: GeminiFemaleVoiceName;
+    skipServerTts?: boolean;
     onDone?: () => void;
   }): void {
     const cleanText = formatTextForNaturalSpeech(params.text);
@@ -583,7 +751,7 @@ class BilingualSpeechPlayer {
       playNext(0);
     };
 
-    if (!wantMale && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+    if (!params.skipServerTts && !wantMale && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
       const ctrl = new AbortController();
       this.activeAbort = ctrl;
       const chosenVoice: GeminiFemaleVoiceName =

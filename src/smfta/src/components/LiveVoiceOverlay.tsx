@@ -2,9 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Mic, RefreshCw, Volume2, X } from 'lucide-react';
 import {
   base64ToUint8Array,
+  bilingualSpeechPlayer,
+  extractReadySpeechChunks,
   formatTextForNaturalSpeech,
   GeminiFemaleVoiceName,
+  isSpeechSynthesisSupported,
   requestGeminiFemaleSpeech,
+  streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
 
 export interface LiveVoiceMessageSnapshot {
@@ -32,6 +36,9 @@ export interface LiveVoiceOverlayProps {
 const VOICE_OPTIONS: Array<{ id: GeminiFemaleVoiceName; label: string }> = [
   { id: 'Kore', label: 'Kore · Natural Female' },
   { id: 'Zephyr', label: 'Zephyr · Bright Female' },
+  { id: 'Puck', label: 'Puck · Warm Male' },
+  { id: 'Charon', label: 'Charon · Deep Male' },
+  { id: 'Fenrir', label: 'Fenrir · Crisp Male' },
 ];
 
 let sharedLiveAudioCtx: AudioContext | null = null;
@@ -83,11 +90,19 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
+  const nextPlayTimeRef = useRef<number>(0);
   const pendingAudioBufferRef = useRef<AudioBuffer | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const micSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const ttsAbortRef = useRef<AbortController | null>(null);
+  const pendingChunksRef = useRef<string[]>([]);
+  const pipelineBusyRef = useRef<boolean>(false);
+  const spokenCursorRef = useRef<number>(0);
+  const activeTurnMsgIdRef = useRef<string | null>(null);
+  const useBrowserTtsForTurnRef = useRef<boolean>(false);
+  const autoListenTimerRef = useRef<number | null>(null);
 
   const energyRef = useRef(0);
   const modeRef = useRef<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
@@ -101,6 +116,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     isAiSpeaking,
     isSynthesizingVoice,
     continuousLoop,
+    selectedVoice,
     onToggleMic,
   });
   propsRef.current = {
@@ -109,6 +125,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     isAiSpeaking,
     isSynthesizingVoice,
     continuousLoop,
+    selectedVoice,
     onToggleMic,
   };
 
@@ -128,11 +145,42 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     return ctx;
   };
 
+  const ensurePlaybackAnalyser = (ctx: AudioContext): AnalyserNode => {
+    if (playbackAnalyserRef.current && playbackAnalyserRef.current.context === ctx) {
+      return playbackAnalyserRef.current;
+    }
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 128;
+    analyser.smoothingTimeConstant = 0.72;
+    analyser.connect(ctx.destination);
+    playbackAnalyserRef.current = analyser;
+    return analyser;
+  };
+
   const stopAiSpeechPlayback = () => {
+    if (autoListenTimerRef.current !== null) {
+      window.clearTimeout(autoListenTimerRef.current);
+      autoListenTimerRef.current = null;
+    }
     if (ttsAbortRef.current) {
       ttsAbortRef.current.abort();
       ttsAbortRef.current = null;
     }
+    pendingChunksRef.current = [];
+    pipelineBusyRef.current = false;
+    nextPlayTimeRef.current = 0;
+
+    for (const src of activeSourcesRef.current) {
+      try {
+        src.onended = null;
+        src.stop();
+        src.disconnect();
+      } catch {
+        // Ignore already stopped audio node
+      }
+    }
+    activeSourcesRef.current.clear();
+
     if (playbackSourceRef.current) {
       try {
         playbackSourceRef.current.onended = null;
@@ -143,7 +191,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       }
       playbackSourceRef.current = null;
     }
-    playbackAnalyserRef.current = null;
+    bilingualSpeechPlayer.stop();
     pendingAudioBufferRef.current = null;
     setNeedsTapToPlay(false);
     setIsSynthesizingVoice(false);
@@ -156,12 +204,16 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       setSeconds(0);
       setDraftText('');
       setIntegrationNotice(null);
+      activeTurnMsgIdRef.current = null;
+      spokenCursorRef.current = 0;
       stopAiSpeechPlayback();
       return;
     }
     openedSessionAtRef.current = Date.now();
     // Mark whatever AI message already existed before opening Live Voice so it does not auto-replay old history
     spokenMsgIdRef.current = lastAiMessage?.id || null;
+    activeTurnMsgIdRef.current = lastAiMessage?.id || null;
+    spokenCursorRef.current = lastAiMessage?.text ? lastAiMessage.text.length : 0;
     const timer = window.setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => {
       window.clearInterval(timer);
@@ -223,127 +275,290 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     };
   }, [isOpen, micStream]);
 
+  const maybeFinishTurnAndAutoListen = (ctrl?: AbortController | null) => {
+    if (ctrl?.signal.aborted) return;
+    if (pipelineBusyRef.current) return;
+    if (pendingChunksRef.current.length > 0) return;
+    if (activeSourcesRef.current.size > 0) return;
+    if (propsRef.current.isGenerating) return;
+
+    setIsSynthesizingVoice(false);
+    setIsAiSpeaking(false);
+
+    if (
+      propsRef.current.continuousLoop &&
+      !propsRef.current.isListening &&
+      !propsRef.current.isGenerating
+    ) {
+      if (autoListenTimerRef.current !== null) {
+        window.clearTimeout(autoListenTimerRef.current);
+      }
+      autoListenTimerRef.current = window.setTimeout(() => {
+        autoListenTimerRef.current = null;
+        if (!ctrl?.signal.aborted && !propsRef.current.isListening && !propsRef.current.isGenerating) {
+          propsRef.current.onToggleMic();
+        }
+      }, 260);
+    }
+  };
+
+  const schedulePcmSamples = (
+    ctx: AudioContext,
+    samples: Float32Array,
+    sampleRate: number,
+    ctrl: AbortController
+  ) => {
+    if (ctrl.signal.aborted || samples.length === 0) return;
+    const audioBuffer = ctx.createBuffer(1, samples.length, sampleRate);
+    audioBuffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+
+    const analyser = ensurePlaybackAnalyser(ctx);
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(analyser);
+
+    const startAt = Math.max(ctx.currentTime + 0.02, nextPlayTimeRef.current);
+    nextPlayTimeRef.current = startAt + audioBuffer.duration;
+
+    activeSourcesRef.current.add(source);
+    playbackSourceRef.current = source;
+    setIsSynthesizingVoice(false);
+    setIsAiSpeaking(true);
+
+    source.onended = () => {
+      activeSourcesRef.current.delete(source);
+      if (playbackSourceRef.current === source) {
+        playbackSourceRef.current = null;
+      }
+      maybeFinishTurnAndAutoListen(ctrl);
+    };
+
+    source.start(startAt);
+  };
+
   const startDecodedBufferPlayback = (
     ctx: AudioContext,
     audioBuffer: AudioBuffer,
     ctrl?: AbortController | null
   ) => {
+    const analyser = ensurePlaybackAnalyser(ctx);
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 128;
-    analyser.smoothingTimeConstant = 0.72;
     source.connect(analyser);
-    analyser.connect(ctx.destination);
 
+    const startAt = Math.max(ctx.currentTime + 0.02, nextPlayTimeRef.current);
+    nextPlayTimeRef.current = startAt + audioBuffer.duration;
+
+    activeSourcesRef.current.add(source);
     playbackSourceRef.current = source;
-    playbackAnalyserRef.current = analyser;
     pendingAudioBufferRef.current = null;
     setNeedsTapToPlay(false);
+    setIsSynthesizingVoice(false);
     setIsAiSpeaking(true);
 
     source.onended = () => {
-      playbackSourceRef.current = null;
-      playbackAnalyserRef.current = null;
-      setIsAiSpeaking(false);
-      if (
-        !ctrl?.signal.aborted &&
-        propsRef.current.continuousLoop &&
-        !propsRef.current.isListening &&
-        !propsRef.current.isGenerating
-      ) {
-        window.setTimeout(() => {
-          if (!ctrl?.signal.aborted && !propsRef.current.isListening) {
-            propsRef.current.onToggleMic();
-          }
-        }, 420);
+      activeSourcesRef.current.delete(source);
+      if (playbackSourceRef.current === source) {
+        playbackSourceRef.current = null;
       }
+      maybeFinishTurnAndAutoListen(ctrl);
     };
 
-    source.start(0);
+    source.start(startAt);
   };
 
-  // Speak back every new completed AI reply via Gemini latest natural female TTS
-  useEffect(() => {
-    if (!isOpen) return;
-    if (isGenerating) return;
-    if (!lastAiMessage || !lastAiMessage.id) return;
-    if (spokenMsgIdRef.current === lastAiMessage.id) return;
-
-    if (lastAiMessage.isError) {
-      spokenMsgIdRef.current = lastAiMessage.id;
-      const errClean = formatTextForNaturalSpeech(lastAiMessage.text, 220);
-      if (errClean) {
-        setIntegrationNotice(errClean);
-      }
-      return;
-    }
-
-    const spokenText = formatTextForNaturalSpeech(lastAiMessage.text);
-    if (!spokenText) return;
-
-    spokenMsgIdRef.current = lastAiMessage.id;
-    stopAiSpeechPlayback();
-
-    const ctrl = new AbortController();
-    ttsAbortRef.current = ctrl;
-    setIsSynthesizingVoice(true);
-    setIntegrationNotice(null);
-
-    void requestGeminiFemaleSpeech({
-      text: spokenText,
-      voiceName: selectedVoice,
-      style:
-        'Warm, clear, expressive natural human female conversational voice with fluid pacing and empathetic human inflection, never robotic',
-      signal: ctrl.signal,
-    }).then(async (res) => {
-      if (ctrl.signal.aborted) return;
-      setIsSynthesizingVoice(false);
-
-      if (!res.ok || !res.audioBase64) {
-        if (res.integrationRequired) {
-          setIntegrationNotice(
-            res.error ||
-              'Integration required: Server GEMINI_API_KEY is needed for Gemini natural female voice.'
-          );
-        } else if (res.error && !/abort/i.test(res.error)) {
-          setIntegrationNotice(res.error);
-        }
+  const speakSentenceViaBrowser = (
+    text: string,
+    msgId: string,
+    isMaleVoice: boolean,
+    voice: GeminiFemaleVoiceName,
+    ctrl: AbortController
+  ): Promise<void> =>
+    new Promise((resolve) => {
+      if (!isSpeechSynthesisSupported() || ctrl.signal.aborted) {
+        resolve();
         return;
       }
+      setIsSynthesizingVoice(false);
+      setIsAiSpeaking(true);
+      bilingualSpeechPlayer.speak({
+        msgId: `live-voice-${msgId}-${Date.now()}`,
+        text,
+        voiceProfile: isMaleVoice ? 'bengali_male' : 'bengali_female',
+        geminiVoice: voice,
+        skipServerTts: true,
+        onDone: () => resolve(),
+      });
+    });
 
-      try {
+  const drainSpeechPipeline = async (msgId: string) => {
+    if (pipelineBusyRef.current) return;
+    const ctrl = ttsAbortRef.current;
+    if (!ctrl || ctrl.signal.aborted) return;
+
+    pipelineBusyRef.current = true;
+    try {
+      while (pendingChunksRef.current.length > 0 && !ctrl.signal.aborted) {
+        const sentence = pendingChunksRef.current.shift();
+        if (!sentence) continue;
+
+        const voice = propsRef.current.selectedVoice;
+        const isMaleVoice =
+          voice === 'Puck' || voice === 'Charon' || voice === 'Fenrir';
+        const voiceStyle = isMaleVoice
+          ? 'Warm, clear, expressive natural human male conversational voice with brisk, natural pacing, never robotic'
+          : 'Warm, clear, expressive natural human female conversational voice with brisk, natural pacing and gentle warmth, never robotic';
+
+        if (useBrowserTtsForTurnRef.current) {
+          await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
+          continue;
+        }
+
+        if (activeSourcesRef.current.size === 0) {
+          setIsSynthesizingVoice(true);
+        }
+
         const ctx = ensureAudioContext();
-        const bytes = base64ToUint8Array(res.audioBase64);
-        if (!ctx || bytes.byteLength === 0) return;
-        const copyBuffer = bytes.slice().buffer;
-        const audioBuffer = await ctx.decodeAudioData(copyBuffer);
-        if (ctrl.signal.aborted) return;
-
-        if (ctx.state === 'suspended') {
+        if (ctx && ctx.state === 'suspended') {
           try {
             await ctx.resume();
           } catch {
-            // Browser blocked automatic resume outside gesture
+            // Will check suspended state below
           }
         }
-        if (ctrl.signal.aborted) return;
+        if (ctrl.signal.aborted) break;
 
-        if ((ctx.state as string) === 'suspended') {
-          pendingAudioBufferRef.current = audioBuffer;
-          setNeedsTapToPlay(true);
-          return;
+        // Primary low-latency path: streaming 24kHz PCM chunk-by-chunk
+        if (ctx && (ctx.state as string) !== 'suspended') {
+          const streamRes = await streamGeminiPcmSpeech({
+            text: sentence,
+            voiceName: voice,
+            style: voiceStyle,
+            signal: ctrl.signal,
+            onPcmChunk: (samples, sampleRate) => {
+              schedulePcmSamples(ctx, samples, sampleRate, ctrl);
+            },
+          });
+          if (ctrl.signal.aborted) break;
+          if (streamRes.ok && streamRes.receivedAudio) {
+            continue;
+          }
+          if (streamRes.integrationRequired) {
+            useBrowserTtsForTurnRef.current = true;
+            if (isSpeechSynthesisSupported()) {
+              await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
+              continue;
+            }
+          }
         }
 
-        startDecodedBufferPlayback(ctx, audioBuffer, ctrl);
-      } catch (err) {
-        setIsAiSpeaking(false);
-        setIntegrationNotice(
-          err instanceof Error ? err.message : 'Could not play voice audio response.'
-        );
+        // Secondary fallback: unary WAV endpoint or instant browser speech
+        const res = await requestGeminiFemaleSpeech({
+          text: sentence,
+          voiceName: voice,
+          style: voiceStyle,
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) break;
+
+        if (!res.ok || !res.audioBase64) {
+          useBrowserTtsForTurnRef.current = true;
+          if (!/abort/i.test(res.error || '') && isSpeechSynthesisSupported()) {
+            await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
+            continue;
+          }
+          if (res.integrationRequired) {
+            setIntegrationNotice(
+              res.error ||
+                'Integration required: Server GEMINI_API_KEY is needed for Gemini natural voice.'
+            );
+          } else if (res.error && !/abort/i.test(res.error)) {
+            setIntegrationNotice(res.error);
+          }
+          break;
+        }
+
+        try {
+          const activeCtx = ensureAudioContext();
+          const bytes = base64ToUint8Array(res.audioBase64);
+          if (!activeCtx || bytes.byteLength === 0) continue;
+          const audioBuffer = await activeCtx.decodeAudioData(bytes.slice().buffer);
+          if (ctrl.signal.aborted) break;
+          if ((activeCtx.state as string) === 'suspended') {
+            pendingAudioBufferRef.current = audioBuffer;
+            setNeedsTapToPlay(true);
+            break;
+          }
+          startDecodedBufferPlayback(activeCtx, audioBuffer, ctrl);
+        } catch (err) {
+          useBrowserTtsForTurnRef.current = true;
+          if (isSpeechSynthesisSupported()) {
+            await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
+          } else {
+            setIntegrationNotice(
+              err instanceof Error ? err.message : 'Could not play voice audio response.'
+            );
+          }
+        }
       }
-    });
-  }, [isOpen, isGenerating, lastAiMessage?.id, lastAiMessage?.text, lastAiMessage?.isError, selectedVoice]);
+    } finally {
+      pipelineBusyRef.current = false;
+      if (pendingChunksRef.current.length > 0 && ttsAbortRef.current && !ttsAbortRef.current.signal.aborted) {
+        void drainSpeechPipeline(msgId);
+      } else {
+        maybeFinishTurnAndAutoListen(ctrl);
+      }
+    }
+  };
+
+  // Real-time streaming sentence pipeline: begins speaking as soon as the FIRST sentence streams in!
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!lastAiMessage || !lastAiMessage.id) return;
+
+    // Ignore historical message that already existed before Live Voice opened
+    if (spokenMsgIdRef.current === lastAiMessage.id && activeTurnMsgIdRef.current === lastAiMessage.id && spokenCursorRef.current >= (lastAiMessage.text?.length || 0)) {
+      return;
+    }
+
+    // New AI turn detected — initialize streaming pipeline immediately
+    if (activeTurnMsgIdRef.current !== lastAiMessage.id) {
+      activeTurnMsgIdRef.current = lastAiMessage.id;
+      spokenMsgIdRef.current = lastAiMessage.id;
+      spokenCursorRef.current = 0;
+      useBrowserTtsForTurnRef.current = false;
+      stopAiSpeechPlayback();
+      setIntegrationNotice(null);
+
+      if (lastAiMessage.isError) {
+        const errClean = formatTextForNaturalSpeech(lastAiMessage.text, 220);
+        if (errClean) setIntegrationNotice(errClean);
+        spokenCursorRef.current = lastAiMessage.text.length;
+        return;
+      }
+
+      ttsAbortRef.current = new AbortController();
+    }
+
+    if (lastAiMessage.isError) return;
+
+    const { chunks, nextCursor } = extractReadySpeechChunks(
+      lastAiMessage.text,
+      spokenCursorRef.current,
+      !isGenerating
+    );
+
+    if (chunks.length > 0) {
+      spokenCursorRef.current = nextCursor;
+      pendingChunksRef.current.push(...chunks);
+      if (!ttsAbortRef.current || ttsAbortRef.current.signal.aborted) {
+        ttsAbortRef.current = new AbortController();
+      }
+      void drainSpeechPipeline(lastAiMessage.id);
+    } else if (!isGenerating) {
+      maybeFinishTurnAndAutoListen(ttsAbortRef.current);
+    }
+  }, [isOpen, isGenerating, lastAiMessage?.id, lastAiMessage?.text, lastAiMessage?.isError]);
 
   // Glowing Iridescent Blue Fluid Orb Canvas Renderer (60fps, matches reference aesthetic)
   useEffect(() => {
