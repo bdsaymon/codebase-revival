@@ -143,19 +143,9 @@ export const DEFAULT_PROVIDER_REGISTRY: ProviderConfig[] = [
     key_env_var_name: 'GEMINI_API_KEY',
     models: [
       {
-        model_id: 'gemini-3.8-flash',
+        model_id: 'gemini-3.1-flash-lite',
         context_window: 1_000_000,
         max_output: 16_384,
-        tools: true,
-        json: true,
-        stream: true,
-        input_price_per_1k: 0.00015,
-        output_price_per_1k: 0.0006,
-      },
-      {
-        model_id: 'gemini-3.5-flash-lite',
-        context_window: 1_000_000,
-        max_output: 8_192,
         tools: true,
         json: true,
         stream: true,

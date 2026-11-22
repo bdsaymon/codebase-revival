@@ -307,10 +307,16 @@ export function buildAdHocProviderConfig(params: {
     });
   }
 
-  // Server Gemini key if available and either smfta_cloud or fallback
+  // Server Gemini key if available for smfta_cloud / xrahat OR keyless gemini_custom
   const serverGemKey = getServerGeminiKey();
-  if (serverGemKey && isExplicitKeyless) {
-    // Map built-in SMFTA tier ids cleanly to small Gemini models.
+  const useServerGemini =
+    Boolean(serverGemKey) &&
+    (isExplicitKeyless ||
+      (!hasUserKeys &&
+        (effectiveProvider === 'gemini_custom' ||
+          effectiveProvider === 'gemini_openai')));
+  if (useServerGemini) {
+    // Map built-in SMFTA tier ids cleanly to fast valid Gemini models.
     const rawExt = (params.externalModel || '').trim().toLowerCase();
     const mappedTierModel =
       rawExt === 'smfta-flash'
@@ -324,10 +330,8 @@ export function buildAdHocProviderConfig(params: {
     const gemModels = Array.from(
       new Set([
         ...(mappedTierModel ? [mappedTierModel] : []),
-        'gemini-4-hydrogen',
-        'gemini-3-flash-preview',
         'gemini-3.1-flash-lite',
-        'gemini-flash-lite-latest',
+        'gemini-4-hydrogen',
       ])
     ).map((m) => ({
       model_id: m,

@@ -1752,8 +1752,25 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     respectCustomBaseUrl: true,
   });
 
+  const cleanVoiceUserName = String(nickname || userName || '').trim();
+  const liveVoiceSysInstruction = liveVoiceMode
+    ? [
+        `You are SMFTA AI Pro in real-time spoken voice conversation${cleanVoiceUserName ? ` with ${cleanVoiceUserName}` : ''}.`,
+        'Reply naturally, warmly, and clearly in the exact language the user spoke (Bengali, English, or mixed Banglish).',
+        'Keep replies crisp and directly helpful: usually 1 to 3 clear, natural, complete spoken sentences.',
+        'NEVER output markdown tables, pipe characters (|), bullet lists, numbered lists, code blocks, raw URLs, asterisks (*), hashtags (#), or emojis — write pure, natural spoken prose that sounds effortless and crystal clear when read aloud.',
+        replyLang === 'bn'
+          ? 'Use natural, clear standard Bengali pronunciation and simple everyday words.'
+          : replyLang === 'en'
+            ? 'Use clear, natural conversational English.'
+            : 'Match the user language seamlessly with clear, natural phrasing.',
+      ].join(' ')
+    : '';
+
+  const effectiveSysInstruction = liveVoiceMode ? liveVoiceSysInstruction : sysInstruction;
+
   const canonicalMessages: CanonicalMessage[] = [
-    { role: 'system', content: sysInstruction },
+    { role: 'system', content: effectiveSysInstruction },
     ...normalizedHistory.map((m) => ({
       role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
       content: m.content || (m.imgs?.length ? 'Analyze the attached image(s).' : ''),
@@ -1787,9 +1804,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         apiKey: fastGeminiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
       });
-      const voiceHistoryContents = normalizedHistory.slice(-10).map((m) => ({
+      const voiceHistoryContents = normalizedHistory.slice(-8).map((m) => ({
         role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: String(m.content || '').slice(0, 4000) || ' ' }],
+        parts: [{ text: String(m.content || '').slice(0, 2000) || ' ' }],
       }));
       const fastVoiceCandidates: Array<{ model: string; level: ThinkingLevel }> = [
         { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
@@ -1803,8 +1820,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             model: cand.model,
             contents: voiceHistoryContents,
             config: {
-              systemInstruction: sysInstruction,
-              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 380),
+              systemInstruction: liveVoiceSysInstruction,
+              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 320),
               thinkingConfig: { thinkingLevel: cand.level },
             },
           });
@@ -1857,9 +1874,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai'
         ? activeCustomModelName
           ? normalizeGeminiModelName(activeCustomModelName)
-          : 'gemini-3.8-flash'
+          : 'gemini-3.1-flash-lite'
         : built.adHocProviders[0]?.provider.provider_id === 'gemini_server'
-        ? built.adHocProviders[0].provider.models[0]?.model_id || 'gemini-3.8-flash'
+        ? built.adHocProviders[0].provider.models[0]?.model_id || 'gemini-3.1-flash-lite'
         : activeCustomModelName || undefined;
 
     // 4a. Use SSE streaming when supportsStreaming !== false

@@ -309,15 +309,33 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     ctrl: AbortController
   ) => {
     if (ctrl.signal.aborted || samples.length === 0) return;
-    const audioBuffer = ctx.createBuffer(1, samples.length, sampleRate);
-    audioBuffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+
+    const now = ctx.currentTime;
+    const isFreshStart =
+      activeSourcesRef.current.size === 0 || nextPlayTimeRef.current <= now + 0.008;
+
+    // Apply a gentle 3ms fade-in only when starting/resuming after silence to prevent clicks
+    let renderSamples = samples;
+    if (isFreshStart && samples.length > 64) {
+      renderSamples = new Float32Array(samples);
+      const fadeInLen = Math.min(Math.round(sampleRate * 0.003), Math.floor(renderSamples.length / 4));
+      for (let i = 0; i < fadeInLen; i += 1) {
+        renderSamples[i] = renderSamples[i]! * (i / fadeInLen);
+      }
+    }
+
+    const audioBuffer = ctx.createBuffer(1, renderSamples.length, sampleRate);
+    audioBuffer.copyToChannel(renderSamples as Float32Array<ArrayBuffer>, 0);
 
     const analyser = ensurePlaybackAnalyser(ctx);
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(analyser);
 
-    const startAt = Math.max(ctx.currentTime + 0.02, nextPlayTimeRef.current);
+    // 90ms initial jitter cushion prevents micro-stuttering while keeping first audio crisp
+    const startAt = isFreshStart
+      ? Math.max(now + 0.09, nextPlayTimeRef.current)
+      : nextPlayTimeRef.current;
     nextPlayTimeRef.current = startAt + audioBuffer.duration;
 
     activeSourcesRef.current.add(source);
@@ -406,8 +424,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         const isMaleVoice =
           voice === 'Puck' || voice === 'Charon' || voice === 'Fenrir';
         const voiceStyle = isMaleVoice
-          ? 'Warm, clear, expressive natural human male conversational voice with brisk, natural pacing, never robotic'
-          : 'Warm, clear, expressive natural human female conversational voice with brisk, natural pacing and gentle warmth, never robotic';
+          ? 'Crystal clear, natural, warm human male conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic'
+          : 'Crystal clear, natural, warm human female conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic';
 
         if (useBrowserTtsForTurnRef.current) {
           await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
@@ -441,6 +459,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           });
           if (ctrl.signal.aborted) break;
           if (streamRes.ok && streamRes.receivedAudio) {
+            // Add a subtle 110ms natural breath pause between consecutive sentences
+            if (pendingChunksRef.current.length > 0 && nextPlayTimeRef.current > ctx.currentTime) {
+              nextPlayTimeRef.current += 0.11;
+            }
             continue;
           }
           if (streamRes.integrationRequired) {

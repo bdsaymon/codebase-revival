@@ -277,10 +277,18 @@ export function formatTextForNaturalSpeech(rawText: string, maxChars = 1500): st
     .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
     .replace(/<file\b[^>]*>[\s\S]*?<\/file>/gi, ' I have created that file for you. ')
     .replace(/<patch\b[^>]*>[\s\S]*?<\/patch>/gi, ' I have updated that file. ')
-    .replace(/```[\s\S]*?```/g, ' Here is the code snippet. ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/gm, ' ')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')
+    .replace(/\|/g, ', ')
     .replace(/^[ \t]*[#>]+\s*/gm, '')
-    .replace(/[*_~`]+/g, '')
+    .replace(/^[ \t]*(?:[-*•]+|\d+[.)])\s+/gm, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u20E3]/gu, '')
+    .replace(/[*_~]+/g, '')
+    .replace(/\s*,\s*,+/g, ', ')
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.slice(0, maxChars);
@@ -388,8 +396,9 @@ export function extractReadySpeechChunks(
       break;
     }
 
-    // Look for a strong sentence boundary (Bengali dari ।, ., ?, !, newline)
-    const sentenceMatch = remaining.match(/^(.{12,260}?[।.?!\n])(?:\s+|$)/);
+    // Split strictly on complete sentence boundaries (Bengali dari ।, ., ?, !, newline)
+    // so Bengali & English intonation and pronunciation remain completely natural and clear.
+    const sentenceMatch = remaining.match(/^(.{6,280}?[।.?!\n])(?:\s+|$)/);
     if (sentenceMatch && sentenceMatch[1]) {
       const piece = sentenceMatch[1].trim();
       if (piece) chunks.push(piece);
@@ -397,20 +406,11 @@ export function extractReadySpeechChunks(
       continue;
     }
 
-    // For fast first-chunk start on long clauses, allow breaking on comma/semicolon/colon after 55 chars
-    const clauseMatch = remaining.match(/^(.{55,180}?[,;:—–])(?:\s+)/);
-    if (clauseMatch && clauseMatch[1]) {
-      const piece = clauseMatch[1].trim();
-      if (piece) chunks.push(piece);
-      cursor += clauseMatch[0].length;
-      continue;
-    }
-
-    // If a single uninterrupted run gets long (>140 chars), split cleanly at the last word boundary
-    if (remaining.length >= 140) {
-      const slice = remaining.slice(0, 140);
+    // Only split a single uninterrupted run without punctuation if it gets very long (>240 chars)
+    if (remaining.length >= 240) {
+      const slice = remaining.slice(0, 240);
       const lastSpace = slice.lastIndexOf(' ');
-      const cut = lastSpace >= 60 ? lastSpace : 140;
+      const cut = lastSpace >= 100 ? lastSpace : 240;
       const piece = remaining.slice(0, cut).trim();
       if (piece) chunks.push(piece);
       cursor += cut;
@@ -478,8 +478,24 @@ export async function streamGeminiPcmSpeech(params: {
 
     const sampleRate = Number(res.headers.get('X-Voice-Sample-Rate')) || 24000;
     const reader = res.body.getReader();
-    let leftoverByte: Uint8Array | null = null;
+    const MIN_FRAME_BYTES = 4800; // ~100ms at 24kHz 16-bit mono PCM for click-free playback
+    let pendingBytes: Uint8Array = new Uint8Array(0);
+    let checkedHeader = false;
     let receivedAudio = false;
+
+    const emitEvenPcm = (buf: Uint8Array) => {
+      const evenBytes = buf.byteLength - (buf.byteLength % 2);
+      if (evenBytes < 2) return buf;
+      const sampleCount = evenBytes / 2;
+      const view = new DataView(buf.buffer, buf.byteOffset, evenBytes);
+      const float32 = new Float32Array(sampleCount);
+      for (let i = 0; i < sampleCount; i += 1) {
+        float32[i] = view.getInt16(i * 2, true) / 32768;
+      }
+      receivedAudio = true;
+      params.onPcmChunk(float32, sampleRate);
+      return buf.byteLength > evenBytes ? buf.slice(evenBytes) : new Uint8Array(0);
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -490,30 +506,34 @@ export async function streamGeminiPcmSpeech(params: {
       }
       if (!value || value.byteLength === 0) continue;
 
-      let combined: Uint8Array;
-      if (leftoverByte && leftoverByte.byteLength > 0) {
-        combined = new Uint8Array(leftoverByte.byteLength + value.byteLength);
-        combined.set(leftoverByte, 0);
-        combined.set(value, leftoverByte.byteLength);
-        leftoverByte = null;
+      if (pendingBytes.byteLength > 0) {
+        const merged = new Uint8Array(pendingBytes.byteLength + value.byteLength);
+        merged.set(pendingBytes, 0);
+        merged.set(value, pendingBytes.byteLength);
+        pendingBytes = merged;
       } else {
-        combined = value;
+        pendingBytes = value;
       }
 
-      const evenBytes = combined.byteLength - (combined.byteLength % 2);
-      if (combined.byteLength % 2 === 1) {
-        leftoverByte = combined.slice(evenBytes);
+      if (!checkedHeader && pendingBytes.byteLength >= 44) {
+        checkedHeader = true;
+        if (
+          pendingBytes[0] === 0x52 &&
+          pendingBytes[1] === 0x49 &&
+          pendingBytes[2] === 0x46 &&
+          pendingBytes[3] === 0x46
+        ) {
+          pendingBytes = pendingBytes.slice(44);
+        }
       }
-      if (evenBytes < 2) continue;
 
-      const sampleCount = evenBytes / 2;
-      const view = new DataView(combined.buffer, combined.byteOffset, evenBytes);
-      const float32 = new Float32Array(sampleCount);
-      for (let i = 0; i < sampleCount; i += 1) {
-        float32[i] = view.getInt16(i * 2, true) / 32768;
+      if (pendingBytes.byteLength >= MIN_FRAME_BYTES) {
+        pendingBytes = emitEvenPcm(pendingBytes);
       }
-      receivedAudio = true;
-      params.onPcmChunk(float32, sampleRate);
+    }
+
+    if (pendingBytes.byteLength >= 2) {
+      emitEvenPcm(pendingBytes);
     }
 
     return { ok: receivedAudio, receivedAudio };

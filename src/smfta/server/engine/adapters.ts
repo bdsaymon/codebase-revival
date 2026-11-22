@@ -596,6 +596,7 @@ export function buildProtocolRequest(params: {
 
   if (params.protocol === 'gemini_native') {
     headers['x-goog-api-key'] = params.apiKey;
+    headers['User-Agent'] = 'aistudio-build';
     const base = params.baseUrl.replace(/\/+$/, '');
     const action = params.stream ? 'streamGenerateContent?alt=sse' : 'generateContent';
     const url = base.includes(':generateContent') || base.includes(':streamGenerateContent')

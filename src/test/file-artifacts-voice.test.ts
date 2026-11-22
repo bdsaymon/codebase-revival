@@ -192,4 +192,36 @@ describe('Hybrid Voice Input & Editorial Thinking Formatting', () => {
     expect(topic2).not.toMatch(/Initiating the Analysis/i);
     expect(topic2).toContain('সুন্দরবনের জীববৈচিত্র্য');
   });
+
+  it('strips markdown tables, keycap emojis, horizontal rules, and raw URLs for crystal-clear speech', async () => {
+    const { formatTextForNaturalSpeech, extractReadySpeechChunks } = await import(
+      '../smfta/src/utils/voiceEngine'
+    );
+    const noisy = [
+      '## 1️⃣ রিসোর্স চেক',
+      '---',
+      '| কলাম | সমাধান |',
+      '| --- | --- |',
+      '| GPU | কোটা দেখুন https://console.cloud.google.com/iam |',
+      '```python\nprint("hi")\n```',
+      'সবকিছু ঠিকঠাক কাজ করছে।',
+    ].join('\n');
+
+    const clean = formatTextForNaturalSpeech(noisy);
+    expect(clean).not.toContain('|');
+    expect(clean).not.toContain('---');
+    expect(clean).not.toContain('https://');
+    expect(clean).not.toContain('1️⃣');
+    expect(clean).not.toContain('print');
+    expect(clean).toContain('সবকিছু ঠিকঠাক কাজ করছে।');
+
+    // Bengali sentence with commas stays intact until the real sentence ending (।)
+    const longBn =
+      'বাংলাদেশ একটি সুন্দর দেশ, যেখানে অনেক নদী, সবুজ মাঠ, এবং অসাধারণ প্রাকৃতিক সৌন্দর্য রয়েছে। এটি দক্ষিণ এশিয়ায় অবস্থিত।';
+    const firstPass = extractReadySpeechChunks(longBn, 0, false);
+    expect(firstPass.chunks).toEqual([
+      'বাংলাদেশ একটি সুন্দর দেশ, যেখানে অনেক নদী, সবুজ মাঠ, এবং অসাধারণ প্রাকৃতিক সৌন্দর্য রয়েছে।',
+      'এটি দক্ষিণ এশিয়ায় অবস্থিত।',
+    ]);
+  });
 });

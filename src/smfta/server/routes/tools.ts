@@ -608,10 +608,18 @@ export function sanitizeTextForTtsEndpoint(raw: unknown): string {
     .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
     .replace(/<file\b[^>]*>[\s\S]*?<\/file>/gi, ' Created a file. ')
     .replace(/<patch\b[^>]*>[\s\S]*?<\/patch>/gi, ' Updated a file. ')
-    .replace(/```[\s\S]*?```/g, ' Here is the code snippet. ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/gm, ' ')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, ' ')
+    .replace(/\|/g, ', ')
     .replace(/^[ \t]*[#>]+\s*/gm, '')
-    .replace(/[*_~`]+/g, '')
+    .replace(/^[ \t]*(?:[-*•]+|\d+[.)])\s+/gm, '')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u20E3]/gu, '')
+    .replace(/[*_~]+/g, '')
+    .replace(/\s*,\s*,+/g, ', ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 1600);
@@ -640,11 +648,11 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const isMaleVoice =
     voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
   const defaultStyle = isMaleVoice
-    ? 'Warm, natural, expressive human male conversational voice with clear articulation, steady calm energy, smooth cadence, never robotic'
-    : 'Warm, natural, expressive human female conversational voice with clear articulation, gentle empathy, smooth natural cadence, never robotic';
+    ? 'Crystal clear, natural, warm human male conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic'
+    : 'Crystal clear, natural, warm human female conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic';
   const customStyle =
     typeof req.body?.style === 'string' && req.body.style.trim()
-      ? req.body.style.trim().slice(0, 200)
+      ? req.body.style.trim().slice(0, 220)
       : defaultStyle;
 
   const ai = new GoogleGenAI({
@@ -733,11 +741,11 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   const isMaleVoice =
     voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
   const defaultStyle = isMaleVoice
-    ? 'Warm, natural, expressive human male conversational voice with clear articulation and brisk natural cadence, never robotic'
-    : 'Warm, natural, expressive human female conversational voice with clear articulation and brisk natural cadence, never robotic';
+    ? 'Crystal clear, natural, warm human male conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic'
+    : 'Crystal clear, natural, warm human female conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic';
   const customStyle =
     typeof req.body?.style === 'string' && req.body.style.trim()
-      ? req.body.style.trim().slice(0, 200)
+      ? req.body.style.trim().slice(0, 220)
       : defaultStyle;
 
   const ai = new GoogleGenAI({
@@ -750,75 +758,105 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     clientClosed = true;
   });
 
-  try {
-    const responseStream = await ai.models.generateContentStream({
-      model: 'gemini-3.8-flash-lite-tts',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text: speechText,
-              speechMetadata: {
-                style: customStyle,
-              },
-            } as { text: string; speechMetadata?: { style?: string } },
-          ],
-        },
-      ],
-      config: {
-        responseModalities: ['AUDIO'],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName },
+  const ttsStreamModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  let lastError = 'Gemini streaming TTS returned no audio chunks.';
+
+  for (const model of ttsStreamModels) {
+    if (clientClosed || req.signal?.aborted) break;
+    let wroteAny = false;
+    try {
+      const responseStream = await ai.models.generateContentStream({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: speechText,
+                speechMetadata: {
+                  style: customStyle,
+                },
+              } as { text: string; speechMetadata?: { style?: string } },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName },
+            },
           },
         },
-      },
-    });
+      });
 
-    let wroteAny = false;
-    for await (const chunk of responseStream) {
-      if (clientClosed || req.signal?.aborted) break;
-      const parts = chunk.candidates?.[0]?.content?.parts || [];
-      for (const p of parts) {
-        const b64 = p?.inlineData?.data;
-        if (!b64) continue;
-        const pcmBytes = Buffer.from(b64, 'base64');
-        if (pcmBytes.length === 0) continue;
-        if (!wroteAny) {
-          wroteAny = true;
-          res.status(200);
-          res.setHeader('Content-Type', 'audio/pcm; rate=24000; channels=1; encoding=signed-int');
-          res.setHeader('Cache-Control', 'no-cache, no-store');
-          res.setHeader('X-Voice-Sample-Rate', '24000');
-          res.flushHeaders();
+      for await (const chunk of responseStream) {
+        if (clientClosed || req.signal?.aborted) break;
+        const parts = chunk.candidates?.[0]?.content?.parts || [];
+        for (const p of parts) {
+          const b64 = p?.inlineData?.data;
+          if (!b64) continue;
+          let pcmBytes = Buffer.from(b64, 'base64');
+          if (pcmBytes.length === 0) continue;
+
+          // Strip accidental 44-byte RIFF/WAV header if upstream wraps first PCM chunk in WAV
+          if (
+            pcmBytes.length > 44 &&
+            pcmBytes[0] === 0x52 &&
+            pcmBytes[1] === 0x49 &&
+            pcmBytes[2] === 0x46 &&
+            pcmBytes[3] === 0x46
+          ) {
+            pcmBytes = pcmBytes.subarray(44);
+          }
+          if (pcmBytes.length === 0) continue;
+
+          if (!wroteAny) {
+            wroteAny = true;
+            const rateMatch = String(p?.inlineData?.mimeType || '').match(/rate=(\d+)/i);
+            const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+            res.status(200);
+            res.setHeader(
+              'Content-Type',
+              `audio/pcm; rate=${sampleRate}; channels=1; encoding=signed-int`
+            );
+            res.setHeader('Cache-Control', 'no-cache, no-store');
+            res.setHeader('X-Voice-Sample-Rate', String(sampleRate));
+            res.setHeader('X-Voice-Model-Used', model);
+            res.flushHeaders();
+          }
+          res.write(pcmBytes);
         }
-        res.write(pcmBytes);
+      }
+
+      if (wroteAny) {
+        if (!res.writableEnded) {
+          res.end();
+        }
+        return;
+      }
+      lastError = `${model} returned no streaming audio chunks.`;
+    } catch (err) {
+      lastError = sanitizeErrorMsg(err);
+      if (wroteAny) {
+        if (!res.writableEnded) {
+          res.end();
+        }
+        return;
       }
     }
-
-    if (!wroteAny && !res.headersSent) {
-      return res.status(502).json({
-        ok: false,
-        error: 'gemini-3.8-flash-lite-tts returned no streaming audio chunks.',
-      });
-    }
-    if (!res.writableEnded) {
-      res.end();
-    }
-    return;
-  } catch (err) {
-    if (!res.headersSent) {
-      return res.status(502).json({
-        ok: false,
-        error: sanitizeErrorMsg(err),
-      });
-    }
-    if (!res.writableEnded) {
-      res.end();
-    }
-    return;
   }
+
+  if (!res.headersSent) {
+    return res.status(502).json({
+      ok: false,
+      error: lastError,
+    });
+  }
+  if (!res.writableEnded) {
+    res.end();
+  }
+  return;
 });
 
 // ============================================================================
