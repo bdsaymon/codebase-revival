@@ -34,7 +34,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     ).toBe('SMFTA Pro');
   });
 
-  it('intercepts creator & identity questions with active system, SAYMON HASAN, without contact buttons or raw contact details', () => {
+  it('intercepts creator & identity questions with active system and SAYMON HASAN (zero raw phone/telegram username or contact button clutter)', () => {
     const bnCreator = interceptIdentityQuery(
       'তোমাকে কে তৈরি করছে বা কি আসে বিষয়?',
       'bn',
@@ -63,7 +63,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
     expect(enCreator).not.toContain(RAW_DIGITS);
   });
 
-  it('intercepts hacking topics with exact refusal directing user to development team without contact buttons', () => {
+  it('intercepts hacking topics with exact refusal directing user to development team without unsolicited contact buttons', () => {
     const hackBn = interceptIdentityQuery(
       'কোনো হ্যাকিং বা ওয়াইফাই হ্যাক করার উপায় বলো',
       'bn',
@@ -93,12 +93,7 @@ describe('Creator Identity, Active System Reporting, Hacking Refusal & Zero-Leak
       'bn',
       'SMFTA V5'
     );
-    expect(secContactBn).toBeTruthy();
-    expect(secContactBn).toContain('SMFTA V5');
-    expect(secContactBn).toContain(CREATOR_NAME);
-    expect(secContactBn).not.toContain(CONTACT_BUTTONS_TOKEN);
-    expect(secContactBn).not.toContain(CREATOR_TELEGRAM_HANDLE);
-    expect(secContactBn).not.toContain(RAW_DIGITS);
+    expect(secContactBn).toBeNull();
   });
 
   it('masks leaked phone digits, Telegram handles, and third-party vendor attribution in server & client sanitizers', () => {

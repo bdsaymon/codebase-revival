@@ -22,6 +22,7 @@ import {
   Check,
   AlertTriangle,
   Zap,
+  User,
   MessageSquare,
   Send,
   ArrowUp,
@@ -42,16 +43,15 @@ import {
   PenLine,
   Play,
   Server,
-  AudioLines,
+  Sparkles,
   Volume2,
   ThumbsUp,
   ThumbsDown,
+  Eye,
   EyeOff,
   Brain,
   KeyRound,
-  GitBranch,
 } from 'lucide-react';
-import { getTimeOfDayGreeting } from './utils/homeGreeting';
 
 const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 h-5' }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" className={className} aria-hidden="true">
@@ -61,21 +61,20 @@ const StaggeredMenuIcon: React.FC<{ className?: string }> = ({ className = 'w-5 
   </svg>
 );
 
-const BrandMarkIcon: React.FC<{ className?: string }> = ({ className = 'w-10 h-10' }) => (
-  <svg viewBox="0 0 40 40" fill="currentColor" className={className} aria-hidden="true">
-    <path d="M16.5 6L9 19.5h9.5l3-5.2L16.5 6z" opacity="0.95" />
-    <path d="M21 15.5l-4.5 7.8H29l4.5-7.8H21z" opacity="0.88" />
-    <path d="M12.5 23.3L9 29.5h15.5l3.5-6.2H12.5z" opacity="0.98" />
-  </svg>
-);
-
-const IncognitoIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-    <path d="M4 11h16" />
-    <path d="M6.5 11l1.7-5.2A1.5 1.5 0 0 1 9.6 4.8h4.8a1.5 1.5 0 0 1 1.4 1L17.5 11" />
-    <circle cx="8.5" cy="16.5" r="2.5" />
-    <circle cx="15.5" cy="16.5" r="2.5" />
-    <path d="M11 16.5h2" />
+const SunburstMarkIcon: React.FC<{ className?: string }> = ({ className = 'w-11 h-11' }) => (
+  <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" className={className} aria-hidden="true">
+    <line x1="24" y1="5" x2="24" y2="15" />
+    <line x1="24" y1="33" x2="24" y2="43" />
+    <line x1="5" y1="24" x2="15" y2="24" />
+    <line x1="33" y1="24" x2="43" y2="24" />
+    <line x1="10.6" y1="10.6" x2="17.6" y2="17.6" />
+    <line x1="30.4" y1="30.4" x2="37.4" y2="37.4" />
+    <line x1="37.4" y1="10.6" x2="30.4" y2="17.6" />
+    <line x1="17.6" y1="30.4" x2="10.6" y2="37.4" />
+    <line x1="16.7" y1="6.4" x2="20.6" y2="15.7" />
+    <line x1="27.4" y1="32.3" x2="31.3" y2="41.6" />
+    <line x1="6.4" y1="31.3" x2="15.7" y2="27.4" />
+    <line x1="32.3" y1="20.6" x2="41.6" y2="16.7" />
   </svg>
 );
 import {
@@ -153,28 +152,6 @@ import {
   extractFileArtifacts,
   FileArtifactItem,
 } from './utils/fileArtifacts';
-import { VirtualizedChatList } from './components/chat/VirtualizedChatList';
-import { DiagramStudioModal } from './components/DiagramStudioModal';
-import {
-  type ArtifactVersion,
-  type WorkspaceArtifactFile,
-  buildWorkspaceContextPrompt,
-  deleteWorkspaceFile,
-  renameWorkspaceFile,
-  upsertWorkspaceFile,
-} from './services/artifactManager';
-import { classifyChatError } from './services/chatStreamParser';
-import {
-  loadProjectWorkspaceSnapshot,
-  saveProjectWorkspaceSnapshot,
-} from './services/indexedDbStore';
-import { extractAgentOperations } from './services/patchEngine';
-import {
-  agentPlanToTaskExecutionPlan,
-  applyFixFallbackFromReply,
-  applyModelWorkspaceTurn,
-  shouldSummarizeConversation,
-} from './services/workspaceSync';
 import { SimpleEntryModal } from './components/SimpleEntryModal';
 import {
   loadSimpleEntryCredentials,
@@ -198,11 +175,8 @@ import {
   CodeLabModal,
   ImageStudioModal,
   StatsAndWhatsNewModal,
+  VoiceCallOverlay,
 } from './components/ToolModals';
-import {
-  LiveVoiceOverlay,
-  unlockSharedLiveAudioContext,
-} from './components/LiveVoiceOverlay';
 import { SettingsModal, SettingsTabId } from './components/SettingsHub';
 import { NotebookModal, createNote, sanitizeNotes } from './components/NotebookModal';
 import { ConnectionsModal } from './components/ConnectionsModal';
@@ -464,12 +438,17 @@ export default function App() {
   });
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = loadJSON<Partial<AppSettings>>(LS_KEYS.settings, {});
-    return sanitizeSettings({
+    const hydrated = sanitizeSettings({
       theme: 'dark',
-      themeMode: 'dark',
       accent: 'indigo',
       ...saved,
+      webSearchDefault: false,
     });
+    if (hydrated.thinkingMode === 'off' || hydrated.thinkingEnabled === false) {
+      hydrated.thinkingEnabled = true;
+      hydrated.thinkingMode = 'medium';
+    }
+    return hydrated;
   });
   const [savedProfiles, setSavedProfiles] = useState<SavedProviderProfile[]>(
     () => getInitialProviderProfiles(settings)
@@ -603,22 +582,6 @@ export default function App() {
   const [activeArtifact, setActiveArtifact] = useState<ArtifactPayload | null>(
     null
   );
-  const [diagramStudioOpen, setDiagramStudioOpen] = useState(false);
-  const [workspaceFiles, setWorkspaceFiles] = useState<
-    Record<string, WorkspaceArtifactFile>
-  >({});
-  const [artifactHistory, setArtifactHistory] = useState<
-    Record<string, ArtifactVersion[]>
-  >({});
-  const workspaceFilesRef = useRef<Record<string, WorkspaceArtifactFile>>({});
-  const artifactHistoryRef = useRef<Record<string, ArtifactVersion[]>>({});
-  const pendingFixTargetRef = useRef<{ filename: string; lang: string } | null>(null);
-  useEffect(() => {
-    workspaceFilesRef.current = workspaceFiles;
-  }, [workspaceFiles]);
-  useEffect(() => {
-    artifactHistoryRef.current = artifactHistory;
-  }, [artifactHistory]);
   const [simpleEntryCreds, setSimpleEntryCreds] =
     useState<SimpleEntryCredentials | null>(() => loadSimpleEntryCredentials());
   const [simpleEntryModalOpen, setSimpleEntryModalOpen] = useState<boolean>(() => {
@@ -661,6 +624,7 @@ export default function App() {
   const [topProviderMenuOpen, setTopProviderMenuOpen] = useState(false);
   const [bottomProviderMenuOpen, setBottomProviderMenuOpen] = useState(false);
   const [bottomModelMenuOpen, setBottomModelMenuOpen] = useState(false);
+  const [moreModelsOpen, setMoreModelsOpen] = useState(false);
   const [providerLimitBanner, setProviderLimitBanner] = useState<{
     profileName: string;
     message: string;
@@ -746,9 +710,7 @@ export default function App() {
   // v18.6.0 — a loaded .zip project: the assistant can edit exact paths and
   // hand back a repacked archive.
   const [project, setProject] = useState<Project | null>(null);
-  const [webSearch, setWebSearch] = useState(
-    () => settings.webSearchDefault === true
-  );
+  const [webSearch, setWebSearch] = useState(false);
   const [activeTaskPlan, setActiveTaskPlan] = useState<TaskExecutionPlan | null>(null);
   const [talkMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -845,20 +807,12 @@ export default function App() {
   const recogRef = useRef<any>(null);
 
   const activeChat = chats.find((c) => c.id === activeId) || chats[0];
-  const activeChatRef = useRef(activeChat);
-  activeChatRef.current = activeChat;
-  const selfWidgetsRef = useRef(selfWidgets);
-  selfWidgetsRef.current = selfWidgets;
-  const isGeneratingRef = useRef(isGenerating);
-  isGeneratingRef.current = isGenerating;
-  const settingsAutoScrollRef = useRef(settings.autoScroll);
-  settingsAutoScrollRef.current = settings.autoScroll;
 
-  const showToast = React.useCallback((msg: string, ms = 2800) => {
+  const showToast = (msg: string, ms = 2800) => {
     setToastMsg(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToastMsg(null), ms);
-  }, []);
+  };
 
   const handleUpdateProfiles = (next: SavedProviderProfile[]) => {
     setSavedProfiles(next);
@@ -877,14 +831,10 @@ export default function App() {
     'Msfta shop ai';
 
   // Raw model id used in requests/metadata. For the built-in keyless engines
-  // this is mapped to honest SMFTA tier labels in chrome — never raw internal IDs.
-  const activeProviderId = activeProfile?.provider || settings.provider;
-  const activeHasUserKey = Boolean(
-    (activeProfile?.externalKeys || settings.externalKeys || '').trim()
+  // this is one of the honest SMFTA tier ids — never a fabricated vendor name.
+  const activeIsBuiltin = isBuiltinProviderId(
+    activeProfile?.provider || settings.provider
   );
-  const activeIsBuiltin =
-    isBuiltinProviderId(activeProviderId) ||
-    (activeProviderId === 'gemini_custom' && !activeHasUserKey);
   const activeModelName =
     activeProfile?.externalModel?.trim() ||
     settings.externalModel?.trim() ||
@@ -902,78 +852,6 @@ export default function App() {
   const activeIsV2 = isV2ModelId(activeModelName);
   const isV2AuthorizedTester = isAuthorizedTestingUser(firebaseUser);
   const v2ResetInfo = getNextRiyadhResetInfo();
-  const isEn = settings.appLanguage === 'en';
-  const workspaceProjectKey =
-    activeChat.projectId || `chat-${activeChat.id}`;
-  const hydratedWorkspaceKeyRef = useRef<string | null>(null);
-
-  // Hydrate per-project workspace files & artifact history from IndexedDB
-  useEffect(() => {
-    let cancelled = false;
-    hydratedWorkspaceKeyRef.current = null;
-    loadProjectWorkspaceSnapshot(workspaceProjectKey)
-      .then((snap) => {
-        if (cancelled) return;
-        if (snap && snap.files) {
-          setWorkspaceFiles(snap.files);
-          setArtifactHistory(snap.history || {});
-          workspaceFilesRef.current = snap.files;
-          artifactHistoryRef.current = snap.history || {};
-        } else {
-          setWorkspaceFiles({});
-          setArtifactHistory({});
-          workspaceFilesRef.current = {};
-          artifactHistoryRef.current = {};
-        }
-        hydratedWorkspaceKeyRef.current = workspaceProjectKey;
-      })
-      .catch(() => {
-        if (!cancelled) {
-          hydratedWorkspaceKeyRef.current = workspaceProjectKey;
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceProjectKey]);
-
-  // Persist workspace files, version history & project chats to IndexedDB
-  useEffect(() => {
-    if (hydratedWorkspaceKeyRef.current !== workspaceProjectKey) return;
-    if (streamingMsgId !== null) return;
-    if (settings.autoSaveChat === false || settings.conversationPrivacyMode) return;
-    if (activeChat.incognito) return;
-    const timer = window.setTimeout(() => {
-      if (hydratedWorkspaceKeyRef.current !== workspaceProjectKey) return;
-      const scopedChats = chats.filter(
-        (c) =>
-          !c.incognito &&
-          (activeChat.projectId
-            ? c.projectId === activeChat.projectId
-            : c.id === activeChat.id || !c.projectId)
-      );
-      void saveProjectWorkspaceSnapshot({
-        projectId: workspaceProjectKey,
-        files: workspaceFiles,
-        history: artifactHistory,
-        chats: scopedChats,
-        activeChatId: activeChat.id,
-        updatedAt: Date.now(),
-      });
-    }, 150);
-    return () => window.clearTimeout(timer);
-  }, [
-    workspaceProjectKey,
-    workspaceFiles,
-    artifactHistory,
-    chats,
-    activeChat.id,
-    activeChat.projectId,
-    activeChat.incognito,
-    streamingMsgId,
-    settings.autoSaveChat,
-    settings.conversationPrivacyMode,
-  ]);
 
   const getV2QuotaStatusForModel = (modelId: V2ModelId): V2ModelQuotaStatus => {
     if (v2ServerQuotaMap && v2ServerQuotaMap[modelId]) {
@@ -1248,8 +1126,125 @@ export default function App() {
     );
   };
 
-  const activeModelNameRef = useRef(activeModelName);
-  activeModelNameRef.current = activeModelName;
+  // Extract a previewable side-by-side ArtifactPayload from any AI message text
+  const extractPreviewableArtifactFromMessage = React.useCallback(
+    (rawMsgText: string): ArtifactPayload | null => {
+      if (!rawMsgText || !rawMsgText.trim()) return null;
+      const { cleanResponse } = extractThinkingAndResponse(rawMsgText);
+      const textToScan = cleanResponse || rawMsgText;
+      const { artifacts: fileArts } = extractFileArtifacts(textToScan, false);
+      const codeBlocks = extractCodeBlocks(textToScan);
+
+      const extMap: Record<string, string> = {
+        html: 'index.html',
+        htm: 'index.html',
+        svg: 'graphic.svg',
+        css: 'styles.css',
+        scss: 'styles.css',
+        javascript: 'script.js',
+        js: 'script.js',
+        typescript: 'script.ts',
+        ts: 'script.ts',
+        jsx: 'App.jsx',
+        tsx: 'App.tsx',
+        react: 'App.tsx',
+      };
+
+      const bundleFiles: FileArtifactItem[] = [...fileArts];
+      codeBlocks.forEach((b, idx) => {
+        if (!b.content.trim()) return;
+        const lang = (b.lang || 'code').trim().toLowerCase();
+        const baseExt = extMap[lang] || `snippet-${idx + 1}.txt`;
+        const filename = bundleFiles.some((x) => x.filename === baseExt)
+          ? `${idx + 1}-${baseExt}`
+          : baseExt;
+        bundleFiles.push({
+          id: `auto-block-${idx}`,
+          filename,
+          lang,
+          title: `${lang.toUpperCase()} Block ${idx + 1}`,
+          content: b.content,
+          isStreaming: false,
+        });
+      });
+
+      const isUiPreviewable = (lang: string, code: string, fname?: string) => {
+        const l = (lang || '').toLowerCase();
+        const fn = (fname || '').toLowerCase();
+        if (
+          l === 'html' ||
+          l === 'htm' ||
+          l === 'svg' ||
+          l === 'jsx' ||
+          l === 'tsx' ||
+          l === 'react' ||
+          fn.endsWith('.html') ||
+          fn.endsWith('.htm') ||
+          fn.endsWith('.svg') ||
+          fn.endsWith('.jsx') ||
+          fn.endsWith('.tsx')
+        ) {
+          return true;
+        }
+        if (
+          /<!doctype\s+html|<html[\s>]|<body[\s>]|<svg[\s>]|<div[\s>]/i.test(
+            code
+          )
+        ) {
+          return true;
+        }
+        if (
+          /(?:export\s+default\s+function|function\s+[A-Z]\w*\s*\(|const\s+[A-Z]\w*\s*=\s*\([^)]*\)\s*=>)/.test(
+            code
+          ) &&
+          /<[A-Za-z][\w.-]*[\s/>]/.test(code)
+        ) {
+          return true;
+        }
+        return false;
+      };
+
+      const primaryArt = fileArts.find((a) =>
+        isUiPreviewable(a.lang, a.content, a.filename)
+      );
+      if (primaryArt) {
+        return {
+          title: primaryArt.title || primaryArt.filename,
+          filename: primaryArt.filename,
+          lang: primaryArt.lang,
+          code: primaryArt.content,
+          bundleFiles,
+        };
+      }
+
+      const primaryBlock = codeBlocks.find((b) =>
+        isUiPreviewable(b.lang, b.content)
+      );
+      if (primaryBlock) {
+        const cleanLang = (primaryBlock.lang || 'html').toLowerCase();
+        return {
+          title: `Interactive ${cleanLang.toUpperCase()} Live Preview`,
+          filename: extMap[cleanLang] || 'index.html',
+          lang: cleanLang,
+          code: primaryBlock.content,
+          bundleFiles,
+        };
+      }
+
+      return null;
+    },
+    []
+  );
+
+  const latestChatArtifact = React.useMemo(() => {
+    for (let i = activeChat.msgs.length - 1; i >= 0; i--) {
+      const m = activeChat.msgs[i];
+      if (m.role !== 'ai') continue;
+      const found = extractPreviewableArtifactFromMessage(m.text || '');
+      if (found) return found;
+    }
+    return null;
+  }, [activeChat.msgs, extractPreviewableArtifactFromMessage]);
 
   // ── v19.0.0 Full-screen Code Workspace (/workspace/code) handoff ─────────
   useEffect(() => {
@@ -1338,8 +1333,6 @@ export default function App() {
       .visualViewport;
     if (!vv) return;
     const apply = () => {
-      // Pinch zoom must not resize the shell as if a keyboard opened.
-      if (Math.abs(vv.scale - 1) > 0.01) return;
       const h = Math.round(vv.height);
       if (h > 120) {
         document.documentElement.style.setProperty('--app-height', `${h}px`);
@@ -1347,9 +1340,10 @@ export default function App() {
     };
     apply();
     vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
     return () => {
       vv.removeEventListener('resize', apply);
-      document.documentElement.style.removeProperty('--app-height');
+      vv.removeEventListener('scroll', apply);
     };
   }, []);
 
@@ -1690,12 +1684,19 @@ export default function App() {
     if (!state) return;
     if (state.settings && Object.keys(state.settings).length > 0) {
       // The live API key never leaves the device — keep the local one only for the same user.
-      setSettings((prev) =>
-        sanitizeSettings({
-          ...parseCloudSettings(state.settings),
+      setSettings((prev) => {
+        const cloudParsed = parseCloudSettings(state.settings);
+        const hydrated = sanitizeSettings({
+          ...cloudParsed,
+          webSearchDefault: false,
           externalKeys: ignoreLocalChats ? '' : prev.externalKeys,
-        })
-      );
+        });
+        if (hydrated.thinkingMode === 'off' || hydrated.thinkingEnabled === false) {
+          hydrated.thinkingEnabled = true;
+          hydrated.thinkingMode = 'medium';
+        }
+        return hydrated;
+      });
     }
     if (Array.isArray(state.memory) && state.memory.length > 0) {
       const restored = factsToText(
@@ -2606,18 +2607,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const lastAutoScrollAtRef = useRef(0);
-  const scrollToBottom = React.useCallback((force = false) => {
+  const scrollToBottom = (force = false) => {
     // v18.11 — honor the user's Auto-Scroll setting (forced calls still win).
-    if (!force && settingsAutoScrollRef.current === false) return;
+    if (!force && settings.autoScroll === false) return;
     if (force) {
       userScrolledUpRef.current = false;
       setShowScrollBottomBtn(false);
-    } else {
-      if (userScrolledUpRef.current) return;
-      const now = Date.now();
-      if (now - lastAutoScrollAtRef.current < 140) return;
-      lastAutoScrollAtRef.current = now;
+    } else if (userScrolledUpRef.current) {
+      return;
     }
     requestAnimationFrame(() => {
       if (!force && userScrolledUpRef.current) return;
@@ -2625,7 +2622,7 @@ export default function App() {
         chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
       }
     });
-  }, []);
+  };
 
   const incrementUsage = () => {
     const today = new Date().toDateString();
@@ -2731,7 +2728,7 @@ export default function App() {
     );
   };
 
-  const appendMessageToChat = React.useCallback((chatId: number, msg: ChatMessage) => {
+  const appendMessageToChat = (chatId: number, msg: ChatMessage) => {
     setChats((prev) =>
       prev.map((c) => {
         if (c.id !== chatId) return c;
@@ -2756,9 +2753,9 @@ export default function App() {
         };
       })
     );
-  }, []);
+  };
 
-  const updateMessageInChat = React.useCallback((
+  const updateMessageInChat = (
     chatId: number,
     messageId: string,
     updater: (m: ChatMessage) => ChatMessage
@@ -2775,15 +2772,14 @@ export default function App() {
             }
       )
     );
-  }, []);
+  };
 
-  // Image Generation & Editing (Real Gemini Image API; surfaces Integration required if unconfigured)
+  // Image Generation (Nano Banana 2.1 backend with Pollinations fallback)
   const handleRunImageGen = (
     prompt: string,
     style = settings.imageGenPrefs?.defaultStyle || 'high quality, detailed',
     size = settings.imageGenPrefs?.defaultSize || 768,
-    skipUserMessage = false,
-    referenceImage?: { base64: string; mimeType: string; name: string }
+    skipUserMessage = false
   ) => {
     if (!isToolEnabled('generate_image', settings.enabledTools)) {
       showToast('Image generation tool is disabled in Settings → Tools.');
@@ -2796,20 +2792,7 @@ export default function App() {
       const userMsg: ChatMessage = {
         id: createUniqueId('u'),
         role: 'user',
-        text: referenceImage
-          ? `Edit image (${referenceImage.name}): ${prompt}`
-          : prompt,
-        ...(referenceImage
-          ? {
-              imgs: [
-                {
-                  mime: referenceImage.mimeType,
-                  data: referenceImage.base64,
-                  url: `data:${referenceImage.mimeType};base64,${referenceImage.base64}`,
-                },
-              ],
-            }
-          : {}),
+        text: prompt,
         ts: nowTs,
         timing: { createdAt: nowIso },
       };
@@ -2817,10 +2800,15 @@ export default function App() {
     }
 
     const aiMsgId = createUniqueId('ai');
+    const seed = Math.floor(Math.random() * 100000);
+    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+      `${prompt}, ${style}`.slice(0, 240)
+    )}?width=${size}&height=${size}&nologo=true&seed=${seed}`;
+
     const aiMsg: ChatMessage = {
       id: aiMsgId,
       role: 'ai',
-      text: `**${prompt}**\n\n_${referenceImage ? 'Editing image via Gemini Image API…' : 'Generating image via Gemini Image API…'}_`,
+      text: `**${prompt}**\n\n_ছবি তৈরি হচ্ছে…_`,
       ts: nowTs,
       status: 'streaming',
       timing: {
@@ -2832,6 +2820,8 @@ export default function App() {
     scrollToBottom(true);
 
     void (async () => {
+      let resolvedUrl = fallbackUrl;
+      let resolvedModel: string | undefined;
       try {
         const res = await fetch('/api/generate-image', {
           method: 'POST',
@@ -2840,68 +2830,37 @@ export default function App() {
             prompt,
             style,
             size,
-            referenceImage,
             enabledTools: settings.enabledTools,
           }),
         });
-        const data = (await res.json().catch(() => null)) as {
-          url?: string;
-          modelUsed?: string;
-          error?: string;
-          code?: string;
-        } | null;
-
-        if (!res.ok || !data?.url) {
-          const errMsg =
-            data?.code === 'INTEGRATION_REQUIRED'
-              ? data.error ||
-                'Integration required: Configure GEMINI_API_KEY in server secrets for image generation/editing.'
-              : data?.error || `Image generation failed (HTTP ${res.status})`;
-          const failIso = new Date().toISOString();
-          updateMessageInChat(targetChatId, aiMsgId, (m) => ({
-            ...m,
-            text: `⚠️ ${errMsg}`,
-            isError: true,
-            status: 'failed',
-            errorCode: data?.code || 'INTEGRATION_REQUIRED',
-            timing: {
-              ...(m.timing || { createdAt: nowIso }),
-              completedAt: failIso,
-            },
-          }));
-          showToast(errMsg, 4500);
-          return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            url?: string;
+            modelUsed?: string;
+          };
+          if (typeof data?.url === 'string' && data.url.trim()) {
+            resolvedUrl = data.url;
+          }
+          if (typeof data?.modelUsed === 'string' && data.modelUsed.trim()) {
+            resolvedModel = data.modelUsed;
+          }
         }
-
-        const doneIso = new Date().toISOString();
-        updateMessageInChat(targetChatId, aiMsgId, (m) => ({
-          ...m,
-          text: `**${prompt}**`,
-          status: 'complete',
-          ...(data.modelUsed ? { modelUsed: data.modelUsed } : {}),
-          timing: {
-            ...(m.timing || { createdAt: nowIso }),
-            completedAt: doneIso,
-          },
-          imgGen: { url: data.url!, prompt },
-        }));
-        scrollToBottom(true);
-      } catch (err: unknown) {
-        const errMsg =
-          err instanceof Error ? err.message : 'Network error generating image';
-        const failIso = new Date().toISOString();
-        updateMessageInChat(targetChatId, aiMsgId, (m) => ({
-          ...m,
-          text: `⚠️ ${errMsg}`,
-          isError: true,
-          status: 'failed',
-          errorCode: 'NETWORK_ERROR',
-          timing: {
-            ...(m.timing || { createdAt: nowIso }),
-            completedAt: failIso,
-          },
-        }));
+      } catch {
+        // Fallback URL already prepared
       }
+      const doneIso = new Date().toISOString();
+      updateMessageInChat(targetChatId, aiMsgId, (m) => ({
+        ...m,
+        text: `**${prompt}**`,
+        status: 'complete',
+        ...(resolvedModel ? { modelUsed: resolvedModel } : {}),
+        timing: {
+          ...(m.timing || { createdAt: nowIso }),
+          completedAt: doneIso,
+        },
+        imgGen: { url: resolvedUrl, prompt },
+      }));
+      scrollToBottom(true);
     })();
   };
 
@@ -2924,17 +2883,6 @@ export default function App() {
     }
     voiceRollingInFlightRef.current = false;
   };
-
-  useEffect(() => {
-    if (!voiceCallOpen || !isListening || isTranscribingVoice) return;
-    if (!voiceLiveText.trim()) return;
-    const timer = window.setTimeout(() => {
-      if (voiceListeningRef.current && voiceLiveText.trim()) {
-        void confirmVoiceDictation();
-      }
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [voiceCallOpen, isListening, isTranscribingVoice, voiceLiveText, voiceActivityAt]);
 
   useEffect(() => {
     return () => {
@@ -3539,16 +3487,8 @@ export default function App() {
       return;
     }
 
-    // 2b. Check Direct Self-Update Command ("নিজেকে আপডেট করো", "থিম ডার্ক/লাইট করো", "কালার সবুজ করো", etc.)
-    const isCodeOrBuildTask =
-      rawTxt.length > 85 ||
-      mentionsPastedCode(rawTxt) ||
-      /<file\b|\b(?:create|build|write|implement|fix|debug|generate|make|code|html|css|javascript|typescript|react|python|json|csv|svg|app|website|counter|component|function|script)\b/i.test(
-        rawTxt
-      );
-    const selfUpdCheck = isCodeOrBuildTask
-      ? { isSelfUpdateIntent: false, payload: null, instantReply: undefined }
-      : detectInstantSelfUpdate(rawTxt);
+    // 2b. Check Direct Self-Update Command ("নিজেকে আপডেট করো", "থিম ডার্ক/লাইট করো", "কালার সবুজ করো", "ক্যালকুলেটর উইজেট যুক্ত করো", etc.)
+    const selfUpdCheck = detectInstantSelfUpdate(rawTxt);
     if (selfUpdCheck.payload && selfUpdCheck.instantReply) {
       const res = applySelfUpdatePayload(selfUpdCheck.payload);
       appendMessageToChat(targetChatId, {
@@ -3588,13 +3528,20 @@ export default function App() {
       const localMsgId = 'ai-' + Date.now();
       const shouldAnimate =
         settings.streamingReveal !== false && replyText.length > 24;
+      const isThinkingOn =
+        settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
+      const localTopic = deriveInitialThinkingTopic(rawTxt);
+      const localThinkingText = isThinkingOn
+        ? `বিষয় বিশ্লেষণ: ${localTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`
+        : undefined;
 
       if (!shouldAnimate) {
         appendMessageToChat(targetChatId, {
           id: localMsgId,
           role: 'ai',
           text: replyText,
-          thinking: undefined,
+          thinking: localThinkingText,
+          thinkingDurationSec: isThinkingOn ? 1 : undefined,
           ts: Date.now(),
           ...extraFields,
         });
@@ -3606,7 +3553,8 @@ export default function App() {
         id: localMsgId,
         role: 'ai',
         text: ' ',
-        thinking: undefined,
+        thinking: localThinkingText,
+        thinkingDurationSec: isThinkingOn ? 1 : undefined,
         status: 'streaming',
         ts: Date.now(),
         ...extraFields,
@@ -3764,8 +3712,10 @@ export default function App() {
     overrideProvider?: AppSettings['provider'],
     appendToMsg?: { id: string; prefixText: string }
   ) => {
+    const isThinkingEnabledAtStart =
+      settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
     setIsGenerating(true);
-    setIsWaitingFirstToken(!appendToMsg);
+    setIsWaitingFirstToken(!appendToMsg && !isThinkingEnabledAtStart);
     setGenPhase(nextGenPhase(null, { type: 'start' }));
     setGenStepDetail(null);
     const abortCtrl = new AbortController();
@@ -3869,6 +3819,7 @@ export default function App() {
       settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
     const rawLastUserMsg =
       [...historyMsgs].reverse().find((m) => m.role === 'user')?.text || '';
+    const initialTurnTopic = deriveInitialThinkingTopic(rawLastUserMsg);
     let thinkingStartMs: number | null = isThinkingEnabledForTurn
       ? Date.now()
       : null;
@@ -3876,6 +3827,27 @@ export default function App() {
 
     if (appendToMsg) {
       setStreamingMsgId(aiMsgId);
+    } else if (isThinkingEnabledForTurn) {
+      bubbleCreated = true;
+      setIsWaitingFirstToken(false);
+      setStreamingMsgId(aiMsgId);
+      appendMessageToChat(chatId, {
+        id: aiMsgId,
+        role: 'ai',
+        text: ' ',
+        thinking: `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`,
+        v2ModelId: isV2Request ? effectiveExternalModel : undefined,
+        ts: reqStart,
+        turnId,
+        status: 'streaming',
+        requestedProvider: activeProvider,
+        requestedModel: effectiveExternalModel || activeModelName,
+        timing: {
+          createdAt: reqStartIso,
+          startedAt: reqStartIso,
+        },
+      });
+      scrollToBottom(false);
     }
 
     try {
@@ -4094,47 +4066,8 @@ export default function App() {
         resolvedServiceContext
       ).catch(() => '');
 
-      const workspaceManifestContext = buildWorkspaceContextPrompt(
-        workspaceFilesRef.current,
-        14000
-      );
-
-      if (shouldSummarizeConversation(cleanHistoryMsgs, targetSession?.conversationSummary)) {
-        void (async () => {
-          try {
-            const sumRes = await fetch('/api/chat/summarize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                messages: cleanHistoryMsgs.slice(0, -6).map((m) => ({
-                  role: m.role,
-                  text: m.text.slice(0, 1200),
-                })),
-                existingSummary: targetSession?.conversationSummary || '',
-              }),
-            });
-            if (!sumRes.ok) return;
-            const sumData = (await sumRes.json().catch(() => null)) as {
-              summary?: string;
-            } | null;
-            if (sumData?.summary?.trim()) {
-              setChats((prev) =>
-                prev.map((c) =>
-                  c.id === chatId
-                    ? { ...c, conversationSummary: sumData.summary!.trim() }
-                    : c
-                )
-              );
-            }
-          } catch {
-            // Best-effort long-chat summarization
-          }
-        })();
-      }
-
       const combinedProjectContext = [
         smartCtx?.envelopeBlock || '',
-        workspaceManifestContext,
         projectPromptBlock(project, 80, 18000, lastUserPrompt),
         liveIntegrationContext,
         ...overflowChunks,
@@ -4225,7 +4158,7 @@ export default function App() {
         memoryCache: isDefaultUnlimitedProfile && settings.memoryCache !== false,
         userName: settings.nickname || profile.name || MASTER_PROFILE_NAME,
         chatHistorySummary:
-          settings.memorySearchChats !== false && !isIncognitoChat
+          settings.crossChatReference !== false && !isIncognitoChat
             ? chatHistorySummary
             : '',
         activeSkills: matchedSkills
@@ -4331,7 +4264,6 @@ export default function App() {
       let revealShown = 0;
       let revealRaf: number | null = null;
       let revealLast = 0;
-      let lastPaintAt = 0;
       let revealFinishing = false;
       let revealDoneCb: (() => void) | null = null;
       let liveThinking = '';
@@ -4339,14 +4271,15 @@ export default function App() {
 
       const buildEffectiveLiveThinking = (): string | undefined => {
         if (liveThinking.trim()) return liveThinking;
-        return undefined;
+        if (!isThinkingEnabledForTurn) return undefined;
+        return `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`;
       };
 
       const scheduleReveal = (): number => {
         if (typeof window.requestAnimationFrame === 'function') {
           return window.requestAnimationFrame((t) => revealPump(t));
         }
-        return window.setTimeout(() => revealPump(Date.now()), 24);
+        return window.setTimeout(() => revealPump(Date.now()), 16);
       };
 
       const cancelReveal = () => {
@@ -4358,13 +4291,7 @@ export default function App() {
         revealRaf = null;
       };
 
-      const paintReveal = (forcePaint = false) => {
-        const nowPerf = typeof performance !== 'undefined' ? performance.now() : Date.now();
-        if (bubbleCreated && !forcePaint && nowPerf - lastPaintAt < 48) {
-          return;
-        }
-        lastPaintAt = nowPerf;
-
+      const paintReveal = () => {
         const visible = safeSlice(revealTarget, revealShown);
         const effectiveThinking = buildEffectiveLiveThinking();
         if (!bubbleCreated) {
@@ -4418,13 +4345,8 @@ export default function App() {
         revealLast = now;
         const backlog = revealTarget.length - revealShown;
         if (backlog > 0) {
-          const baseStep = revealChars(backlog, dt, revealFinishing);
-          const hasCodeStream =
-            backlog > 120 &&
-            (revealTarget.includes('```') || revealTarget.includes('<file'));
-          const codeStep = hasCodeStream ? Math.ceil(backlog * 0.25) : 0;
-          revealShown = Math.min(revealTarget.length, revealShown + Math.max(baseStep, codeStep));
-          paintReveal(revealShown >= revealTarget.length);
+          revealShown += revealChars(backlog, dt, revealFinishing);
+          paintReveal();
         }
         if (revealShown < revealTarget.length) {
           revealRaf = scheduleReveal();
@@ -4445,58 +4367,25 @@ export default function App() {
         new Promise<void>((resolve) => {
           if (revealShown >= revealTarget.length) return resolve();
           const remaining = Math.max(0, revealTarget.length - revealShown);
-          if (remaining > 1800) {
-            revealShown = revealTarget.length;
-            paintReveal(true);
-            return resolve();
-          }
           const budgetMs =
             typeof timeoutMs === 'number'
               ? timeoutMs
-              : Math.min(2_400, Math.max(350, Math.ceil((remaining / 320) * 1000) + 200));
+              : Math.min(12_000, Math.max(2000, Math.ceil((remaining / 130) * 1000) + 600));
           revealFinishing = true;
           revealDoneCb = resolve;
           kickReveal();
           window.setTimeout(() => {
-            if (revealDoneCb === resolve) {
-              revealDoneCb = null;
-              revealShown = revealTarget.length;
-              paintReveal(true);
-            }
+            if (revealDoneCb === resolve) revealDoneCb = null;
             resolve();
           }, budgetMs);
         });
 
-      let lastLiveAgentScanLen = 0;
       const flushStreamText = (flushNow = false) => {
         frameTimer = null;
         const liveAnswer = accumulated.includes('⟦FILE:')
           ? parseFileEdits(accumulated).cleanText
           : accumulated;
-
-        let displaySource = liveAnswer || accumulated;
-        const hasAgentMarkers =
-          accumulated.includes('<plan') ||
-          accumulated.includes('<patch') ||
-          accumulated.includes('<file_');
-        if (hasAgentMarkers && (flushNow || accumulated.length - lastLiveAgentScanLen >= 160)) {
-          lastLiveAgentScanLen = accumulated.length;
-          const agentOps = extractAgentOperations(displaySource, {
-            isStreaming: true,
-          });
-          if (agentOps.planSteps.length > 0) {
-            const livePlan = agentPlanToTaskExecutionPlan(
-              agentOps.planSteps,
-              rawLastUserMsg.slice(0, 72) || 'Agent Plan'
-            );
-            if (livePlan) setActiveTaskPlan(livePlan);
-          }
-          if (agentOps.cleanedDisplayText) {
-            displaySource = agentOps.cleanedDisplayText;
-          }
-        }
-
-        const parsedTags = parseAIControlTags(displaySource);
+        const parsedTags = parseAIControlTags(liveAnswer || accumulated);
         if (parsedTags.thinking) {
           if (thinkingStartMs === null) {
             thinkingStartMs = Date.now();
@@ -4515,7 +4404,7 @@ export default function App() {
           (Boolean(liveThinking) && !displayTxt)
         ) {
           revealShown = revealTarget.length;
-          paintReveal(true);
+          paintReveal();
           return;
         }
         kickReveal();
@@ -4908,84 +4797,6 @@ export default function App() {
         );
       }
 
-      // Apply multi-file create (<file>), targeted diff (<patch>/<file_patch>), deletion (<file_delete>), and <plan>
-      const activeFixTarget = pendingFixTargetRef.current;
-      pendingFixTargetRef.current = null;
-      const finalWorkspaceTurn = activeFixTarget
-        ? applyFixFallbackFromReply(
-            workspaceFilesRef.current,
-            artifactHistoryRef.current,
-            activeFixTarget.filename,
-            accumulated,
-            rawLastUserMsg.slice(0, 60) || 'AI error fix'
-          )
-        : applyModelWorkspaceTurn(
-            workspaceFilesRef.current,
-            artifactHistoryRef.current,
-            accumulated,
-            {
-              isStreaming: false,
-              notePrefix: rawLastUserMsg.slice(0, 60) || 'AI reply',
-            }
-          );
-      if (
-        finalWorkspaceTurn.changedPaths.length > 0 ||
-        finalWorkspaceTurn.deletedPaths.length > 0
-      ) {
-        workspaceFilesRef.current = finalWorkspaceTurn.files;
-        artifactHistoryRef.current = finalWorkspaceTurn.history;
-        setWorkspaceFiles(finalWorkspaceTurn.files);
-        setArtifactHistory(finalWorkspaceTurn.history);
-        projectFilesUpdated = Array.from(
-          new Set([
-            ...projectFilesUpdated,
-            ...finalWorkspaceTurn.changedPaths,
-            ...finalWorkspaceTurn.deletedPaths.map((p) => `${p} (deleted)`),
-          ])
-        );
-        const resolvedFixedPath =
-          (activeFixTarget &&
-            finalWorkspaceTurn.changedPaths.find(
-              (p) => p === activeFixTarget.filename
-            )) ||
-          finalWorkspaceTurn.primaryFilePath ||
-          finalWorkspaceTurn.changedPaths[0];
-        if (activeFixTarget && resolvedFixedPath) {
-          const fixedFile = finalWorkspaceTurn.files[resolvedFixedPath];
-          if (fixedFile) {
-            setCodeLabInit(fixedFile.content);
-            setActiveArtifact((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    title: fixedFile.path,
-                    filename: fixedFile.path,
-                    lang: fixedFile.lang,
-                    code: fixedFile.content,
-                    isStreaming: false,
-                  }
-                : prev
-            );
-            showToast(`✅ ${fixedFile.path} এর এরর ফিক্স করা হয়েছে`, 3200);
-          }
-        }
-      }
-      if (finalWorkspaceTurn.patchErrors.length > 0) {
-        showToast(`⚠️ Patch note: ${finalWorkspaceTurn.patchErrors[0]}`, 4200);
-      }
-      if (finalWorkspaceTurn.planSteps.length > 0) {
-        const completedPlan = agentPlanToTaskExecutionPlan(
-          finalWorkspaceTurn.planSteps,
-          rawLastUserMsg.slice(0, 72) || 'Agent Plan'
-        );
-        if (completedPlan) setActiveTaskPlan(completedPlan);
-      }
-
-      const finalAgentOps = extractAgentOperations(
-        textWithoutFileBlocks || accumulated,
-        { isStreaming: false }
-      );
-
       const {
         cleanText,
         thinking: extractedThinking,
@@ -4993,9 +4804,7 @@ export default function App() {
         selfUpdate,
         notes: aiNotes,
         skills: aiSkills,
-      } = parseAIControlTags(
-        finalAgentOps.cleanedDisplayText || textWithoutFileBlocks || accumulated
-      );
+      } = parseAIControlTags(textWithoutFileBlocks || accumulated);
       const conciseMode =
         settings.style !== 'detailed' && settings.mode !== 'power';
       const polished = polishReply(cleanText, { concise: conciseMode });
@@ -5145,9 +4954,9 @@ export default function App() {
                 memoryRef.current,
                 extData.memories
               );
-              if (mergedRes.added.length > 0) {
-                memoryRef.current = mergedRes.updated;
-                setMemory(mergedRes.updated);
+              if (mergedRes.addedOrUpdated.length > 0) {
+                memoryRef.current = mergedRes.memories;
+                setMemory(mergedRes.memories);
               }
             }
           } catch {
@@ -5269,6 +5078,16 @@ export default function App() {
         statusSteps: finalCompletedMsg.statusSteps ?? m.statusSteps,
       }));
 
+      // Automatically open side-by-side Live Preview when previewable HTML/CSS/JS/React/SVG is generated
+      if (settings.autoOpenLivePreview !== false && finalCompletedMsg.text) {
+        const autoPreviewPayload = extractPreviewableArtifactFromMessage(
+          finalCompletedMsg.text
+        );
+        if (autoPreviewPayload) {
+          setActiveArtifact(autoPreviewPayload);
+        }
+      }
+
       setTelemetryLogs(
         appendTelemetryLog(
           {
@@ -5362,11 +5181,10 @@ export default function App() {
 
       if (
         finalText.trim() &&
-        !voiceCallOpen &&
-        (settings.autoVoice || talkMode)
+        (settings.autoVoice || talkMode || voiceCallOpen)
       ) {
         speakText(finalText, aiMsgId, () => {
-          if (talkMode) {
+          if (talkMode || voiceCallOpen) {
             setTimeout(() => toggleMic(), 400);
           }
         });
@@ -5406,34 +5224,31 @@ export default function App() {
         }
         showToast('Generation stopped');
       } else {
-        const classified = classifyChatError(err);
-        const rawMsg = classified.message;
+        const rawMsg =
+          err instanceof Error ? err.message : 'Connection interrupted';
         const errCode =
           (err as { code?: string })?.code ||
-          (classified.category === 'INTEGRATION_REQUIRED'
-            ? 'INTEGRATION_REQUIRED'
-            : classified.category === 'RATE_LIMITED'
-            ? 'RATE_LIMITED'
-            : classified.category === 'NETWORK_ERROR'
-            ? 'NETWORK_ERROR'
-            : classified.category === 'EMPTY_RESPONSE'
-            ? 'EMPTY_RESPONSE'
-            : /401|403|unauthorized|invalid.*key/i.test(rawMsg)
+          (/401|403|unauthorized|invalid.*key/i.test(rawMsg)
             ? 'AUTH_INVALID'
             : /404|model.*not.*found/i.test(rawMsg)
             ? 'MODEL_UNAVAILABLE'
             : /402|insufficient_quota|credit|billing|কোটা শেষ/i.test(rawMsg)
             ? 'QUOTA_EXHAUSTED'
+            : /429|rate.?limit/i.test(rawMsg)
+            ? 'RATE_LIMITED'
             : /timeout|timed out|টাইমআউট/i.test(rawMsg)
             ? 'TIMEOUT'
+            : /failed to fetch|networkerror|load failed|connection refused/i.test(
+                rawMsg
+              )
+            ? 'NETWORK_ERROR'
             : 'SERVER_ERROR');
 
-        // P1-05: Never bypass explicit INTEGRATION_REQUIRED; only allow fallback if explicitly requested on third-party errors
+        // P1-05: Only fallback to built-in keyless engine for V1 if user explicitly enabled allowKeylessFallback AND no partial tokens were painted yet
         if (
           !isV2Request &&
           settings.allowKeylessFallback === true &&
           !isDefaultUnlimitedProfile &&
-          classified.category !== 'INTEGRATION_REQUIRED' &&
           !accumulated.trim()
         ) {
           showToast(
@@ -5445,7 +5260,7 @@ export default function App() {
             chatId,
             historyMsgs,
             latestMemory,
-            'smfta_cloud',
+            'xrahat',
             appendToMsg
           );
           return;
@@ -5466,9 +5281,7 @@ export default function App() {
         const isRateLimited = errCode === 'RATE_LIMITED';
 
         const cleanErr = isNetworkFetchErr
-          ? isEn
-            ? 'Network connection interrupted. Please check your connection and press Retry.'
-            : 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
+          ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
           : rawMsg;
         const finalErrText = cleanErr.startsWith('⚠️')
           ? cleanErr
@@ -5605,7 +5418,6 @@ export default function App() {
       }
     } finally {
       activeStreamCountRef.current = Math.max(0, activeStreamCountRef.current - 1);
-      pendingFixTargetRef.current = null;
       window.clearTimeout(timeoutId);
       window.clearTimeout(phaseFallback);
       setIsWaitingFirstToken(false);
@@ -5613,228 +5425,9 @@ export default function App() {
       setIsGenerating(false);
       setGenPhase(nextGenPhase(null, { type: 'stop' }));
       setGenStepDetail(null);
+      setActiveTaskPlan(null);
     }
   };
-
-  const handleSendRef = useRef(handleSend);
-  handleSendRef.current = handleSend;
-  const streamAIResponseRef = useRef(streamAIResponse);
-  streamAIResponseRef.current = streamAIResponse;
-  const applySelfUpdatePayloadRef = useRef(applySelfUpdatePayload);
-  applySelfUpdatePayloadRef.current = applySelfUpdatePayload;
-
-  const handleFixWithAi = React.useCallback(
-    ({
-      filename,
-      code,
-      error,
-      lang,
-    }: {
-      filename: string;
-      code: string;
-      error: string;
-      lang?: string;
-    }) => {
-      const cleanFilename = (filename || 'index.html').trim() || 'index.html';
-      const cleanLang = (
-        lang ||
-        (cleanFilename.endsWith('.js')
-          ? 'javascript'
-          : cleanFilename.endsWith('.py')
-            ? 'python'
-            : cleanFilename.endsWith('.tsx')
-              ? 'tsx'
-              : cleanFilename.endsWith('.jsx')
-                ? 'jsx'
-                : 'html')
-      ).toLowerCase();
-
-      const existing = workspaceFilesRef.current[cleanFilename];
-      if (!existing || existing.content !== code) {
-        const seeded = upsertWorkspaceFile(
-          workspaceFilesRef.current,
-          artifactHistoryRef.current,
-          cleanFilename,
-          code,
-          'user',
-          'Synced for AI error fix'
-        );
-        workspaceFilesRef.current = seeded.files;
-        artifactHistoryRef.current = seeded.history;
-        setWorkspaceFiles(seeded.files);
-        setArtifactHistory(seeded.history);
-      }
-
-      pendingFixTargetRef.current = { filename: cleanFilename, lang: cleanLang };
-      const fixPrompt = `The preview/execution for \`${cleanFilename}\` failed with this runtime error:\n\`\`\`\n${error}\n\`\`\`\n\nHere is the current file content:\n\`\`\`${cleanLang}\n${code.slice(0, 8000)}\n\`\`\`\n\nPlease fix this error completely and return either a <patch path="${cleanFilename}"><find>...</find><replace>...</replace></patch> or the full corrected <file path="${cleanFilename}" type="${cleanLang}">...</file>.`;
-      void handleSendRef.current(fixPrompt);
-    },
-    []
-  );
-
-  const handleUpdateMessageTextStable = React.useCallback(
-    (msgId: string, newText: string, rev?: InlineRevision) => {
-      updateMessageInChat(activeChatRef.current.id, msgId, (old) => ({
-        ...old,
-        text: newText,
-        revisions: rev
-          ? [...(old.revisions || []), rev]
-          : old.revisions?.slice(0, -1),
-      }));
-    },
-    [updateMessageInChat]
-  );
-
-  const handleDismissSuggestionStable = React.useCallback(
-    (msgId: string, sugId: string) => {
-      updateMessageInChat(activeChatRef.current.id, msgId, (old) => ({
-        ...old,
-        proactiveSuggestions: (old.proactiveSuggestions || []).filter(
-          (s) => s.id !== sugId
-        ),
-      }));
-    },
-    [updateMessageInChat]
-  );
-
-  const handleAcceptSuggestionStable = React.useCallback(
-    (msgId: string, sug: ProactiveSuggestion) => {
-      updateMessageInChat(activeChatRef.current.id, msgId, (old) => {
-        if (!old.text.includes(sug.targetText)) {
-          showToast('Phrase already modified; try Inline Rewrite');
-          return old;
-        }
-        const updatedText = old.text.replace(sug.targetText, sug.replacementText);
-        const newRev: InlineRevision = {
-          id: 'rev-' + Date.now(),
-          timestamp: Date.now(),
-          feedback: `Proactive AI (${sug.category})`,
-          scope: 'sentence',
-          previousText: old.text,
-          newText: updatedText,
-          summary: sug.reason,
-        };
-        showToast('Suggestion applied inline');
-        return {
-          ...old,
-          text: updatedText,
-          revisions: [...(old.revisions || []), newRev],
-          proactiveSuggestions: (old.proactiveSuggestions || []).filter(
-            (s) => s.id !== sug.id
-          ),
-        };
-      });
-    },
-    [showToast, updateMessageInChat]
-  );
-
-  const handleOpenCodeLabStable = React.useCallback(
-    (
-      code: string,
-      lang?: string,
-      filename?: string,
-      title?: string,
-      bundleFiles?: FileArtifactItem[]
-    ) => {
-      const cleanLang = (lang || 'html').trim().toLowerCase();
-      setActiveArtifact({
-        title: title || filename || `${cleanLang.toUpperCase()} Artifact`,
-        filename,
-        lang: cleanLang,
-        code,
-        bundleFiles,
-      });
-    },
-    []
-  );
-
-  const handleInstallSelfWidgetStable = React.useCallback(
-    (code: string) => {
-      const res = applySelfUpdatePayloadRef.current({
-        widget: {
-          title: 'Custom AI Tool #' + (selfWidgetsRef.current.length + 1),
-          description: 'Installed from chat code block',
-          code,
-        },
-        summary: 'Installed live HTML tool into SMFTA AI',
-      });
-      if (res.widgetId) {
-        showToast('Installed into your self-update tools');
-      }
-    },
-    [showToast]
-  );
-
-  const handleOpenWidgetByIdStable = React.useCallback((wId: string) => {
-    const found = selfWidgetsRef.current.find((w) => w.id === wId);
-    if (found) {
-      setActiveWidgetModal(found);
-    } else {
-      setSelfEvolutionOpen(true);
-    }
-  }, []);
-
-  const handleOpenLightboxStable = React.useCallback((url: string) => {
-    setLightboxImg(url);
-  }, []);
-
-  const handleSubmitFeedbackStable = React.useCallback(
-    async (msgObj: ChatMessage, rating: 'up' | 'down', reasonText?: string) => {
-      const currentChatId = activeChatRef.current.id;
-      const now = Date.now();
-      const fb = {
-        rating,
-        reason: reasonText?.trim() || undefined,
-        createdAt: now,
-        updatedAt: now,
-      };
-      updateMessageInChat(currentChatId, msgObj.id, (old) => ({
-        ...old,
-        feedback: fb,
-      }));
-      showToast(
-        rating === 'up'
-          ? 'ধন্যবাদ! আপনার মতামত সংরক্ষিত হয়েছে'
-          : 'মতামত সংরক্ষিত হয়েছে'
-      );
-      try {
-        await fetch('/api/feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            messageId: msgObj.id,
-            sessionId: String(currentChatId),
-            rating,
-            reason: fb.reason || '',
-            model:
-              msgObj.modelUsed ||
-              msgObj.requestedModel ||
-              activeModelNameRef.current,
-            provider:
-              msgObj.providerUsed || msgObj.requestedProvider || '',
-          }),
-        });
-      } catch {
-        // Offline feedback stays saved locally
-      }
-    },
-    [showToast, updateMessageInChat]
-  );
-
-  const handleRetryMessageStable = React.useCallback((messageId: string) => {
-    if (isGeneratingRef.current) return;
-    const chatSnapshot = activeChatRef.current;
-    const idx = chatSnapshot.msgs.findIndex((x) => x.id === messageId);
-    if (idx > 0) {
-      const trimmed = chatSnapshot.msgs.slice(0, idx);
-      setChats((prev) =>
-        prev.map((c) =>
-          c.id === chatSnapshot.id ? { ...c, msgs: trimmed } : c
-        )
-      );
-      void streamAIResponseRef.current(chatSnapshot.id, trimmed);
-    }
-  }, []);
 
   // v18.6.0 — open the loaded zip project in the Code Workspace (idle until Run click)
   const handleRunProject = () => {
@@ -6353,10 +5946,8 @@ export default function App() {
 
   const lastUserMessage =
     [...activeChat.msgs].reverse().find((m) => m.role === 'user')?.text || '';
-  const lastAiMsgEntry =
-    [...activeChat.msgs].reverse().find((m) => m.role === 'ai') || null;
-  const lastAiMessage = lastAiMsgEntry?.text || '';
-  void lastAiMessage;
+  const lastAiMessage =
+    [...activeChat.msgs].reverse().find((m) => m.role === 'ai')?.text || '';
 
   return (
     <div className="app-shell flex h-[100dvh] w-full overflow-hidden bg-[var(--bg)] text-[var(--text)]">
@@ -6393,7 +5984,7 @@ export default function App() {
               className="w-full h-10 px-3.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[13.5px] font-medium text-[var(--ink)] flex items-center gap-2.5 hover:bg-[var(--surface-2)] cursor-pointer"
             >
               <MessageSquarePlus className="w-4 h-4 text-[var(--primary)]" />
-              <span>{isEn ? 'New chat' : 'নতুন চ্যাট'}</span>
+              <span>New chat</span>
             </button>
 
             <div className="relative">
@@ -6461,30 +6052,6 @@ export default function App() {
             <div className="pt-2 border-t border-[var(--border)] space-y-1">
               <button
                 type="button"
-                data-testid="sidebar-diagram-studio-btn"
-                onClick={() => {
-                  setDiagramStudioOpen(true);
-                  setSidebarOpen(false);
-                }}
-                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
-              >
-                <GitBranch className="w-4 h-4 text-[var(--primary)]" />
-                <span>{isEn ? 'Mind Map & Flowchart' : 'মাইন্ড ম্যাপ ও ফ্লোচার্ট'}</span>
-              </button>
-              <button
-                type="button"
-                data-testid="sidebar-image-studio-btn"
-                onClick={() => {
-                  setStudioOpen(true);
-                  setSidebarOpen(false);
-                }}
-                className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
-              >
-                <ImageIcon className="w-4 h-4 text-[var(--primary)]" />
-                <span>{isEn ? 'Image Studio (Gen & Edit)' : 'ইমেজ স্টুডিও'}</span>
-              </button>
-              <button
-                type="button"
                 data-testid="sidebar-simple-entry-btn"
                 onClick={() => {
                   setSimpleEntryModalOpen(true);
@@ -6495,7 +6062,7 @@ export default function App() {
                 <span className="flex items-center gap-2.5 min-w-0 truncate">
                   <KeyRound className="w-4 h-4 text-[var(--primary)] shrink-0" />
                   <span className="truncate">
-                    {profile?.name?.trim() || simpleEntryCreds?.name || (isEn ? 'Name & Passcode' : 'নাম ও পাসওয়ার্ড')}
+                    {profile?.name?.trim() || simpleEntryCreds?.name || 'নাম ও পাসওয়ার্ড'}
                   </span>
                 </span>
                 <span className="text-[10.5px] px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--border)] text-[var(--ink-dim)] shrink-0">
@@ -6513,7 +6080,7 @@ export default function App() {
                 className="w-full px-3 py-2 rounded-xl text-[13px] text-[var(--ink-muted)] hover:bg-[var(--surface)] hover:text-[var(--ink)] flex items-center gap-2.5 cursor-pointer"
               >
                 <Settings className="w-4 h-4" />
-                <span>{isEn ? 'Settings' : 'সেটিংস'}</span>
+                <span>Settings</span>
               </button>
             </div>
           </aside>
@@ -6522,13 +6089,13 @@ export default function App() {
 
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[70] bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
           {toastMsg}
         </div>
       )}
 
       {/* MAIN WORKSPACE COLUMN + SIDE-BY-SIDE ARTIFACT PREVIEW */}
-      <div className="chat-shell-body flex-1 flex flex-row min-w-0 h-full overflow-hidden">
+      <div className="flex-1 flex flex-row min-w-0 h-full overflow-hidden">
         {currentView === 'workspace' ? (
           <div className="flex-1 flex flex-col min-w-0 h-full">
             <CodeWorkspacePage
@@ -6540,7 +6107,7 @@ export default function App() {
         ) : (
           <>
           <main className={`v2-main flex-1 min-w-0${activeChat.msgs.length === 0 && !isWaitingFirstToken ? ' is-empty' : ''}`}>
-            {/* HEADER — Menu Left, Quiet Centered Brand, Incognito & Three-Dot Menu Right */}
+            {/* HEADER — Screenshot 1 & 4: Staggered Menu Left, Quiet Brand, Pill Group [New Chat | •••] Right */}
             <header className="app-header">
               <div className="flex items-center gap-2 min-w-0">
                 <button
@@ -6553,6 +6120,22 @@ export default function App() {
                 >
                   <StaggeredMenuIcon className="w-4 h-4" />
                 </button>
+                <div
+                  data-testid="app-header-brand"
+                  className="inline-flex items-center gap-2 min-w-0"
+                >
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] shrink-0">
+                    <Sparkles className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="text-[15px] font-bold tracking-tight text-[var(--ink)] truncate">
+                    SMFTA AI Pro
+                  </span>
+                  {activeModelLabel && (
+                    <span className="hidden xs:inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink-dim)] truncate max-w-[140px]">
+                      {activeModelLabel}
+                    </span>
+                  )}
+                </div>
 
                 {/* Active Project Selector Pill (Section ঘ: Projects) */}
                 {(settings.projects || []).length > 0 && (
@@ -6575,7 +6158,7 @@ export default function App() {
                     <option value="">প্রজেক্ট ছাড়া চ্যাট</option>
                     {(settings.projects || []).map((proj) => (
                       <option key={proj.id} value={proj.id}>
-                        {proj.name}
+                        📁 {proj.name}
                       </option>
                     ))}
                   </select>
@@ -6585,7 +6168,7 @@ export default function App() {
                   <span
                     data-testid="incognito-active-badge"
                     className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px] font-semibold shrink-0"
-                    title="Incognito চ্যাট চালু আছে"
+                    title="Incognito চ্যাট চালু আছে — কোনো মেমোরি বা হিস্ট্রি সেভ হবে না"
                   >
                     <EyeOff className="w-3 h-3" />
                     <span className="hidden xs:inline">Incognito</span>
@@ -6593,58 +6176,98 @@ export default function App() {
                 )}
               </div>
 
-              <div
-                data-testid="app-header-brand"
-                className="flex items-center justify-center min-w-0 px-2 text-[13.5px] font-medium tracking-tight text-[var(--ink-muted)]"
-              >
-                <span className="font-semibold text-[var(--ink)] truncate">
-                  SMFTA AI Pro
-                </span>
-              </div>
-
               <div className="relative flex items-center gap-1.5">
-                <button
-                  type="button"
-                  data-testid="incognito-chat-toggle"
-                  onClick={() => {
-                    const nextIncog = !activeChat.incognito;
-                    setChats((prev) =>
-                      prev.map((c) =>
-                        c.id === activeChat.id
-                          ? { ...c, incognito: nextIncog }
-                          : c
-                      )
-                    );
-                    showToast(
-                      nextIncog
-                        ? 'Incognito on'
-                        : 'Incognito off'
-                    );
-                  }}
-                  className={`ref-circle-btn shrink-0 ${
-                    activeChat.incognito ? 'text-amber-400 border-amber-400/40' : ''
-                  }`}
-                  aria-label="Incognito chat toggle"
-                  aria-pressed={Boolean(activeChat.incognito)}
-                  title={
-                    activeChat.incognito
-                      ? 'Disable Incognito'
-                      : 'Incognito Chat'
-                  }
-                >
-                  <IncognitoIcon className="w-[17px] h-[17px]" />
-                </button>
-                <button
-                  type="button"
-                  data-testid="header-menu-btn"
-                  onClick={() => setHeaderMenuOpen((v) => !v)}
-                  className="ref-circle-btn shrink-0"
-                  aria-label="Options & Settings"
-                  aria-expanded={headerMenuOpen}
-                  title="Options & Settings"
-                >
-                  <MoreHorizontal className="w-[17px] h-[17px]" />
-                </button>
+                <div className="ref-pill-group">
+                  {(latestChatArtifact || activeArtifact) && (
+                    <button
+                      type="button"
+                      data-testid="header-live-preview-toggle"
+                      onClick={() => {
+                        if (activeArtifact) {
+                          setActiveArtifact(null);
+                        } else if (latestChatArtifact) {
+                          setActiveArtifact(latestChatArtifact);
+                        }
+                      }}
+                      className={`ref-pill-icon-btn ${
+                        activeArtifact ? 'text-[var(--primary)]' : ''
+                      }`}
+                      aria-label="Toggle side-by-side live preview"
+                      title={
+                        activeArtifact
+                          ? 'পাশাপাশি লাইভ প্রিভিউ বন্ধ করুন'
+                          : 'পাশাপাশি লাইভ প্রিভিউ খুলুন (Live Preview)'
+                      }
+                    >
+                      <Eye className="w-[16px] h-[16px]" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="header-simple-entry-btn"
+                    onClick={() => setSimpleEntryModalOpen(true)}
+                    className="ref-pill-icon-btn"
+                    aria-label="নাম ও পাসওয়ার্ড প্রোফাইল"
+                    title={
+                      profile?.name?.trim()
+                        ? `প্রোফাইল: ${profile.name.trim()} (নাম ও পাসওয়ার্ড)`
+                        : 'নাম ও পাসওয়ার্ড দিয়ে প্রবেশ করুন'
+                    }
+                  >
+                    <User className="w-[16px] h-[16px]" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="incognito-chat-toggle"
+                    onClick={() => {
+                      const nextIncog = !activeChat.incognito;
+                      setChats((prev) =>
+                        prev.map((c) =>
+                          c.id === activeChat.id
+                            ? { ...c, incognito: nextIncog }
+                            : c
+                        )
+                      );
+                      showToast(
+                        nextIncog
+                          ? '🕶️ Incognito চ্যাট চালু — মেমোরি ও হিস্ট্রি সেভ হবে না'
+                          : 'Incognito চ্যাট বন্ধ করা হয়েছে'
+                      );
+                    }}
+                    className={`ref-pill-icon-btn ${
+                      activeChat.incognito ? 'text-amber-400' : ''
+                    }`}
+                    aria-label="Incognito chat toggle"
+                    aria-pressed={Boolean(activeChat.incognito)}
+                    title={
+                      activeChat.incognito
+                        ? 'Incognito চ্যাট বন্ধ করুন'
+                        : 'Incognito চ্যাট (মেমোরি ও হিস্ট্রি ছাড়া চ্যাট)'
+                    }
+                  >
+                    <EyeOff className="w-[16px] h-[16px]" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNewChat}
+                    className="ref-pill-icon-btn"
+                    aria-label="New chat"
+                    title="New chat"
+                  >
+                    <MessageSquarePlus className="w-[17px] h-[17px]" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="header-menu-btn"
+                    onClick={() => setHeaderMenuOpen((v) => !v)}
+                    className="ref-pill-icon-btn"
+                    aria-label="Options & Settings"
+                    aria-expanded={headerMenuOpen}
+                    title="Options & Settings"
+                  >
+                    <MoreHorizontal className="w-[17px] h-[17px]" />
+                  </button>
+                </div>
 
                 {headerMenuOpen && (
                   <>
@@ -6654,8 +6277,25 @@ export default function App() {
                     />
                     <div
                       data-testid="header-menu-popover"
-                      className="absolute right-0 top-full mt-2 w-48 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-1 text-xs"
+                      className="absolute right-0 top-full mt-2 w-52 bg-[var(--surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-1.5 z-40 space-y-0.5 text-xs"
                     >
+                      <button
+                        type="button"
+                        data-testid="header-menu-simple-entry"
+                        onClick={() => {
+                          setSimpleEntryModalOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span className="truncate">
+                          {profile?.name?.trim()
+                            ? `${profile.name.trim()} (নাম ও পাসওয়ার্ড)`
+                            : 'নাম ও পাসওয়ার্ড সেটআপ'}
+                        </span>
+                      </button>
+
                       <button
                         type="button"
                         data-testid="header-menu-new-chat"
@@ -6663,11 +6303,12 @@ export default function App() {
                           handleNewChat();
                           setHeaderMenuOpen(false);
                         }}
-                        className="w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer font-medium"
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
                       >
-                        <Plus className="w-4 h-4 text-[var(--primary)]" />
+                        <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
                         <span>New Chat</span>
                       </button>
+
                       <button
                         type="button"
                         data-testid="header-menu-incognito"
@@ -6682,15 +6323,33 @@ export default function App() {
                           );
                           setHeaderMenuOpen(false);
                           showToast(
-                            nextIncog ? 'Hidden chat on' : 'Hidden chat off'
+                            nextIncog
+                              ? '🕶️ Incognito চ্যাট চালু — মেমোরি ও হিস্ট্রি সেভ হবে না'
+                              : 'Incognito চ্যাট বন্ধ করা হয়েছে'
                           );
                         }}
-                        className="w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer font-medium"
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
                       >
-                        <EyeOff className="w-4 h-4 text-amber-400" />
+                        <EyeOff className="w-3.5 h-3.5 text-amber-400" />
                         <span>
-                          {activeChat.incognito ? 'Unhide' : 'Hide'}
+                          {activeChat.incognito
+                            ? 'Incognito বন্ধ করুন'
+                            : 'Incognito চ্যাট'}
                         </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="header-menu-settings"
+                        onClick={() => {
+                          setSettingsTab('general');
+                          setSettingsOpen(true);
+                          setHeaderMenuOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl flex items-center gap-2 text-[var(--ink)] hover:bg-[var(--surface-2)] cursor-pointer transition-colors font-medium"
+                      >
+                        <Settings className="w-3.5 h-3.5 text-[var(--primary)]" />
+                        <span>Settings</span>
                       </button>
                     </div>
                   </>
@@ -6699,7 +6358,7 @@ export default function App() {
             </header>
 
             {/* FULL-WIDTH RESPONSIVE CHAT PANEL */}
-            <div className="chat-transcript flex flex-col min-w-0 overflow-hidden">
+            <div className="flex flex-col min-w-0 h-full overflow-hidden">
               {/* IN-CHAT FLOATING SEARCH BAR */}
               {inChatSearchOpen && (
                 <div className="app-findbar shrink-0">
@@ -6787,43 +6446,517 @@ export default function App() {
               >
                 {activeChat.msgs.length === 0 && !isWaitingFirstToken ? (
                   <div className="empty-state" data-testid="ultra-empty-home">
-                    <BrandMarkIcon className="ref-brand-mark" />
-                    <h1 className="empty-title">
-                      {getTimeOfDayGreeting({ name: profile?.name || settings.nickname }).headline}
-                    </h1>
-                    <p className="empty-sub">
-                      {getTimeOfDayGreeting({ name: profile?.name || settings.nickname }).subtitle}
-                    </p>
+                    <SunburstMarkIcon className="ref-sunburst" />
+                    <h1 className="empty-title">What can I help with?</h1>
                   </div>
                 ) : (
-                  <VirtualizedChatList
-                    messages={activeChat.msgs}
-                    scrollElementRef={chatBoxRef}
-                    streamingMsgId={streamingMsgId}
-                    isGenerating={isGenerating}
-                    isWaitingFirstToken={isWaitingFirstToken}
-                    thinkingEnabled={
-                      settings.thinkingEnabled !== false &&
-                      settings.thinkingMode !== 'off'
-                    }
-                    liveThinkingSummary={
-                      settings.liveThinkingSummary !== false
-                    }
-                    renderMarkdown={settings.markdownRender !== false}
-                    highlightCode={settings.codeHighlight !== false}
-                    showThinkingTopic={settings.showThinkingTopic !== false}
-                    autoCollapseThinking={Boolean(settings.autoCollapseThinking)}
-                    onUpdateMessageText={handleUpdateMessageTextStable}
-                    onDismissSuggestion={handleDismissSuggestionStable}
-                    onAcceptSuggestion={handleAcceptSuggestionStable}
-                    onOpenCodeLab={handleOpenCodeLabStable}
-                    onInstallSelfWidget={handleInstallSelfWidgetStable}
-                    onOpenWidgetById={handleOpenWidgetByIdStable}
-                    onOpenLightbox={handleOpenLightboxStable}
-                    onSubmitFeedback={handleSubmitFeedbackStable}
-                    onRetryMessage={handleRetryMessageStable}
-                    onToast={showToast}
-                  />
+              <div className="w-full max-w-[780px] mx-auto">
+                {activeChat.msgs.map((m, msgIdx) => {
+                  const prevUserMsg =
+                    m.role === 'ai'
+                      ? activeChat.msgs
+                          .slice(0, msgIdx)
+                          .reverse()
+                          .find((x) => x.role === 'user')
+                      : undefined;
+                  const attachedDocNames =
+                    m.role === 'user'
+                      ? Array.from(
+                          m.text.matchAll(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g)
+                        ).map((match) => match[1].trim())
+                      : [];
+                  const cleanUserText =
+                    m.role === 'user'
+                      ? m.text
+                          .replace(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g, '')
+                          .trim()
+                      : m.text;
+                  return (
+                  <div key={m.id} className={`msg-row ${m.role === 'user' ? 'is-user' : 'is-ai'}`}>
+                    {/* Message Body */}
+                    <div
+                      className={`flex flex-col min-w-0 ${
+                        m.role === 'user'
+                          ? 'items-end max-w-[92%] sm:max-w-2xl'
+                          : 'items-start w-full'
+                      }`}
+                    >
+                      {m.role === 'user' ? (
+                        <>
+                          {((m.imgs && m.imgs.length > 0) || attachedDocNames.length > 0) && (
+                            <div className="ref-attach-grid">
+                              {m.imgs?.map((im, idx) => (
+                                <img
+                                  key={`img-${idx}`}
+                                  src={
+                                    im.url ||
+                                    `data:${im.mime};base64,${im.data}`
+                                  }
+                                  alt="Uploaded attachment"
+                                  referrerPolicy="no-referrer"
+                                  onClick={() =>
+                                    setLightboxImg(
+                                      im.url ||
+                                        `data:${im.mime};base64,${im.data}`
+                                    )
+                                  }
+                                  className="ref-attach-img"
+                                />
+                              ))}
+                              {attachedDocNames.map((fname, idx) => {
+                                const ext =
+                                  fname.split('.').pop()?.slice(0, 4).toUpperCase() ||
+                                  'FILE';
+                                return (
+                                  <div key={`doc-${idx}`} className="ref-attach-doc">
+                                    <span className="ref-attach-badge">{ext}</span>
+                                    <span className="ref-attach-name">{fname}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {cleanUserText && (
+                            <div className="msg-user-bubble">{cleanUserText}</div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="w-full min-w-0">
+                          <InteractiveMessageContent
+                            messageId={m.id}
+                            text={m.text}
+                            thinking={m.thinking}
+                            thinkingDurationSec={m.thinkingDurationSec}
+                            statusSteps={m.statusSteps}
+                            thinkingEnabled={
+                              settings.thinkingEnabled !== false &&
+                              settings.thinkingMode !== 'off'
+                            }
+                            liveThinkingSummary={
+                              settings.liveThinkingSummary !== false
+                            }
+                            isStreaming={streamingMsgId === m.id}
+                            proactiveSuggestions={m.proactiveSuggestions}
+                            revisions={m.revisions}
+                            onUpdateMessageText={(msgId, newText, rev) => {
+                              updateMessageInChat(
+                                activeChat.id,
+                                msgId,
+                                (old) => ({
+                                  ...old,
+                                  text: newText,
+                                  revisions: rev
+                                    ? [...(old.revisions || []), rev]
+                                    : old.revisions?.slice(0, -1),
+                                })
+                              );
+                            }}
+                            onDismissSuggestion={(msgId, sugId) => {
+                              updateMessageInChat(
+                                activeChat.id,
+                                msgId,
+                                (old) => ({
+                                  ...old,
+                                  proactiveSuggestions: (
+                                    old.proactiveSuggestions || []
+                                  ).filter((s) => s.id !== sugId),
+                                })
+                              );
+                            }}
+                            onAcceptSuggestion={(msgId, sug) => {
+                              updateMessageInChat(
+                                activeChat.id,
+                                msgId,
+                                (old) => {
+                                  if (!old.text.includes(sug.targetText)) {
+                                    showToast(
+                                      'Phrase already modified; try Inline Rewrite'
+                                    );
+                                    return old;
+                                  }
+                                  const updatedText = old.text.replace(
+                                    sug.targetText,
+                                    sug.replacementText
+                                  );
+                                  const newRev: InlineRevision = {
+                                    id: 'rev-' + Date.now(),
+                                    timestamp: Date.now(),
+                                    feedback: `Proactive AI (${sug.category})`,
+                                    scope: 'sentence',
+                                    previousText: old.text,
+                                    newText: updatedText,
+                                    summary: sug.reason,
+                                  };
+                                  showToast(
+                                    'Suggestion applied inline'
+                                  );
+                                  return {
+                                    ...old,
+                                    text: updatedText,
+                                    revisions: [
+                                      ...(old.revisions || []),
+                                      newRev,
+                                    ],
+                                    proactiveSuggestions: (
+                                      old.proactiveSuggestions || []
+                                    ).filter((s) => s.id !== sug.id),
+                                  };
+                                }
+                              );
+                            }}
+                            onOpenCodeLab={(code, lang, filename, title, bundleFiles) => {
+                              const cleanLang = (lang || 'html').trim().toLowerCase();
+                              setActiveArtifact({
+                                title: title || filename || `${cleanLang.toUpperCase()} Artifact`,
+                                filename,
+                                lang: cleanLang,
+                                code,
+                                bundleFiles,
+                              });
+                            }}
+                            onInstallSelfWidget={(code) => {
+                              const res = applySelfUpdatePayload({
+                                widget: {
+                                  title: 'Custom AI Tool #' + (selfWidgets.length + 1),
+                                  description: 'Installed from chat code block',
+                                  code,
+                                },
+                                summary: 'Installed live HTML tool into SMFTA AI',
+                              });
+                              if (res.widgetId) {
+                                showToast('Installed into your self-update tools');
+                              }
+                            }}
+                            onToast={showToast}
+                            renderMarkdown={settings.markdownRender !== false}
+                            highlightCode={settings.codeHighlight !== false}
+                            userPromptPreview={prevUserMsg?.text || ''}
+                            showThinkingTopic={settings.showThinkingTopic !== false}
+                            autoCollapseThinking={Boolean(settings.autoCollapseThinking)}
+                          />
+
+                          {/* Artifact / Downloadable Card (Screenshot 1 style) */}
+                          {(m.selfUpdateSummary ||
+                            m.selfUpdateWidgetId ||
+                            (m.memoryAdded && m.memoryAdded.length > 0)) && (
+                            <div className="mt-3 space-y-2">
+                              {m.selfUpdateWidgetId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const found = selfWidgets.find(
+                                      (w) => w.id === m.selfUpdateWidgetId
+                                    );
+                                    if (found) {
+                                      setActiveWidgetModal(found);
+                                    } else {
+                                      setSelfEvolutionOpen(true);
+                                    }
+                                  }}
+                                  className="ref-artifact-card"
+                                >
+                                  <span className="ref-artifact-thumb">
+                                    <LayoutTemplate className="w-5 h-5" />
+                                  </span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-[15.5px] font-semibold text-[var(--ink)] truncate">
+                                      {m.selfUpdateSummary || 'Interactive App Solution'}
+                                    </span>
+                                    <span className="block text-[13px] text-[var(--ink-dim)] mt-0.5">
+                                      Interactive Artifact · Open
+                                    </span>
+                                  </span>
+                                </button>
+                              )}
+                              {!m.selfUpdateWidgetId && m.selfUpdateSummary && (
+                                <div className="text-xs text-[var(--ink-dim)] flex items-center gap-1.5">
+                                  <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span>{m.selfUpdateSummary}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Generated Image Card */}
+                          {m.imgGen && (
+                            <div className="mt-3 max-w-xs rounded-2xl overflow-hidden border border-[var(--border)] bg-[var(--surface-2)]">
+                              <img
+                                src={m.imgGen.url}
+                                alt={m.imgGen.prompt}
+                                referrerPolicy="no-referrer"
+                                onClick={() => setLightboxImg(m.imgGen!.url)}
+                                className="w-full aspect-square object-cover block cursor-zoom-in"
+                              />
+                              <div className="px-3 py-2 flex items-center justify-between text-xs text-[var(--text-2)]">
+                                <span>Image Studio</span>
+                                <a
+                                  href={m.imgGen.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[var(--primary)] font-semibold inline-flex items-center gap-1 hover:underline"
+                                >
+                                  Open HD <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Message Bottom Action Row (Outside message text, hidden while streaming) */}
+                      {streamingMsgId !== m.id && (() => {
+                        const latestAiMsg = [...activeChat.msgs]
+                          .reverse()
+                          .find((x) => x.role === 'ai');
+                        const isLatestAiMsg =
+                          m.role === 'ai' && latestAiMsg?.id === m.id;
+                        const submitFeedback = async (
+                          rating: 'up' | 'down',
+                          reasonText?: string
+                        ) => {
+                          const fb = {
+                            rating,
+                            reason: reasonText?.trim() || undefined,
+                            createdAt: Date.now(),
+                          };
+                          updateMessageInChat(activeChat.id, m.id, (old) => ({
+                            ...old,
+                            feedback: fb,
+                          }));
+                          setFeedbackReasonMsgId(null);
+                          setFeedbackReasonInput('');
+                          showToast(
+                            rating === 'up'
+                              ? 'ধন্যবাদ! আপনার মতামত সংরক্ষিত হয়েছে'
+                              : 'মতামত সংরক্ষিত হয়েছে'
+                          );
+                          try {
+                            await fetch('/api/feedback', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                messageId: m.id,
+                                sessionId: String(activeChat.id),
+                                rating,
+                                reason: fb.reason || '',
+                                model: m.modelUsed || m.requestedModel || activeModelName,
+                                provider: m.providerUsed || m.requestedProvider || '',
+                              }),
+                            });
+                          } catch {
+                            // Offline feedback stays saved on message in local/cloud session
+                          }
+                        };
+
+                        return (
+                          <div className="flex flex-col gap-1.5 mt-1">
+                            <div
+                              data-testid={`msg-actions-${m.role}`}
+                              className={`msg-actions flex items-center gap-0.5 ${
+                                m.role === 'ai'
+                                  ? isLatestAiMsg
+                                    ? 'opacity-100 -ml-1.5'
+                                    : 'opacity-85 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity -ml-1.5'
+                                  : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 hover:opacity-100 transition-opacity'
+                              }`}
+                            >
+                              {m.role === 'ai' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    data-testid="msg-copy-btn"
+                                    onClick={() => {
+                                      const { cleanResponse } =
+                                        extractThinkingAndResponse(
+                                          m.text,
+                                          m.thinking
+                                        );
+                                      navigator.clipboard?.writeText(
+                                        stripContactTokensForText(
+                                          cleanResponse || m.text
+                                        )
+                                      );
+                                      showToast('কপি করা হয়েছে');
+                                    }}
+                                    className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                    title="Copy"
+                                    aria-label="Copy response"
+                                  >
+                                    <Copy className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-feedback-up-btn"
+                                    onClick={() => void submitFeedback('up')}
+                                    className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-[var(--surface-2)] transition-colors cursor-pointer ${
+                                      m.feedback?.rating === 'up'
+                                        ? 'text-[var(--ink)] bg-[var(--surface-2)]'
+                                        : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                                    }`}
+                                    title="Like"
+                                    aria-label="Good response"
+                                  >
+                                    <ThumbsUp className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-feedback-down-btn"
+                                    onClick={() => {
+                                      void submitFeedback('down');
+                                      if (feedbackReasonMsgId === m.id) {
+                                        setFeedbackReasonMsgId(null);
+                                      } else {
+                                        setFeedbackReasonMsgId(m.id);
+                                        setFeedbackReasonInput(
+                                          m.feedback?.reason || ''
+                                        );
+                                      }
+                                    }}
+                                    className={`w-7 h-7 rounded-lg inline-flex items-center justify-center hover:bg-[var(--surface-2)] transition-colors cursor-pointer ${
+                                      m.feedback?.rating === 'down'
+                                        ? 'text-[var(--ink)] bg-[var(--surface-2)]'
+                                        : 'text-[var(--ink-dim)] hover:text-[var(--ink)]'
+                                    }`}
+                                    title="Dislike"
+                                    aria-label="Bad response"
+                                  >
+                                    <ThumbsDown className="w-4 h-4" />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-retry-btn"
+                                    onClick={() => {
+                                      if (isGenerating) return;
+                                      const idx = activeChat.msgs.findIndex(
+                                        (x) => x.id === m.id
+                                      );
+                                      if (idx > 0) {
+                                        const trimmed = activeChat.msgs.slice(
+                                          0,
+                                          idx
+                                        );
+                                        setChats((prev) =>
+                                          prev.map((c) =>
+                                            c.id === activeChat.id
+                                              ? { ...c, msgs: trimmed }
+                                              : c
+                                          )
+                                        );
+                                        streamAIResponse(
+                                          activeChat.id,
+                                          trimmed
+                                        );
+                                      }
+                                    }}
+                                    className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                    title="Retry"
+                                    aria-label="Retry response"
+                                  >
+                                    <RotateCcw className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  data-testid="user-msg-copy-btn"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(
+                                      cleanUserText || m.text
+                                    );
+                                    showToast('কপি করা হয়েছে');
+                                  }}
+                                  className="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                                  title="Copy"
+                                  aria-label="Copy message"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Optional Short Reason Box when "খারাপ উত্তর" is clicked */}
+                            {m.role === 'ai' && feedbackReasonMsgId === m.id && (
+                              <div
+                                data-testid="feedback-reason-box"
+                                className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] max-w-md"
+                              >
+                                <input
+                                  type="text"
+                                  data-testid="feedback-reason-input"
+                                  value={feedbackReasonInput}
+                                  onChange={(e) =>
+                                    setFeedbackReasonInput(e.target.value)
+                                  }
+                                  placeholder="কেন উত্তরটি ভালো লাগেনি? (ঐচ্ছিক)"
+                                  className="flex-1 min-w-[180px] px-2.5 py-1.5 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--text)] outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  data-testid="feedback-reason-submit"
+                                  onClick={() =>
+                                    void submitFeedback(
+                                      'down',
+                                      feedbackReasonInput
+                                    )
+                                  }
+                                  className="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold cursor-pointer"
+                                >
+                                  জমা দিন
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFeedbackReasonMsgId(null)}
+                                  className="px-2 py-1.5 rounded-lg text-xs text-[var(--text-2)] hover:text-[var(--text)] cursor-pointer"
+                                >
+                                  বাতিল
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  );
+                })}
+
+                {/* Direct Groq-style Thinking indicator before first token (zero Processing/Confirming intermediate screens) */}
+                {isWaitingFirstToken && (() => {
+                  const lastUser = [...activeChat.msgs]
+                    .reverse()
+                    .find((x) => x.role === 'user');
+                  const waitingSubject = deriveInitialThinkingTopic(
+                    lastUser?.text || ''
+                  );
+                  return (
+                    <div className="msg-row is-ai">
+                      <div
+                        data-testid="thinking-accordion"
+                        className="mt-0 mb-2.5 select-none"
+                      >
+                        <div
+                          data-testid="thinking-accordion-headline"
+                          className="inline-flex items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[13px] font-medium text-[var(--primary)]"
+                        >
+                          <Brain className="w-3.5 h-3.5 animate-pulse shrink-0" />
+                          <span className="font-semibold animate-pulse">
+                            Thinking... 0.1s
+                          </span>
+                          <span
+                            data-testid="thinking-subject-label"
+                            className="text-[12.5px] font-medium text-[var(--ink-dim)] truncate max-w-[240px]"
+                          >
+                            · {waitingSubject}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
                 )}
               </div>
 
@@ -6841,8 +6974,8 @@ export default function App() {
               )}
             </div>
 
-            {/* Composer stays below the independently scrolling transcript. */}
-            <div className="chat-footer">
+            {/* VARIATION 2 COMPOSER & FOOTER METADATA */}
+            <div>
               <section className="composer-wrap">
                 {/* Active Multi-Step Task Execution Planner */}
                 {activeTaskPlan && (
@@ -7107,39 +7240,73 @@ export default function App() {
                             );
                           }
                         }}
-                        placeholder={getTimeOfDayGreeting({ name: profile?.name || settings.nickname }).placeholder}
+                        placeholder={`Ask ${
+                          activeIsBuiltin
+                            ? activeModelLabel
+                            : activeDisplayName === 'Msfta shop ai'
+                              ? activeModelLabel
+                              : activeDisplayName
+                        } anything…`}
                         className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
                       />
                       </div>
 
                       {/* Unified Composer Toolbar */}
                       <div className="composer-bar">
-                        <div className="composer-tools flex items-center gap-1.5 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className="composer-icon composer-icon-attach"
-                            title={isEn ? 'Attach photo or file' : 'ছবি বা ফাইল যুক্ত করুন'}
-                            aria-label="Attach photo or file"
+                            className="composer-icon"
+                            title="Attach photo or file"
                           >
                             <Plus className="w-5 h-5" />
                           </button>
-                        </div>
 
-                        <div className="composer-submit flex items-center gap-2 shrink-0 ml-auto">
                           <button
                             type="button"
                             data-testid="model-selector-btn"
                             onClick={() => {
+                              setMoreModelsOpen(!activeIsBuiltin);
                               setBottomModelMenuOpen((v) => !v);
                             }}
                             className="composer-model"
-                            title="Select Model & Reasoning"
+                            title="Select Model"
                           >
                             <span className="truncate">{activeModelLabel}</span>
                             <ChevronDown className="w-3.5 h-3.5 opacity-60 shrink-0" />
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!isToolEnabled('web_search', settings.enabledTools)) {
+                                showToast('Web search tool is disabled in Settings → Tools.');
+                                return;
+                              }
+                              setWebSearch((w) => {
+                                showToast(!w ? 'Web search on' : 'Web search off');
+                                return !w;
+                              });
+                            }}
+                            className={`composer-icon composer-icon-web ${
+                              webSearch && isToolEnabled('web_search', settings.enabledTools)
+                                ? 'is-on'
+                                : ''
+                            }`}
+                            title={
+                              !isToolEnabled('web_search', settings.enabledTools)
+                                ? 'Web Search disabled in Settings → Tools'
+                                : webSearch
+                                  ? 'Web Search active'
+                                  : 'Enable Web Search'
+                            }
+                          >
+                            <Globe className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             data-testid="voice-mic-btn"
@@ -7157,52 +7324,20 @@ export default function App() {
                             onClick={() => {
                               if (isGenerating) {
                                 abortRef.current?.abort();
-                              } else if (
-                                inputText.trim() ||
-                                pendingImgs.length > 0 ||
-                                pendingFiles.length > 0
-                              ) {
-                                handleSend();
                               } else {
-                                unlockSharedLiveAudioContext();
-                                setVoiceCallOpen(true);
+                                handleSend();
                               }
                             }}
-                            className={`composer-send${
-                              inputText.trim() ||
-                              pendingImgs.length > 0 ||
-                              pendingFiles.length > 0 ||
-                              isGenerating
-                                ? ' is-ready'
-                                : ''
-                            }`}
+                            className={`composer-send${inputText.trim() || isGenerating ? ' is-ready' : ''}`}
                             title={
-                              isGenerating
-                                ? 'Stop generation'
-                                : inputText.trim() ||
-                                    pendingImgs.length > 0 ||
-                                    pendingFiles.length > 0
-                                  ? 'Send message'
-                                  : 'Voice Conversation'
+                              isGenerating ? 'Stop generation' : 'Send message'
                             }
-                            aria-label={
-                              isGenerating
-                                ? 'Stop generating'
-                                : inputText.trim() ||
-                                    pendingImgs.length > 0 ||
-                                    pendingFiles.length > 0
-                                  ? 'Send message'
-                                  : 'Start voice conversation'
-                            }
+                            aria-label={isGenerating ? 'Stop generating' : 'Send message'}
                           >
                             {isGenerating ? (
                               <Square className="w-4 h-4 fill-current" />
-                            ) : inputText.trim() ||
-                              pendingImgs.length > 0 ||
-                              pendingFiles.length > 0 ? (
-                              <ArrowUp className="w-4 h-4 stroke-[2.4]" />
                             ) : (
-                              <AudioLines className="w-4 h-4 stroke-[2.1]" />
+                              <ArrowUp className="w-4 h-4 stroke-[2.4]" />
                             )}
                           </button>
                         </div>
@@ -7211,7 +7346,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Clean Two-Series Model Picker (V1 & V2) */}
+                {/* Screenshot 4 Bottom-Sheet "Select model" Modal */}
                 {bottomModelMenuOpen && (
                   <div
                     className="ref-sheet-backdrop"
@@ -7234,174 +7369,165 @@ export default function App() {
                         <div className="ref-sheet-title">Select model</div>
                       </div>
 
-                      {/* V1 Series */}
-                      <div>
-                        <div className="ref-model-series-label">V1</div>
-                        <div className="ref-sheet-group" data-testid="v1-model-options-list">
-                          {BUILTIN_TIERS.map((tier) => {
-                            const activeV1Model =
-                              activeIsBuiltin && !activeIsV2
-                                ? builtinTierForModel(activeModelName, settings.mode).model
-                                : '';
-                            const isSelectedTier = activeV1Model === tier.model;
-                            const badgeText =
-                              tier.id === 'fast'
-                                ? 'Fast'
-                                : tier.id === 'balanced'
-                                  ? 'Balanced'
-                                  : 'Deep';
-                            return (
-                              <button
-                                key={tier.model}
-                                type="button"
-                                data-testid={`select-model-${tier.model}`}
-                                onClick={() => {
-                                  if (!activeIsBuiltin) {
-                                    const builtinProf =
-                                      savedProfiles.find((p) =>
-                                        isBuiltinProviderId(p.provider)
-                                      ) || DEFAULT_BUILTIN_PROFILE;
-                                    handleSelectProfile({
-                                      ...builtinProf,
-                                      externalModel: tier.model,
-                                    });
-                                  }
-                                  handleSelectModel(tier.model);
-                                  setBottomModelMenuOpen(false);
-                                }}
-                                className="ref-sheet-row"
-                              >
-                                <div className="flex flex-col items-start flex-1 min-w-0 text-left">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="ref-sheet-row-title truncate">
-                                      {tier.label}
-                                    </span>
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
-                                      {badgeText}
-                                    </span>
-                                  </div>
-                                  <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
-                                    {tier.desc}
+                      {/* Primary Model Group (Flash / V5 at Top, Pro & Max at Bottom) */}
+                      <div className="ref-sheet-group" data-testid="v2-model-options-list">
+                        {sortV2ModelsFlashFirst(V2_SPECIAL_MODELS).map((spec) => {
+                          const isSelectedV2 =
+                            activeIsBuiltin && activeModelName === spec.id;
+                          const tierChip =
+                            spec.id === 'smfta-v5'
+                              ? 'Flash'
+                              : spec.id === 'smfta-v2-pro'
+                                ? 'Pro'
+                                : 'Max';
+                          return (
+                            <button
+                              key={spec.id}
+                              type="button"
+                              data-testid={`select-model-${spec.id}`}
+                              onClick={() => {
+                                handleSelectModel(spec.id);
+                                setBottomModelMenuOpen(false);
+                              }}
+                              className="ref-sheet-row"
+                            >
+                              <div className="flex flex-col items-start flex-1 min-w-0 text-left">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="ref-sheet-row-title truncate">
+                                    {spec.label}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
+                                    {tierChip}
                                   </span>
                                 </div>
-                                {isSelectedTier && (
-                                  <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
+                                <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
+                                  {spec.desc}
+                                </span>
+                              </div>
+                              {isSelectedV2 && (
+                                <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      {/* V2 Series */}
-                      <div>
-                        <div className="ref-model-series-label">V2</div>
-                        <div className="ref-sheet-group" data-testid="v2-model-options-list">
-                          {sortV2ModelsFlashFirst(V2_SPECIAL_MODELS).map((spec) => {
-                            const isSelectedV2 =
-                              activeIsBuiltin && activeModelName === spec.id;
-                            const tierChip =
-                              spec.id === 'smfta-v5'
-                                ? 'Flash'
-                                : spec.id === 'smfta-v2-pro'
-                                  ? 'Pro'
-                                  : 'Max';
-                            return (
-                              <button
-                                key={spec.id}
-                                type="button"
-                                data-testid={`select-model-${spec.id}`}
-                                onClick={() => {
-                                  handleSelectModel(spec.id);
-                                  setBottomModelMenuOpen(false);
-                                }}
-                                className="ref-sheet-row"
-                              >
-                                <div className="flex flex-col items-start flex-1 min-w-0 text-left">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="ref-sheet-row-title truncate">
-                                      {spec.label}
-                                    </span>
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
-                                      {tierChip}
-                                    </span>
-                                  </div>
-                                  <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
-                                    {spec.desc}
+                      {/* More Models (Built-in Tiers + Custom Providers) */}
+                      <div className="ref-sheet-group">
+                        <button
+                          type="button"
+                          onClick={() => setMoreModelsOpen((v) => !v)}
+                          className="ref-sheet-row"
+                        >
+                          <span className="ref-sheet-row-title">More models</span>
+                          <ChevronRight
+                            className={`w-4 h-4 text-[var(--ink-dim)] transition-transform ${
+                              moreModelsOpen ? 'rotate-90' : ''
+                            }`}
+                          />
+                        </button>
+
+                        {moreModelsOpen && (
+                          <div className="border-t border-[var(--border)] bg-[var(--surface)]/50">
+                            {BUILTIN_TIERS.map((tier) => {
+                              const isSelectedTier =
+                                activeIsBuiltin &&
+                                !activeIsV2 &&
+                                activeModelName === tier.model;
+                              return (
+                                <button
+                                  key={tier.model}
+                                  type="button"
+                                  data-testid={`select-model-${tier.model}`}
+                                  onClick={() => {
+                                    if (!activeIsBuiltin) {
+                                      const builtinProf =
+                                        savedProfiles.find((p) =>
+                                          isBuiltinProviderId(p.provider)
+                                        ) || DEFAULT_BUILTIN_PROFILE;
+                                      handleSelectProfile({
+                                        ...builtinProf,
+                                        externalModel: tier.model,
+                                      });
+                                    }
+                                    handleSelectModel(tier.model);
+                                    setBottomModelMenuOpen(false);
+                                  }}
+                                  className="ref-sheet-row"
+                                >
+                                  <span className="ref-sheet-row-title truncate">
+                                    {tier.label}
                                   </span>
-                                </div>
-                                {isSelectedV2 && (
-                                  <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                                  {isSelectedTier && (
+                                    <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                  )}
+                                </button>
+                              );
+                            })}
 
-                      {/* Custom configured providers (only when user saved external profiles) */}
-                      {savedProfiles.some(
-                        (p) =>
-                          !isBuiltinProviderId(p.provider) &&
-                          !(
-                            p.provider === 'gemini_custom' &&
-                            !(p.externalKeys || '').trim()
-                          ) &&
-                          p.enabled !== false &&
-                          getModelsForProfile(p).length > 0
-                      ) && (
-                        <div>
-                          <div className="ref-model-series-label">Custom</div>
-                          <div className="ref-sheet-group">
                             {savedProfiles
                               .filter(
                                 (p) =>
                                   !isBuiltinProviderId(p.provider) &&
-                                  !(
-                                    p.provider === 'gemini_custom' &&
-                                    !(p.externalKeys || '').trim()
-                                  ) &&
                                   p.enabled !== false
                               )
                               .map((customProf) => {
                                 const vModels = getModelsForProfile(customProf);
                                 if (vModels.length === 0) return null;
-                                return vModels.map((mId) => {
-                                  const isSelectedCustom =
-                                    !activeIsBuiltin &&
-                                    activeProfile?.id === customProf.id &&
-                                    activeModelName === mId;
-                                  return (
-                                    <button
-                                      key={`${customProf.id}-${mId}`}
-                                      type="button"
-                                      onClick={() => {
-                                        handleSelectProfile({
-                                          ...customProf,
-                                          externalModel: mId,
-                                        });
-                                        setBottomModelMenuOpen(false);
-                                      }}
-                                      className="ref-sheet-row"
-                                    >
-                                      <div className="flex flex-col items-start min-w-0 text-left">
-                                        <span className="text-[13.5px] font-mono truncate">
-                                          {mId}
-                                        </span>
-                                        <span className="text-[10.5px] text-[var(--ink-dim)] truncate">
-                                          {customProf.name}
-                                        </span>
-                                      </div>
-                                      {isSelectedCustom && (
-                                        <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
-                                      )}
-                                    </button>
-                                  );
-                                });
+                                return (
+                                  <div key={customProf.id} className="border-t border-[var(--border)]">
+                                    <div className="px-4 pt-2 pb-1 text-[11px] font-medium text-[var(--ink-dim)] truncate">
+                                      {customProf.name}
+                                    </div>
+                                    {vModels.map((mId) => {
+                                      const isSelectedCustom =
+                                        !activeIsBuiltin &&
+                                        activeProfile?.id === customProf.id &&
+                                        activeModelName === mId;
+                                      return (
+                                        <button
+                                          key={`${customProf.id}-${mId}`}
+                                          type="button"
+                                          onClick={() => {
+                                            handleSelectProfile({
+                                              ...customProf,
+                                              externalModel: mId,
+                                            });
+                                            setBottomModelMenuOpen(false);
+                                          }}
+                                          className="ref-sheet-row"
+                                        >
+                                          <span className="text-[14px] font-mono truncate">
+                                            {mId}
+                                          </span>
+                                          {isSelectedCustom && (
+                                            <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                );
                               })}
+
+                            <button
+                              type="button"
+                              data-testid="sheet-manage-providers-btn"
+                              onClick={() => {
+                                setBottomModelMenuOpen(false);
+                                setSettingsTab('providers_api');
+                                setSettingsOpen(true);
+                              }}
+                              className="ref-sheet-row border-t border-[var(--border)] text-[var(--primary)] font-medium"
+                            >
+                              <span className="text-[13.5px]">
+                                + Add or Manage Custom Providers
+                              </span>
+                              <Settings className="w-4 h-4 shrink-0" />
+                            </button>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -7421,9 +7547,6 @@ export default function App() {
           {/* Claude.ai-Style Right-Side Live Code & Artifact Preview Panel */}
           <ClaudeArtifactPanel
             artifact={activeArtifact}
-            workspaceFiles={Object.values(workspaceFiles)}
-            artifactHistory={artifactHistory}
-            isDarkTheme={settings.theme !== 'light'}
             onClose={() => setActiveArtifact(null)}
             onSelectBundleFile={(bf) =>
               setActiveArtifact((prev) =>
@@ -7438,110 +7561,6 @@ export default function App() {
                   : null
               )
             }
-            onSelectWorkspacePath={(path) => {
-              const target = workspaceFilesRef.current[path];
-              if (target) {
-                setActiveArtifact({
-                  title: target.path,
-                  filename: target.path,
-                  lang: target.lang,
-                  code: target.content,
-                });
-              }
-            }}
-            onSaveFile={(path, content, note) => {
-              const res = upsertWorkspaceFile(
-                workspaceFilesRef.current,
-                artifactHistoryRef.current,
-                path,
-                content,
-                'user',
-                note || 'Manual edit'
-              );
-              workspaceFilesRef.current = res.files;
-              artifactHistoryRef.current = res.history;
-              setWorkspaceFiles(res.files);
-              setArtifactHistory(res.history);
-              const savedFile = res.files[res.normalizedPath];
-              if (savedFile) {
-                setActiveArtifact((prev) =>
-                  prev &&
-                  ((prev.filename || prev.title) === path ||
-                    prev.filename === res.normalizedPath ||
-                    prev.title === res.normalizedPath)
-                    ? { ...prev, filename: savedFile.path, lang: savedFile.lang, code: savedFile.content }
-                    : prev
-                );
-              }
-              showToast(`Saved ${res.normalizedPath}`);
-            }}
-            onCreateFile={(path, initialContent = '') => {
-              const res = upsertWorkspaceFile(
-                workspaceFilesRef.current,
-                artifactHistoryRef.current,
-                path,
-                initialContent,
-                'user',
-                'Created manually'
-              );
-              workspaceFilesRef.current = res.files;
-              artifactHistoryRef.current = res.history;
-              setWorkspaceFiles(res.files);
-              setArtifactHistory(res.history);
-              const created = res.files[res.normalizedPath];
-              if (created) {
-                setActiveArtifact({
-                  title: created.path,
-                  filename: created.path,
-                  lang: created.lang,
-                  code: created.content,
-                });
-              }
-              showToast(`Created ${res.normalizedPath}`);
-            }}
-            onRenameFile={(oldPath, newPath) => {
-              const res = renameWorkspaceFile(
-                workspaceFilesRef.current,
-                artifactHistoryRef.current,
-                oldPath,
-                newPath
-              );
-              workspaceFilesRef.current = res.files;
-              artifactHistoryRef.current = res.history;
-              setWorkspaceFiles(res.files);
-              setArtifactHistory(res.history);
-              const renamed = res.files[res.newPath];
-              if (renamed && (activeArtifact?.filename === res.oldPath || activeArtifact?.title === res.oldPath)) {
-                setActiveArtifact({
-                  title: renamed.path,
-                  filename: renamed.path,
-                  lang: renamed.lang,
-                  code: renamed.content,
-                  isStreaming: false,
-                });
-              }
-              showToast(`Renamed ${res.oldPath} → ${res.newPath}`);
-            }}
-            onDeleteFile={(path) => {
-              const nextFiles = deleteWorkspaceFile(workspaceFilesRef.current, path);
-              workspaceFilesRef.current = nextFiles;
-              setWorkspaceFiles(nextFiles);
-              if (activeArtifact?.filename === path) {
-                const remaining = Object.values(nextFiles)[0];
-                setActiveArtifact(
-                  remaining
-                    ? {
-                        title: remaining.path,
-                        filename: remaining.path,
-                        lang: remaining.lang,
-                        code: remaining.content,
-                      }
-                    : null
-                );
-              }
-              showToast(`Deleted ${path}`);
-            }}
-            onFixWithAi={handleFixWithAi}
             onToast={showToast}
           />
           </>
@@ -7549,18 +7568,11 @@ export default function App() {
       </div>
 
       {/* MODALS */}
-      <DiagramStudioModal
-        isOpen={diagramStudioOpen}
-        onClose={() => setDiagramStudioOpen(false)}
-        projectId={workspaceProjectKey}
-        onToast={showToast}
-      />
-
       <ImageStudioModal
         isOpen={studioOpen}
         onClose={() => setStudioOpen(false)}
-        onGenerate={(prompt, style, size, referenceImage) =>
-          handleRunImageGen(prompt, style, size, false, referenceImage)
+        onGenerate={(prompt, style, size) =>
+          handleRunImageGen(prompt, style, size)
         }
       />
 
@@ -7568,7 +7580,6 @@ export default function App() {
         isOpen={codeLabOpen}
         initialCode={codeLabInit}
         onClose={() => setCodeLabOpen(false)}
-        onFixWithAi={handleFixWithAi}
       />
 
       <BattleArenaModal
@@ -7584,31 +7595,16 @@ export default function App() {
         usageToday={usageToday}
       />
 
-      <LiveVoiceOverlay
+      <VoiceCallOverlay
         isOpen={voiceCallOpen}
-        userName={profile?.name || settings.nickname || ''}
         isListening={isListening}
         isGenerating={isGenerating}
-        isTranscribing={isTranscribingVoice}
-        liveTranscript={voiceLiveText}
-        micStream={voiceAudioStream}
         lastUserText={lastUserMessage}
-        lastAiMessage={
-          lastAiMsgEntry
-            ? {
-                id: lastAiMsgEntry.id,
-                text: lastAiMsgEntry.text,
-                isError: lastAiMsgEntry.isError,
-              }
-            : null
-        }
+        lastAiText={lastAiMessage}
         onToggleMic={toggleMic}
-        onCancelMic={cancelVoiceDictation}
-        onSendText={(txt) => void handleSend(txt)}
         onEndCall={() => {
           setVoiceCallOpen(false);
-          cancelVoiceDictation();
-          bilingualSpeechPlayer.stop();
+          window.speechSynthesis?.cancel();
         }}
       />
 
@@ -7684,7 +7680,7 @@ export default function App() {
         onDeleteCloudData={handleDeleteCloudData}
         cloudConnected={Boolean(cloudClient && userId)}
         cloudUserEmail={auth.user?.email || undefined}
-        activeProjectId={activeChat.projectId || undefined}
+        activeProjectId={activeChat.projectId || null}
         onSelectActiveProject={(projId) => {
           setChats((prev) =>
             prev.map((c) =>
@@ -7708,9 +7704,9 @@ export default function App() {
       {/* Simple Name + Password Entry Modal (No Login/Registration Required) */}
       <SimpleEntryModal
         isOpen={simpleEntryModalOpen}
-        storedCredentials={simpleEntryCreds}
-        defaultName={profile?.name || settings.displayName || ''}
-        isLockedGate={Boolean(settings.simpleEntryRequireOnLoad && !simpleEntryCreds)}
+        existingCreds={simpleEntryCreds}
+        initialName={profile?.name || settings.displayName || ''}
+        canClose={!settings.simpleEntryRequireOnLoad || Boolean(simpleEntryCreds)}
         onClose={() => setSimpleEntryModalOpen(false)}
         onSuccess={(creds) => {
           setSimpleEntryCreds(creds);

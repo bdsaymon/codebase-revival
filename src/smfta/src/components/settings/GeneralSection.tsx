@@ -1,12 +1,7 @@
-import React, { useState } from 'react';
-import { KeyRound, Lock, Monitor, Moon, Sun, UserCheck } from 'lucide-react';
+import React from 'react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import type { AppSettings } from '../../types';
 import {
-  loadSimpleEntryCredentials,
-  saveSimpleEntryCredentials,
-} from '../../utils/simpleEntryAuth';
-import {
-  SettingNumber,
   SettingSegmented,
   SettingToggle,
   SettingsCard,
@@ -26,12 +21,7 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
   profileName,
   onNameChange,
   patch,
-  notify,
-  onOpenSimpleEntryModal,
 }) => {
-  const existingSimpleCreds = loadSimpleEntryCredentials();
-  const [simplePassInput, setSimplePassInput] = useState('');
-
   const currentLang =
     draft.replyLang === 'auto' && draft.appLanguage !== 'bn' && draft.appLanguage !== 'en'
       ? 'auto'
@@ -40,26 +30,6 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
       : draft.appLanguage === 'en' || draft.replyLang === 'en'
       ? 'en'
       : 'bn';
-
-  const handleSaveSimpleCredentials = () => {
-    const cleanName = (profileName || draft.displayName || '').trim();
-    if (!cleanName) {
-      notify?.('অনুগ্রহ করে আগে আপনার নাম লিখুন');
-      return;
-    }
-    if (!simplePassInput.trim()) {
-      notify?.('পাসওয়ার্ড সেট বা আপডেট করতে পাসওয়ার্ড লিখুন');
-      return;
-    }
-    const saved = saveSimpleEntryCredentials(cleanName, simplePassInput);
-    patch({
-      displayName: saved.name,
-      nickname: saved.name,
-      simpleEntryPasscode: saved.passwordHash,
-    });
-    setSimplePassInput('');
-    notify?.(`✅ নাম (${saved.name}) ও পাসওয়ার্ড সফলভাবে সংরক্ষিত হয়েছে`);
-  };
 
   return (
     <div className="space-y-3" data-testid="settings-section-general">
@@ -71,7 +41,7 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
               Display Name (আপনার নাম)
             </span>
             <span className="text-[11.5px] text-[var(--ink-dim)]">
-              লগইন বা রেজিস্ট্রেশন ছাড়াই শুধু আপনার নাম ও পাসওয়ার্ড দিয়ে সব ফিচার ব্যবহার করুন
+              চ্যাটে আপনার যে নাম দেখানো হবে
             </span>
           </div>
           <input
@@ -87,68 +57,6 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
             className="cs-input text-xs sm:text-[13px] py-1.5 px-2.5 max-w-[220px]"
           />
         </div>
-
-        {/* Simple Name + Password Quick Access */}
-        <div
-          className="py-3 border-b border-[var(--border)] space-y-2.5"
-          data-testid="general-simple-entry-card"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="text-[13.5px] font-medium text-[var(--ink)] flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-[var(--primary)]" />
-                <span>সহজ নাম ও পাসওয়ার্ড অ্যাক্সেস (No Registration Required)</span>
-              </span>
-              <span className="text-[11.5px] text-[var(--ink-dim)] block">
-                ইমেইল বা ভেরিফিকেশন ছাড়াই আপনার নাম ও পাসওয়ার্ড দিয়ে প্রোফাইল সুরক্ষিত রাখুন
-              </span>
-            </div>
-            {onOpenSimpleEntryModal && (
-              <button
-                type="button"
-                data-testid="open-simple-entry-modal-btn"
-                onClick={onOpenSimpleEntryModal}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-xs font-medium text-[var(--ink)] cursor-pointer transition-colors"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-[var(--primary)]" />
-                <span>নাম ও পাসওয়ার্ড প্যানেল</span>
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="password"
-              data-testid="general-simple-password-input"
-              value={simplePassInput}
-              onChange={(e) => setSimplePassInput(e.target.value)}
-              placeholder={
-                existingSimpleCreds
-                  ? 'নতুন পাসওয়ার্ড দিন (আপডেট করতে)...'
-                  : 'একটি পাসওয়ার্ড সেট করুন...'
-              }
-              className="cs-input text-xs sm:text-[13px] py-1.5 px-2.5 flex-1 min-w-[180px] max-w-[260px]"
-            />
-            <button
-              type="button"
-              data-testid="general-simple-password-save-btn"
-              onClick={handleSaveSimpleCredentials}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold hover:opacity-95 transition-opacity cursor-pointer"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>{existingSimpleCreds ? 'পাসওয়ার্ড আপডেট' : 'সেভ করুন'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Require Name & Password on Startup Toggle */}
-        <SettingToggle
-          label="অ্যাপ চালুর শুরুতে নাম ও পাসওয়ার্ড চাইবে (Startup Lock)"
-          description="চালু থাকলে অ্যাপ ওপেন করার সময় আপনার নাম ও পাসওয়ার্ড দিয়ে প্রবেশ করতে হবে"
-          checked={Boolean(draft.simpleEntryRequireOnLoad)}
-          testId="simple-entry-startup-toggle"
-          onChange={(v) => patch({ simpleEntryRequireOnLoad: v })}
-        />
 
         {/* Theme */}
         <div className="flex flex-wrap items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
@@ -310,15 +218,6 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
           }
         />
 
-        {/* Auto-Open Side-by-Side Live Preview */}
-        <SettingToggle
-          label="Auto-Open Side-by-Side Live Preview (পাশাপাশি লাইভ প্রিভিউ)"
-          description="HTML, CSS, JS বা React কোড তৈরি হলে স্বয়ংক্রিয়ভাবে ডানপাশে লাইভ প্রিভিউ প্যানেল খুলে দেখাবে"
-          checked={draft.autoOpenLivePreview !== false}
-          testId="auto-open-live-preview-toggle"
-          onChange={(v) => patch({ autoOpenLivePreview: v })}
-        />
-
         {/* Enter to Send */}
         <SettingToggle
           label="Enter চাপলে মেসেজ যাবে"
@@ -327,28 +226,13 @@ export const GeneralSection: React.FC<GeneralSectionProps> = ({
           onChange={(v) => patch({ sendOnEnter: v })}
         />
 
-        <SettingToggle
-          label="Allow web search"
-          checked={draft.enabledTools?.web_search !== false && draft.enabledTools?.web_browse !== false}
-          onChange={(allowed) => patch({
-            enabledTools: { ...draft.enabledTools, web_search: allowed, web_browse: allowed },
-          })}
-        />
-        <SettingNumber
-          label="Daily message limit (0 = no limit)"
-          value={draft.dailyMessageLimit ?? 0}
-          min={0}
-          max={10000}
-          onChange={(dailyMessageLimit) => patch({ dailyMessageLimit })}
-        />
-
         {/* Code Highlight & Artifact Preview */}
         <SettingToggle
           label="Code Syntax Highlight & Artifact Preview"
           description="কোড ব্লকে সিনট্যাক্স হাইলাইটিং এবং লাইভ প্রিভিউ ও .zip ডাউনলোড সক্রিয় রাখবে"
-          checked={draft.codeHighlight !== false}
+          checked={draft.highlightCode !== false}
           testId="highlight-code-toggle"
-          onChange={(v) => patch({ codeHighlight: v })}
+          onChange={(v) => patch({ highlightCode: v })}
         />
       </SettingsCard>
     </div>
