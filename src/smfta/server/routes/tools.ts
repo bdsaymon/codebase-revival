@@ -672,7 +672,9 @@ function recordTtsModelFailure(model: string, errMsg: string): void {
     ttsModelCooldownUntil.set(model, Date.now() + 25_000);
   } else if (/404|403|400|not.?found|unsupported|permission|no streaming audio/i.test(errMsg)) {
     ttsModelCooldownUntil.set(model, Date.now() + 180_000);
-  } else if (model !== 'gemini-3.8-live') {
+  } else if (model === 'gemini-3.8-live') {
+    ttsModelCooldownUntil.set(model, Date.now() + 15_000);
+  } else {
     ttsModelCooldownUntil.set(model, Date.now() + 60_000);
   }
 }
@@ -845,8 +847,10 @@ function createWarmLiveTtsSession(
   });
 
   let closed = false;
+  let receivedAudioInTurn = false;
+  let lastTextReply = '';
   let activeChunkHandler: ((pcm: Buffer, rate: number) => void) | null = null;
-  let activeDoneHandler: (() => void) | null = null;
+  let activeDoneHandler: ((reason?: string) => void) | null = null;
   let activeErrorHandler: ((err: unknown) => void) | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sessionRef: any = null;
@@ -867,6 +871,9 @@ function createWarmLiveTtsSession(
         onmessage: (msg) => {
           const parts = msg?.serverContent?.modelTurn?.parts || [];
           for (const p of parts) {
+            if (typeof p?.text === 'string' && p.text.trim()) {
+              lastTextReply += p.text;
+            }
             const b64 = p?.inlineData?.data;
             if (!b64 || !activeChunkHandler) continue;
             let pcmBytes = Buffer.from(b64, 'base64');
@@ -881,12 +888,19 @@ function createWarmLiveTtsSession(
               pcmBytes = pcmBytes.subarray(44);
             }
             if (pcmBytes.length === 0) continue;
+            receivedAudioInTurn = true;
             const rateMatch = String(p?.inlineData?.mimeType || '').match(/rate=(\d+)/i);
             const rate = rateMatch ? Number(rateMatch[1]) : 24000;
             activeChunkHandler(pcmBytes, rate);
           }
-          if ((msg?.serverContent?.turnComplete || msg?.serverContent?.generationComplete) && activeDoneHandler) {
-            activeDoneHandler();
+          const isTurnComplete = Boolean(msg?.serverContent?.turnComplete);
+          const isGenCompleteWithAudio = Boolean(msg?.serverContent?.generationComplete && receivedAudioInTurn);
+          if ((isTurnComplete || isGenCompleteWithAudio) && activeDoneHandler) {
+            const detail =
+              !receivedAudioInTurn && lastTextReply.trim()
+                ? `text-only reply: ${lastTextReply.trim().slice(0, 80)}`
+                : undefined;
+            activeDoneHandler(detail);
           }
         },
         onerror: (err) => {
@@ -895,9 +909,12 @@ function createWarmLiveTtsSession(
             activeErrorHandler(err);
           }
         },
-        onclose: () => {
+        onclose: (ev?: { code?: number; reason?: string }) => {
           closed = true;
-          if (activeDoneHandler) {
+          if (!receivedAudioInTurn && activeErrorHandler) {
+            const detail = `WebSocket closed (${ev?.code ?? 0}${ev?.reason ? `: ${ev.reason}` : ''}${lastTextReply.trim() ? `; text=${lastTextReply.trim().slice(0, 60)}` : ''})`;
+            activeErrorHandler(new Error(detail));
+          } else if (activeDoneHandler) {
             activeDoneHandler();
           }
         },
@@ -988,8 +1005,8 @@ function createWarmLiveTtsSession(
                 finish(totalBytes > 0);
               }, 550);
             };
-            activeDoneHandler = () => {
-              finish(totalBytes > 0);
+            activeDoneHandler = (reason) => {
+              finish(totalBytes > 0, totalBytes > 0 ? undefined : reason);
             };
             activeErrorHandler = (err) => {
               finish(totalBytes > 0, sanitizeErrorMsg(err));
@@ -1040,7 +1057,7 @@ async function streamGeminiLiveVerbatimTts(params: {
       return { ok: false, totalBytes: 0, sampleRate: 24000, error: 'Aborted' };
     }
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 150));
     }
     const handle = await createWarmLiveTtsSession(params.apiKey, params.voiceName);
     if (!handle) {
@@ -1062,7 +1079,7 @@ async function streamGeminiLiveVerbatimTts(params: {
     }
   }
 
-  if (/429|quota|resource_exhausted|not_found|404|timeout/i.test(lastErr)) {
+  if (/429|quota|resource_exhausted|not_found|404|timeout|0 bytes|closed|text-only/i.test(lastErr)) {
     recordTtsModelFailure('gemini-3.8-live', lastErr);
   }
   return { ok: false, totalBytes: 0, sampleRate: 24000, error: lastErr };
@@ -1157,7 +1174,9 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
     }
     if (liveRes.error || !liveRes.ok || livePcmChunks.length === 0) {
       lastError = liveRes.error || 'gemini-3.8-live returned empty audio payload.';
-      console.warn(`[voice/tts] Gemini TTS failed for model="gemini-3.8-live": ${lastError}`);
+      if (!/cooling down/i.test(lastError)) {
+        console.info(`[voice/tts] gemini-3.8-live skipped (${lastError}); trying fallback TTS`);
+      }
     }
 
     // 1B. Secondary Gemini TTS models via generateContent
@@ -1240,17 +1259,17 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
           });
         }
         lastError = `${model} returned no audio payload.`;
-        console.warn(`[voice/tts] Gemini TTS failed for model="${model}": ${lastError}`);
+        console.info(`[voice/tts] ${model} returned empty audio; trying next model`);
       } catch (err) {
         lastError = sanitizeErrorMsg(err);
-        console.warn(`[voice/tts] Gemini TTS failed for model="${model}": ${lastError}`);
+        console.info(`[voice/tts] ${model} skipped (${lastError.slice(0, 140)})`);
         recordTtsModelFailure(model, lastError);
       }
     }
-    console.warn(`[voice/tts] All Gemini TTS models failed; falling back to neural-voice-hd. lastError=${lastError}`);
+    console.info(`[voice/tts] Gemini TTS unavailable (${lastError}); serving neural-voice-hd`);
   } else {
     lastError = 'GEMINI_API_KEY is missing on the server.';
-    console.warn(`[voice/tts] Gemini TTS unavailable: ${lastError}`);
+    console.info(`[voice/tts] Gemini TTS unavailable: ${lastError}`);
   }
 
   // 2. Last-resort Server Neural Audio Fallback only if all Gemini models are unreachable
@@ -1389,7 +1408,9 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   }
 
   let lastError = liveStreamRes.error || 'Gemini streaming TTS returned no audio chunks.';
-  console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="gemini-3.8-live": ${lastError}`);
+  if (!/cooling down/i.test(lastError)) {
+    console.info(`[voice/tts-stream] gemini-3.8-live skipped (${lastError}); trying fallback stream TTS`);
+  }
 
   // 2B. Secondary streaming TTS models via generateContentStream
   const ai = new GoogleGenAI({
@@ -1495,11 +1516,11 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
         return;
       }
       lastError = `${model} returned no streaming audio chunks.`;
-      console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="${model}": ${lastError}`);
+      console.info(`[voice/tts-stream] ${model} empty stream; trying next model`);
       recordTtsModelFailure(model, lastError);
     } catch (err) {
       lastError = sanitizeErrorMsg(err);
-      console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="${model}": ${lastError}`);
+      console.info(`[voice/tts-stream] ${model} skipped (${lastError.slice(0, 140)})`);
       recordTtsModelFailure(model, lastError);
       if (wroteAny) {
         if (!res.writableEnded) {
@@ -1510,7 +1531,7 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     }
   }
 
-  console.warn(`[voice/tts-stream] All Gemini streaming TTS models failed. lastError=${lastError}`);
+  console.info(`[voice/tts-stream] Deferring to unary TTS fallback (${lastError.slice(0, 140)})`);
 
   if (!res.headersSent) {
     return res.status(200).json({
