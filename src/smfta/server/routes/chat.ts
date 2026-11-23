@@ -9,7 +9,10 @@ import {
   resolveEffectiveProvider,
   sanitizeProprietaryOutput,
 } from '../providers';
-import { buildSystemInstruction } from '../systemPrompt';
+import {
+  buildNaturalHumanLanguageRules,
+  buildSystemInstruction,
+} from '../systemPrompt';
 import {
   buildAdHocProviderConfig,
   callBackendEngine,
@@ -799,15 +802,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     );
   };
 
-  let ensureThinkingBeforeFirstDelta: (() => void) | null = null;
-
   const emitDelta = (delta: string) => {
     if (!delta || clientClosed || res.writableEnded) return;
     const cleanDelta = sanitizeProprietaryOutput(delta);
     if (!cleanDelta) return;
-    if (fullReplyAccumulator.length === 0 && ensureThinkingBeforeFirstDelta) {
-      ensureThinkingBeforeFirstDelta();
-    }
     if (firstTokenPerf === null) {
       firstTokenPerf = performance.now();
     }
@@ -916,6 +914,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     responseLength = 'medium',
     memoryPaused = false,
     incognito = false,
+    includeThinkingDetails,
     thinkingEnabled = true,
     liveVoiceMode = false,
   } = req.body || {};
@@ -932,7 +931,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       ? Math.min(200, Math.max(1, Math.round(topK)))
       : undefined;
   const requestedThinkingMode: 'off' | 'low' | 'medium' | 'high' =
-    liveVoiceMode || thinkingEnabled === false || thinkingMode === 'off'
+    liveVoiceMode ||
+    thinkingEnabled === false ||
+    includeThinkingDetails === false ||
+    thinkingMode === 'off'
       ? 'off'
       : thinkingMode === 'low' ||
         thinkingMode === 'medium' ||
@@ -1072,20 +1074,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     parsedKeys.length > 0 ||
     (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud');
 
-  const ensurePreResponseThinking = (modelLabelOverride?: string) => {
-    if (requestedThinkingMode === 'off' || hasEmittedAnyThinking) {
-      return;
-    }
-    const trace = buildContextualThinkingTrace(
-      lastUserText,
-      replyLang,
-      modelLabelOverride || activeCustomModelName || effectiveProvider,
-      requestedThinkingMode
-    );
-    emitThinking(trace);
+  const ensurePreResponseThinking = (_modelLabelOverride?: string) => {
+    // Only real model thinking chunks are emitted; never inject synthetic template thinking traces
   };
-  ensureThinkingBeforeFirstDelta = () =>
-    ensurePreResponseThinking(activeCustomModelName || effectiveProvider);
 
   emitEvent({
     type: 'meta',
@@ -1185,7 +1176,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         activeV2SystemLabel
       );
       if (identityReply) {
-        ensurePreResponseThinking(activeV2SystemLabel);
         await emitChunkedDelta(identityReply);
         finishStream({
           type: 'done',
@@ -1313,7 +1303,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           ];
 
     const effectiveV2SysInstruction = liveVoiceMode
-      ? `${v2SystemInstruction}\n\nLIVE VOICE CONVERSATION MODE: Reply naturally and warmly in 1 to 3 clear, concise spoken sentences in the exact language the user spoke (Bengali, English, or Banglish). Output pure spoken text with NO markdown tables, bullet lists, code blocks, URLs, or emojis.`
+      ? `${v2SystemInstruction}\n\n${buildNaturalHumanLanguageRules({
+          replyLang,
+          liveVoiceMode: true,
+          userName: String(nickname || userName || '').trim(),
+        })}`
       : v2SystemInstruction;
 
     let v2StreamRes = await streamV2FirebaseModel({
@@ -1453,7 +1447,6 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       activeSystemLabel
     );
     if (identityReply) {
-      ensurePreResponseThinking(activeSystemLabel);
       await emitChunkedDelta(identityReply);
       finishStream({
         type: 'done',
@@ -1763,20 +1756,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       lastUserText
     );
   const liveVoiceSysInstruction = liveVoiceMode
-    ? [
-        `You are SMFTA AI Pro talking live on a real-time voice call${cleanVoiceUserName ? ` with ${cleanVoiceUserName}` : ''}.`,
-        'Speak like a real, warm, emotionally intelligent human friend and expert companion — NEVER sound like a stiff customer-service robot, IVR menu, or translated textbook.',
-        'AVOID robotic clichés such as "আমি খুব ভালো আছি, ধন্যবাদ। আপনাকে কীভাবে সাহায্য করতে পারি?" or "How may I assist you today?". Instead, speak with natural human warmth and spontaneous conversational flow.',
-        wantsDetailedVoiceReply
-          ? 'The user explicitly asked for a detailed explanation: deliver a clear, thorough, complete spoken explanation without cutting short, structured smoothly for listening.'
-          : 'Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 3 to 4 crisp, warm, natural spoken sentences — concise and complete without rambling.',
-        'NEVER output markdown tables, pipe characters (|), bullet lists, numbered lists, code blocks, raw URLs, asterisks (*), hashtags (#), or emojis — output pure, natural spoken dialogue.',
-        replyLang === 'bn'
-          ? 'Use warm, natural everyday spoken Bengali (স্বাভাবিক কথ্য বাংলা).'
-          : replyLang === 'en'
-            ? 'Use warm, natural conversational English.'
-            : 'Match the user language seamlessly with warm, natural human phrasing.',
-      ].join(' ')
+    ? buildNaturalHumanLanguageRules({
+        replyLang,
+        liveVoiceMode: true,
+        userName: cleanVoiceUserName,
+        wantsDetailedVoiceReply,
+      })
     : '';
 
   const effectiveSysInstruction = liveVoiceMode ? liveVoiceSysInstruction : sysInstruction;
@@ -2111,7 +2096,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       streamSucceeded = true;
       streamTruncated = Boolean(gw.truncated);
       actualProviderUsed = 'smfta_cloud';
-      actualModelUsed = gw.modelUsed || gw.model || activeCustomModelName || 'smfta-flash';
+      actualModelUsed = gw.model || activeCustomModelName || 'smfta-flash';
       if (gw.fallbackNotice) {
         gatewayFallbackNotice = gw.fallbackNotice;
       }
@@ -2705,11 +2690,7 @@ chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
     );
 
     const parsedItems = aiRes.ok ? parseExtractedMemoriesJson(aiRes.text) : [];
-    const safeItems = parsedItems.filter(
-      (item) =>
-        !isSensitiveFact(`${item.key}: ${item.value}`) &&
-        !isSensitiveFact(item.value)
-    );
+    const safeItems = parsedItems.filter((item) => !isSensitiveFact(item));
 
     return res.json({
       ok: true,
@@ -2729,7 +2710,8 @@ chatRouter.post('/memory/extract', async (req: Request, res: Response) => {
 chatRouter.post('/feedback', (req: Request, res: Response) => {
   const {
     messageId = '',
-    conversationId = 'default',
+    conversationId = '',
+    sessionId = 'default',
     rating = '',
     reason = '',
   } = req.body || {};
@@ -2743,7 +2725,7 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
 
   const cleanMessageId =
     String(messageId || '').trim() || `msg_${Date.now().toString(36)}`;
-  const cleanConvId = String(conversationId || 'default').trim().slice(0, 128);
+  const cleanConvId = String(conversationId || sessionId || 'default').trim().slice(0, 128);
   const cleanReason = String(reason || '').trim().slice(0, 500);
   const userId = String(req.userId || 'anonymous').slice(0, 128);
 
@@ -2751,7 +2733,7 @@ chatRouter.post('/feedback', (req: Request, res: Response) => {
     const engine = getSharedHardenedEngine();
     const record = engine.storage.saveMessageFeedback({
       messageId: cleanMessageId,
-      conversationId: cleanConvId,
+      sessionId: cleanConvId,
       userId,
       rating,
       reason: cleanReason,

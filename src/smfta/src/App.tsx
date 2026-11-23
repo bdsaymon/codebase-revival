@@ -1189,7 +1189,9 @@ export default function App() {
       if (!rawMsgText || !rawMsgText.trim()) return null;
       const { cleanResponse } = extractThinkingAndResponse(rawMsgText);
       const textToScan = cleanResponse || rawMsgText;
-      const { artifacts: fileArts } = extractFileArtifacts(textToScan, false);
+      const { artifacts: fileArts } = extractFileArtifacts(textToScan, {
+        isStreaming: false,
+      });
       const codeBlocks = extractCodeBlocks(textToScan);
 
       const extMap: Record<string, string> = {
@@ -3410,11 +3412,34 @@ export default function App() {
   };
 
   // Main Send handler
-  const handleSend = async (overrideText?: string) => {
+  const handleSend = async (
+    overrideText?: string,
+    extraAttachments?: {
+      imgs?: ImageAttachment[];
+      files?: Array<{ name: string; content: string; summary?: string }>;
+    }
+  ) => {
     if (isGenerating || inFlightSendRef.current) return;
     const rawTxt = (overrideText ?? inputText).trim();
-    const imgs = [...pendingImgs];
-    const files = [...pendingFiles];
+    const imgs = [
+      ...pendingImgs,
+      ...(Array.isArray(extraAttachments?.imgs) ? extraAttachments.imgs : []),
+    ];
+    const files: Array<{
+      name: string;
+      content: string;
+      summary?: string;
+      doc?: ReadDocumentResult;
+    }> = [
+      ...pendingFiles,
+      ...(Array.isArray(extraAttachments?.files)
+        ? extraAttachments.files.map((f) => ({
+            name: f.name,
+            content: f.content,
+            summary: f.summary || `${f.content.length} chars`,
+          }))
+        : []),
+    ];
 
     if (!rawTxt && imgs.length === 0 && files.length === 0) return;
 
@@ -3893,9 +3918,9 @@ export default function App() {
       setProviderLimitBanner({
         profileName: profileSnapshot.name || activeProvider,
         profileId: profileSnapshot.id,
-        message: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+        message: 'এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।',
       });
-      showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+      showToast('এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।', 5500);
       setIsGenerating(false);
       setIsWaitingFirstToken(false);
       setGenPhase(null);
@@ -3917,7 +3942,7 @@ export default function App() {
                     ...p,
                     decryptionFailed: true,
                     verificationStatus: 'failed' as const,
-                    statusMessage: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+                    statusMessage: 'এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।',
                   }
                 : p
             )
@@ -3926,9 +3951,9 @@ export default function App() {
         setProviderLimitBanner({
           profileName: failName,
           profileId: profileSnapshot?.id,
-          message: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+          message: 'এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।',
         });
-        showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+        showToast('এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।', 5500);
         setIsGenerating(false);
         setIsWaitingFirstToken(false);
         setGenPhase(null);
@@ -5178,9 +5203,9 @@ export default function App() {
                 memoryRef.current,
                 extData.memories
               );
-              if (mergedRes.addedOrUpdated.length > 0) {
-                memoryRef.current = mergedRes.memories;
-                setMemory(mergedRes.memories);
+              if (mergedRes.added.length > 0) {
+                memoryRef.current = mergedRes.updated;
+                setMemory(mergedRes.updated);
               }
             }
           } catch {
@@ -7511,7 +7536,7 @@ export default function App() {
                     <div className="flex items-center gap-2 min-w-0">
                       <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                       <span className="truncate">
-                        {decryptionAlertProfileName}: সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন
+                        {decryptionAlertProfileName}: এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
@@ -8077,7 +8102,7 @@ export default function App() {
                               data-testid="sheet-manage-providers-btn"
                               onClick={() => {
                                 setBottomModelMenuOpen(false);
-                                setSettingsTab('providers_api');
+                                setSettingsTab('providers');
                                 setSettingsOpen(true);
                               }}
                               className="ref-sheet-row border-t border-[var(--border)] text-[var(--primary)] font-medium"
@@ -8185,8 +8210,8 @@ export default function App() {
         onAbortGeneration={() => {
           abortRef.current?.abort();
         }}
-        onSendText={(text) => {
-          void handleSend(text);
+        onSendText={(text, attachments) => {
+          void handleSend(text, attachments);
         }}
         onEndCall={() => {
           abortRef.current?.abort();
@@ -8317,7 +8342,7 @@ export default function App() {
         onDeleteCloudData={handleDeleteCloudData}
         cloudConnected={Boolean(cloudClient && userId)}
         cloudUserEmail={auth.user?.email || undefined}
-        activeProjectId={activeChat.projectId || null}
+        activeProjectId={activeChat.projectId || undefined}
         onSelectActiveProject={(projId) => {
           setChats((prev) =>
             prev.map((c) =>
@@ -8341,9 +8366,9 @@ export default function App() {
       {/* Simple Name + Password Entry Modal (No Login/Registration Required) */}
       <SimpleEntryModal
         isOpen={simpleEntryModalOpen}
-        existingCreds={simpleEntryCreds}
-        initialName={profile?.name || settings.displayName || ''}
-        canClose={!settings.simpleEntryRequireOnLoad || Boolean(simpleEntryCreds)}
+        storedCredentials={simpleEntryCreds}
+        defaultName={profile?.name || settings.displayName || ''}
+        isLockedGate={Boolean(settings.simpleEntryRequireOnLoad && !simpleEntryCreds)}
         onClose={() => setSimpleEntryModalOpen(false)}
         onSuccess={(creds) => {
           setSimpleEntryCreds(creds);

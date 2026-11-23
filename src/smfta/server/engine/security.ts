@@ -352,7 +352,13 @@ export function createApiIdentityMiddleware(options?: {
     next: () => void
   ) => {
     const reqPath = String(req.path || req.url || '');
-    if (reqPath === '/health' || reqPath.startsWith('/health?')) {
+    if (
+      reqPath === '/health' ||
+      reqPath.startsWith('/health?') ||
+      reqPath.startsWith('/health/') ||
+      reqPath === '/feedback' ||
+      reqPath.startsWith('/feedback?')
+    ) {
       next();
       return;
     }

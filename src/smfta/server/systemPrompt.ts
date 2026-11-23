@@ -94,6 +94,57 @@ function buildStyleSection(opts: SystemInstructionOptions): string {
   return parts.join('\n');
 }
 
+export interface NaturalHumanLanguageRulesParams {
+  replyLang?: 'auto' | 'bn' | 'en' | string;
+  liveVoiceMode?: boolean;
+  userName?: string;
+  wantsDetailedVoiceReply?: boolean;
+}
+
+/**
+ * Shared human conversational language directive used by BOTH text chat (buildSystemInstruction)
+ * and Live Voice (liveVoiceSysInstruction) so responses are pure, natural, and free of robotic clichés.
+ */
+export function buildNaturalHumanLanguageRules(
+  params: NaturalHumanLanguageRulesParams = {}
+): string {
+  const {
+    replyLang = 'auto',
+    liveVoiceMode = false,
+    userName = '',
+    wantsDetailedVoiceReply = false,
+  } = params;
+
+  const langChoiceDirective =
+    replyLang === 'en'
+      ? 'Reply strictly in clear, warm, natural conversational English.'
+      : replyLang === 'bn'
+        ? 'Reply in pure, natural everyday colloquial Bengali (স্বাভাবিক চলিত বাংলা) — the way an educated, thoughtful Bengali friend or colleague naturally speaks and writes. Keep standard technical terms (API, key, token, server, code, database, webhook, URL, JSON) in English.'
+        : 'Always reply in the exact language the user used (Bengali, English, or mixed Banglish). When replying in Bengali, write in natural everyday colloquial Bengali (স্বাভাবিক চলিত বাংলা — যেভাবে একজন শিক্ষিত বাঙালি বন্ধু বা সহকর্মী স্বাভাবিকভাবে কথা বলে; অনুবাদ-করা বা কিতাবি ভাষা নয়). Do not mix unnecessary English filler words into Bengali sentences, while keeping technical terms (API, key, token, server, code, database) in English.';
+
+  const bannedRoboticPhrases =
+    'STRICT ANTI-ROBOTIC PHRASING RULE (CRITICAL): NEVER start or pad replies with stiff, translated, or robotic clichés. The following robotic phrases are STRICTLY FORBIDDEN: "আমি একটি এআই ভাষা মডেল", "অবশ্যই!", "নিশ্চিতভাবে", "আপনাকে কীভাবে সাহায্য করতে পারি?", "আমি খুব ভালো আছি, ধন্যবাদ।", "As an AI language model", "Certainly!", "Sure!", "How may I assist you today?". Speak directly, warmly, and naturally like a real human expert.';
+
+  if (liveVoiceMode) {
+    return [
+      `You are SMFTA AI Pro talking live on a real-time voice call${userName ? ` with ${userName}` : ''}.`,
+      'Speak like a real, warm, emotionally intelligent human friend and expert companion — NEVER sound like a stiff customer-service robot, IVR menu, or translated textbook.',
+      bannedRoboticPhrases,
+      langChoiceDirective,
+      wantsDetailedVoiceReply
+        ? 'The user explicitly asked for a detailed explanation: deliver a clear, thorough, complete spoken explanation without cutting short, structured smoothly for listening.'
+        : 'Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 2 to 4 crisp, warm, natural spoken sentences — concise and complete without rambling.',
+      'NEVER output markdown tables, pipe characters (|), bullet lists, numbered lists, code blocks, raw URLs, asterisks (*), hashtags (#), or emojis — output pure, natural spoken dialogue.',
+    ].join(' ');
+  }
+
+  return [
+    'NATURAL HUMAN LANGUAGE & BENGALI FLUENCY DIRECTIVE:',
+    `- ${langChoiceDirective}`,
+    `- ${bannedRoboticPhrases}`,
+  ].join('\n');
+}
+
 export function buildSystemInstruction(opts: SystemInstructionOptions): string {
   const customModel = opts.customModelName?.trim() || '';
   const activeSystemName = resolveActiveSystemLabel({
@@ -101,11 +152,11 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     mode: opts.mode,
   });
   const tier = customModel || (opts.mode === 'power' ? 'SMFTA-3 Ultra' : opts.mode === 'balanced' ? 'SMFTA-2 Sonnet' : 'SMFTA-1 Flash');
-  const languageRule = opts.replyLang === 'en'
-    ? 'Reply only in clear natural English.'
-    : opts.replyLang === 'bn'
-      ? 'Reply only in clear, natural Bengali; use standard English technical terms.'
-      : 'Mirror the latest user message language; default to clear Bengali for Bengali users.';
+  const languageRule = buildNaturalHumanLanguageRules({
+    replyLang: opts.replyLang,
+    liveVoiceMode: false,
+    userName: opts.nickname || opts.userName,
+  });
   const answerStyle = 'Answer the user request thoroughly and accurately. Only keep single-word greetings brief. Whenever the user asks for detailed information, long-form writing, designs, builds, apps, or code updates, produce complete, well-structured, production-grade output without shortening, skipping sections, or using placeholders.';
   const history = (opts.recentTranscript || []).slice(-20).map((m) => `${m.role}: ${(m.content || '').slice(0, 1400)}`).join('\n');
   const notebook = (opts.notebook || []).slice(0, 10).map((n) => `${n.title}: ${n.content.slice(0, 500)}`).join('\n');

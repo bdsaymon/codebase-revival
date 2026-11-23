@@ -224,7 +224,7 @@ export function sanitizeSettings(input: unknown): AppSettings {
 
   // A key prefix is not a reliable vendor identity; preserve the user's selection.
 
-  let externalModel = str(raw.externalModel, DEFAULT_SETTINGS.externalModel)
+  let externalModel = str(raw.externalModel, DEFAULT_SETTINGS.externalModel || '')
     .trim()
     .slice(0, 200);
   if (

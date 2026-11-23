@@ -1107,7 +1107,7 @@ export async function hydrateSavedProfiles(): Promise<SavedProviderProfile[]> {
           decryptionFailed: true,
           verified: false,
           verificationStatus: 'failed' as const,
-          statusMessage: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+          statusMessage: 'এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন।',
         };
       }
     })
@@ -1159,7 +1159,7 @@ export function formatProviderErrorBn(params: {
   const model = params.modelName || 'নির্বাচিত মডেল';
 
   if (code === 'KEY_DECRYPT_FAILED' || /decrypt/i.test(raw)) {
-    return 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন। Settings → Custom Providers থেকে কী-টি পুনরায় সেভ করুন।';
+    return 'এই ঠিকানায় আগের সেভ করা কী পড়া যায় না, আবার দিন। Settings → Custom Providers থেকে কী-টি পুনরায় সেভ করুন।';
   }
   if (status === 401 || status === 403 || code === 'AUTH_INVALID') {
     return `${label} API কী সঠিক নয় বা অনুমতি নেই (HTTP ${status || 401})। Settings → Custom Providers থেকে সঠিক কী আপডেট করুন।`;

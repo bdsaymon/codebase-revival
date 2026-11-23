@@ -508,11 +508,16 @@ export function buildV2GenAiRequestConfig(params: {
   fullSystemInstruction: string;
   thinkingEnabled?: boolean;
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
+  webSearch?: boolean;
 }): Record<string, unknown> {
   const normalized = params.modelName.trim().toLowerCase();
   const isHydrogen = normalized.includes('gemini-4');
   const isFlash38 = normalized.includes('gemini-3.8');
   const allowThinking = params.thinkingEnabled !== false && params.thinkingEffort !== 'off';
+  const useSearch =
+    typeof params.webSearch === 'boolean'
+      ? params.webSearch
+      : Boolean(params.spec.useSearchGrounding);
   const effort =
     params.thinkingEffort === 'low' ||
     params.thinkingEffort === 'medium' ||
@@ -538,7 +543,7 @@ export function buildV2GenAiRequestConfig(params: {
       includeThoughts: allowThinking,
       thinkingLevel: safeHydrogenLevel,
     };
-    if (params.spec.useSearchGrounding) {
+    if (useSearch) {
       cfg.tools = [{ googleSearch: {} }];
     }
     return cfg;
@@ -571,7 +576,7 @@ export function buildV2GenAiRequestConfig(params: {
         thinkingBudget: budgetMap[effKey],
       };
     }
-    if (params.spec.useSearchGrounding) {
+    if (useSearch) {
       cfg.tools = [{ googleSearch: {} }];
     }
     return cfg;
@@ -600,7 +605,7 @@ export function buildV2GenAiRequestConfig(params: {
       thinkingLevel: finalLevel,
     };
   }
-  if (params.spec.useSearchGrounding) {
+  if (useSearch) {
     cfg.tools = [{ googleSearch: {} }];
   }
   return cfg;
@@ -806,18 +811,16 @@ export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const primary = spec.serverGeminiModel;
   const raw =
     modelId === 'smfta-v5'
-      ? ['gemini-3.1-flash-lite', 'gemini-flash-lite-latest']
+      ? ['gemini-3.1-flash-lite']
       : modelId === 'smfta-v2-pro'
         ? Array.from(
-            new Set([primary, 'gemini-3-flash-preview', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'])
+            new Set([primary, 'gemini-3.1-flash-lite'])
           )
         : Array.from(
             new Set([
               primary,
               'gemini-4-hydrogen',
-              'gemini-3-flash-preview',
               'gemini-3.1-flash-lite',
-              'gemini-flash-lite-latest',
             ])
           );
   const healthy = raw.filter((m) => !isV2ModelInCooldown(m));
@@ -870,6 +873,7 @@ export async function streamV2FirebaseModel(params: {
     imgs?: Array<{ mime: string; data: string }>;
   }>;
   signal: AbortSignal;
+  webSearch?: boolean;
   thinkingEnabled?: boolean;
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   emitThinking?: (chunk: string) => void;
@@ -952,12 +956,18 @@ export async function streamV2FirebaseModel(params: {
       const onParentAbort = () => candidateCtrl.abort(params.signal.reason);
       params.signal.addEventListener('abort', onParentAbort, { once: true });
 
+      const effectiveAllowTools =
+        allowTools &&
+        (typeof params.webSearch === 'boolean'
+          ? params.webSearch
+          : Boolean(spec.useSearchGrounding));
       const config = buildV2GenAiRequestConfig({
         modelName: candidateModel,
-        spec: allowTools ? spec : { ...spec, useSearchGrounding: false },
+        spec,
         fullSystemInstruction,
         thinkingEnabled: params.thinkingEnabled,
         thinkingEffort: params.thinkingEffort,
+        webSearch: effectiveAllowTools,
       });
       config.abortSignal = candidateCtrl.signal;
 

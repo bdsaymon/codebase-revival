@@ -798,7 +798,7 @@ async function synthesizeServerNeuralFallbackMp3(speechText: string): Promise<Bu
 // ============================================================================
 // 3C-LIVE. PRE-WARMED GEMINI 3.8 LIVE NATIVE AUDIO TTS POOL (gemini-3.8-live)
 // ============================================================================
-// Why: gemini-3.8-flash-lite-tts & gemini-2.5-flash-preview-tts have a strict
+// Why: gemini-3.8-flash-lite-tts & gemini-3.8-flash-tts have a strict
 // 10 requests/day Free Tier generateContent quota, after which they return 429
 // and would fall back to robotic TTS. gemini-3.8-live via ai.live.connect has
 // no 10/day cap, connects in ~33ms, streams the first 24kHz PCM chunk in ~320ms,
@@ -2336,6 +2336,25 @@ Rules:
   ]);
 
   if (llmRes.ok && llmRes.text) {
+    const safeJsonExtract = <T>(raw: string): T | null => {
+      const clean = String(raw || '')
+        .replace(/```(?:json)?/gi, '')
+        .trim();
+      if (!clean) return null;
+      try {
+        return JSON.parse(clean) as T;
+      } catch {
+        const objMatch = clean.match(/\{[\s\S]*\}/);
+        if (objMatch) {
+          try {
+            return JSON.parse(objMatch[0]) as T;
+          } catch {
+            return null;
+          }
+        }
+        return null;
+      }
+    };
     const parsed = safeJsonExtract<{
       title?: string;
       nodes?: Array<{ id?: string; label?: string; note?: string; x?: number; y?: number }>;

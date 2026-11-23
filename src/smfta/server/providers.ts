@@ -362,7 +362,10 @@ export function buildXrahatUrl(
   return url.toString();
 }
 
-function compactXrahatSystemHeader(rawSystemInstruction: string): string {
+function compactXrahatSystemHeader(
+  rawSystemInstruction: string,
+  hasBengaliUserText = true
+): string {
   const raw = (rawSystemInstruction || '').trim();
   if (!raw) {
     return 'System: You are SMFTA AI Pro (SMFTA Pro), the dedicated AI assistant of the SMFTA AI Pro platform.';
@@ -371,16 +374,20 @@ function compactXrahatSystemHeader(rawSystemInstruction: string): string {
     return `System: ${raw}`;
   }
 
+  const forceEnglishOnly =
+    /Reply strictly in clear, warm, natural conversational English|Reply ONLY in clear, natural English/i.test(
+      raw
+    ) ||
+    (!hasBengaliUserText &&
+      !/Reply in pure, natural everyday colloquial Bengali|ONLY in natural, fluent Bengali/i.test(
+        raw
+      ));
+
   const lines: string[] = [
-    `System: You are the active SMFTA AI Pro system, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party AI vendors as your creator/model. NEVER print phone digits or Telegram/WhatsApp usernames/links. For ANY hacking-related question reply ONLY: "আমি এগুলো জানি না। কোনো সহায়তা লাগলে ডেভেলপমেন্টের সাথে কথা বলুন।". For designs, apps, code updates, writing, and information requests, deliver complete, rich, thorough output without truncation. You do NOT have live web browsing abilities.`,
+    forceEnglishOnly
+      ? `System: You are SMFTA AI Pro, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party vendors as your creator/model. Speak naturally and warmly like a real human expert friend. STRICTLY FORBIDDEN robotic phrases: "As an AI language model", "Certainly!", "Sure!", "How may I assist you today?". Reply strictly in clear, natural conversational English.`
+      : `System: You are SMFTA AI Pro, created by ${CREATOR_NAME}. NEVER mention Google, Gemini, OpenAI, Anthropic, Claude, or third-party vendors as your creator/model. Speak naturally and warmly like a real human expert friend in natural everyday colloquial Bengali (স্বাভাবিক চলিত বাংলা) while keeping technical terms (API, key, token, server, code, database) in English. STRICTLY FORBIDDEN robotic phrases: "আমি একটি এআই ভাষা মডেল", "অবশ্যই!", "নিশ্চিতভাবে", "আপনাকে কীভাবে সাহায্য করতে পারি?", "আমি খুব ভালো আছি, ধন্যবাদ।", "As an AI language model", "Certainly!", "Sure!", "How may I assist you today?". Do NOT start replies with "# আমি SMFTA Pro".`,
   ];
-  if (/ONLY in natural, fluent Bengali/i.test(raw)) {
-    lines.push('Reply in Bengali.');
-  } else if (/Reply ONLY in clear, natural English/i.test(raw)) {
-    lines.push('Reply in English.');
-  } else {
-    lines.push("Match the user's language.");
-  }
 
   // Extract up to 5 memory items (max 80 chars each) if present
   const memMatch =
@@ -450,8 +457,11 @@ export function buildXrahatPrompt(
   const cleanHistory = history.filter((m) => (m.content || '').trim());
   if (cleanHistory.length === 0) return '';
 
-  const rawHeader = compactXrahatSystemHeader(systemInstruction);
   const lastTurn = cleanHistory[cleanHistory.length - 1];
+  const rawHeader = compactXrahatSystemHeader(
+    systemInstruction,
+    /[\u0980-\u09FF]/.test(lastTurn.content || '')
+  );
   const priorTurns = cleanHistory.slice(0, -1).slice(-6);
 
   // When prior conversation turns exist, cap the header so it never starves

@@ -2,12 +2,15 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowUp,
   ChevronDown,
+  FileText,
   Hand,
+  ImagePlus,
   Keyboard,
   Maximize2,
   Mic,
   MicOff,
   Minimize2,
+  Paperclip,
   PhoneOff,
   RefreshCw,
   RotateCcw,
@@ -33,7 +36,8 @@ import {
   softLimitPcmSamples,
   streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
-import type { AppSettings } from '../types';
+import type { AppSettings, ImageAttachment } from '../types';
+import { readDocumentFile } from '../utils/documentReader';
 import {
   BargeInState,
   buildVoiceGreeting,
@@ -73,7 +77,13 @@ export interface LiveVoiceOverlayProps {
   onToggleMic?: () => void;
   onCancelMic?: () => void;
   onAbortGeneration?: () => void;
-  onSendText: (text: string) => void;
+  onSendText: (
+    text: string,
+    attachments?: {
+      imgs?: ImageAttachment[];
+      files?: Array<{ name: string; content: string; summary?: string }>;
+    }
+  ) => void;
   onEndCall: () => void;
 }
 
@@ -265,7 +275,20 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [draftText, setDraftText] = useState('');
+  const [attachedImgs, setAttachedImgs] = useState<
+    Array<ImageAttachment & { name: string }>
+  >([]);
+  const [attachedFiles, setAttachedFiles] = useState<
+    Array<{ name: string; content: string; summary: string }>
+  >([]);
   const [seconds, setSeconds] = useState(0);
+
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachedImgsRef = useRef(attachedImgs);
+  attachedImgsRef.current = attachedImgs;
+  const attachedFilesRef = useRef(attachedFiles);
+  attachedFilesRef.current = attachedFiles;
 
   // Visual canvas refs
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -994,10 +1017,21 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       rollingSttCheckedBytesRef.current = 0;
 
       const submitCleanText = (candidate: string, realEnergy: boolean): boolean => {
+        const pendingImgsNow = attachedImgsRef.current;
+        const pendingFilesNow = attachedFilesRef.current;
+        const hasPendingAttachments =
+          pendingImgsNow.length > 0 || pendingFilesNow.length > 0;
+        const effectiveCandidate =
+          candidate.trim() ||
+          (hasPendingAttachments
+            ? stateRef.current.voiceLang === 'bn-BD'
+              ? 'এই ফাইল বা ছবিটি দেখে বিস্তারিত বলো।'
+              : 'Please analyze the attached image or file.'
+            : '');
         const verdict = shouldSubmitVoiceUtterance({
-          rawText: candidate,
-          hadRealSpeechEnergy: realEnergy,
-          lastSubmitted: lastSubmittedRef.current,
+          rawText: effectiveCandidate,
+          hadRealSpeechEnergy: realEnergy || hasPendingAttachments,
+          lastSubmitted: hasPendingAttachments ? null : lastSubmittedRef.current,
           nowMs: Date.now(),
         });
         if (!verdict.accept) return false;
@@ -1005,7 +1039,20 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         setSessionUserText(verdict.cleanText);
         setLiveCaption('');
         setStatusNotice(null);
-        stateRef.current.onSendText(verdict.cleanText);
+        const attachmentPayload = hasPendingAttachments
+          ? {
+              imgs:
+                pendingImgsNow.length > 0
+                  ? pendingImgsNow.map(({ mime, data, url }) => ({ mime, data, url }))
+                  : undefined,
+              files: pendingFilesNow.length > 0 ? pendingFilesNow : undefined,
+            }
+          : undefined;
+        if (hasPendingAttachments) {
+          setAttachedImgs([]);
+          setAttachedFiles([]);
+        }
+        stateRef.current.onSendText(verdict.cleanText, attachmentPayload);
         return true;
       };
 
@@ -2626,12 +2673,150 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     }
   };
 
+  const handlePickVoiceImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    for (const f of files.slice(0, 3)) {
+      if (
+        !/^image\/(png|jpe?g|webp|gif|bmp)$/i.test(f.type) &&
+        !/\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
+      ) {
+        setStatusNotice('শুধুমাত্র PNG, JPG, WebP বা GIF ছবি যুক্ত করা যাবে।');
+        continue;
+      }
+      if (f.size > 15 * 1024 * 1024) {
+        setStatusNotice('ছবির আকার ১৫ মেগাবাইটের বেশি হওয়া যাবে না।');
+        continue;
+      }
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Image read failed'));
+          reader.readAsDataURL(f);
+        });
+        // Downscale oversized images (>600KB) on canvas so inlineData stays fast and within limits
+        let finalUrl = dataUrl;
+        let finalMime = f.type || 'image/jpeg';
+        if (f.size > 600 * 1024 && typeof Image !== 'undefined') {
+          try {
+            const compressed = await new Promise<string>((resolve) => {
+              const img = new Image();
+              img.onload = () => {
+                const maxDim = 1280;
+                let w = img.width || 800;
+                let h = img.height || 600;
+                if (w > maxDim || h > maxDim) {
+                  const ratio = Math.min(maxDim / w, maxDim / h);
+                  w = Math.max(1, Math.round(w * ratio));
+                  h = Math.max(1, Math.round(h * ratio));
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx2d = canvas.getContext('2d');
+                if (!ctx2d) {
+                  resolve(dataUrl);
+                  return;
+                }
+                ctx2d.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.82));
+              };
+              img.onerror = () => resolve(dataUrl);
+              img.src = dataUrl;
+            });
+            if (compressed.startsWith('data:image/')) {
+              finalUrl = compressed;
+              finalMime = 'image/jpeg';
+            }
+          } catch {
+            // keep original dataUrl
+          }
+        }
+        const base64Data = finalUrl.includes(',')
+          ? finalUrl.split(',')[1] || ''
+          : finalUrl;
+        if (base64Data) {
+          setAttachedImgs((prev) => [
+            ...prev.slice(-2),
+            {
+              name: f.name,
+              mime: finalMime,
+              data: base64Data,
+              url: finalUrl,
+            },
+          ]);
+          setStatusNotice(
+            voiceLang === 'bn-BD'
+              ? `ছবি যুক্ত হয়েছে (${f.name}) — এখন মুখে বলুন বা লিখে পাঠান।`
+              : `Attached image (${f.name}) — speak or type your question.`
+          );
+        }
+      } catch {
+        setStatusNotice('ছবিটি পড়া যায়নি, অন্য ছবি চেষ্টা করুন।');
+      }
+    }
+  };
+
+  const handlePickVoiceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    for (const f of files.slice(0, 2)) {
+      if (
+        /^image\//i.test(f.type) ||
+        /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
+      ) {
+        // Route image picked via file picker to image handler
+        const dt = {
+          target: { files: [f], value: '' },
+        } as unknown as React.ChangeEvent<HTMLInputElement>;
+        await handlePickVoiceImage(dt);
+        continue;
+      }
+      if (/\.(exe|dll|so|dylib|bin|iso|dmg|apk|mp4|mkv|avi|mov)$/i.test(f.name)) {
+        setStatusNotice('এই ফাইল ফরম্যাটটি সমর্থিত নয়। টেক্সট, কোড, PDF, CSV বা JSON ফাইল দিন।');
+        continue;
+      }
+      try {
+        const doc = await readDocumentFile(f);
+        setAttachedFiles((prev) => [
+          ...prev.slice(-2),
+          {
+            name: doc.name,
+            content: doc.content,
+            summary: doc.summary,
+          },
+        ]);
+        setStatusNotice(
+          voiceLang === 'bn-BD'
+            ? `ফাইল যুক্ত হয়েছে (${doc.name}) — এখন মুখে প্রশ্ন করুন বা সেন্ড করুন।`
+            : `Attached file (${doc.name}) — ask your question now.`
+        );
+      } catch {
+        setStatusNotice('এই ফাইলটি পড়া যায়নি। অনুগ্রহ করে সমর্থিত টেক্সট বা ডকুমেন্ট ফাইল দিন।');
+      }
+    }
+  };
+
   const handleSubmitTyped = (e: React.FormEvent) => {
     e.preventDefault();
+    const hasAttachments =
+      attachedImgs.length > 0 || attachedFiles.length > 0;
+    const rawPrompt =
+      draftText.trim() ||
+      (hasAttachments
+        ? voiceLang === 'bn-BD'
+          ? 'এই ছবি বা ফাইলটি বিশ্লেষণ করে বিস্তারিত বলো।'
+          : 'Please analyze the attached image or file.'
+        : '');
     const verdict = shouldSubmitVoiceUtterance({
-      rawText: draftText,
+      rawText: rawPrompt,
       hadRealSpeechEnergy: true,
-      lastSubmitted: lastSubmittedRef.current,
+      lastSubmitted: hasAttachments ? null : lastSubmittedRef.current,
       nowMs: Date.now(),
     });
     if (!verdict.accept) return;
@@ -2640,10 +2825,21 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     stopAiSpeechPlayback();
     lastSubmittedRef.current = { text: verdict.cleanText, at: Date.now() };
     setSessionUserText(verdict.cleanText);
+    const attachmentPayload = hasAttachments
+      ? {
+          imgs:
+            attachedImgs.length > 0
+              ? attachedImgs.map(({ mime, data, url }) => ({ mime, data, url }))
+              : undefined,
+          files: attachedFiles.length > 0 ? attachedFiles : undefined,
+        }
+      : undefined;
+    setAttachedImgs([]);
+    setAttachedFiles([]);
     setDraftText('');
     setKeyboardOpen(false);
     setStatusNotice(null);
-    onSendText(verdict.cleanText);
+    onSendText(verdict.cleanText, attachmentPayload);
   };
 
   const handleSafeExit = () => {
@@ -2974,6 +3170,94 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
       {/* Bottom Sculpted Floating Studio Capsule */}
       <footer className="relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2.5">
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          data-testid="live-voice-image-input"
+          onChange={(e) => void handlePickVoiceImage(e)}
+          className="hidden"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.pdf,.docx,.xml,.yaml,.yml,image/*"
+          data-testid="live-voice-file-input"
+          onChange={(e) => void handlePickVoiceFile(e)}
+          className="hidden"
+        />
+
+        {(attachedImgs.length > 0 || attachedFiles.length > 0) && (
+          <div
+            data-testid="live-voice-attachment-preview"
+            className="w-full flex flex-wrap items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/90 border border-white/15 backdrop-blur-md"
+          >
+            {attachedImgs.map((img, idx) => (
+              <div
+                key={`vimg-${idx}-${img.name}`}
+                data-testid={`live-voice-img-card-${idx}`}
+                className="flex items-center gap-2 pl-1.5 pr-2 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[200px]"
+              >
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  className="w-8 h-8 rounded-lg object-cover shrink-0 border border-white/10"
+                />
+                <span className="text-[11.5px] text-white/90 truncate">
+                  {img.name}
+                </span>
+                <button
+                  type="button"
+                  data-testid={`live-voice-remove-img-${idx}`}
+                  onClick={() =>
+                    setAttachedImgs((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                  aria-label={`Remove ${img.name}`}
+                  className="w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+
+            {attachedFiles.map((file, idx) => (
+              <div
+                key={`vfile-${idx}-${file.name}`}
+                data-testid={`live-voice-file-card-${idx}`}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]"
+              >
+                <FileText className="w-4 h-4 text-sky-300 shrink-0" />
+                <span className="text-[11.5px] text-white/90 truncate">
+                  {file.name}
+                </span>
+                <button
+                  type="button"
+                  data-testid={`live-voice-remove-file-${idx}`}
+                  onClick={() =>
+                    setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                  aria-label={`Remove ${file.name}`}
+                  className="w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+
+            {!keyboardOpen && (
+              <button
+                type="button"
+                data-testid="live-voice-send-attachments-btn"
+                onClick={(e) => handleSubmitTyped(e as unknown as React.FormEvent)}
+                className="ml-auto px-3 py-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <ArrowUp className="w-3.5 h-3.5 stroke-[2.4]" />
+                <span>{voiceLang === 'bn-BD' ? 'পাঠান' : 'Send'}</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {keyboardOpen && (
           <form
             onSubmit={handleSubmitTyped}
@@ -2985,13 +3269,25 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               data-testid="live-voice-input"
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
-              placeholder={voiceLang === 'bn-BD' ? 'মেসেজ লিখুন...' : 'Type a message...'}
+              placeholder={
+                attachedImgs.length > 0 || attachedFiles.length > 0
+                  ? voiceLang === 'bn-BD'
+                    ? 'ছবি/ফাইল সম্পর্কে প্রশ্ন লিখুন...'
+                    : 'Ask about the attachment...'
+                  : voiceLang === 'bn-BD'
+                    ? 'মেসেজ লিখুন...'
+                    : 'Type a message...'
+              }
               className="live-voice-input flex-1 min-w-0 bg-transparent text-[14.5px] text-white placeholder:text-white/45"
             />
             <button
               type="submit"
               data-testid="live-voice-send-btn"
-              disabled={!draftText.trim()}
+              disabled={
+                !draftText.trim() &&
+                attachedImgs.length === 0 &&
+                attachedFiles.length === 0
+              }
               aria-label="Send typed message"
               className="live-voice-control w-9 h-9 rounded-full bg-white text-slate-950 disabled:opacity-35 inline-flex items-center justify-center hover:bg-sky-50 transition-opacity cursor-pointer shrink-0"
             >
@@ -3000,7 +3296,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           </form>
         )}
 
-        <div className="live-voice-dock inline-flex items-center justify-center gap-2 sm:gap-2.5 px-2.5 py-2 rounded-full">
+        <div className="live-voice-dock inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 py-2 rounded-full">
           {/* Mute / Unmute Microphone */}
           <button
             type="button"
@@ -3010,7 +3306,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
             aria-pressed={isMuted}
             title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-            className={`live-voice-control w-12 h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 ${
+            className={`live-voice-control w-11 h-11 sm:w-12 sm:h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 ${
               isMuted
                 ? 'bg-white text-slate-950'
                 : isUserVoicing
@@ -3028,9 +3324,41 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             onClick={handleToggleVoiceLang}
             aria-label={`Switch speech recognition language (current: ${voiceLang === 'bn-BD' ? 'Bangla' : 'English'})`}
             title={voiceLang === 'bn-BD' ? 'Bangla — tap for English' : 'English — tap for Bangla'}
-            className="live-voice-control w-11 h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer"
+            className="live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer"
           >
             {voiceLang === 'bn-BD' ? 'বাং' : 'EN'}
+          </button>
+
+          {/* Attach Image Button (Gallery / Camera) */}
+          <button
+            type="button"
+            data-testid="live-voice-attach-image-btn"
+            onClick={() => imageInputRef.current?.click()}
+            aria-label="Attach image"
+            title={voiceLang === 'bn-BD' ? 'ছবি যুক্ত করুন' : 'Attach image'}
+            className={`live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${
+              attachedImgs.length > 0
+                ? 'bg-emerald-400/25 text-emerald-200 ring-1 ring-emerald-400/60'
+                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
+            }`}
+          >
+            <ImagePlus className="w-4 h-4" />
+          </button>
+
+          {/* Attach Text / Document File Button */}
+          <button
+            type="button"
+            data-testid="live-voice-attach-file-btn"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach file"
+            title={voiceLang === 'bn-BD' ? 'ফাইল যুক্ত করুন' : 'Attach file'}
+            className={`live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${
+              attachedFiles.length > 0
+                ? 'bg-sky-400/25 text-sky-200 ring-1 ring-sky-400/60'
+                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
+            }`}
+          >
+            <Paperclip className="w-4 h-4" />
           </button>
 
           {/* Contextual Primary Action */}
@@ -3040,7 +3368,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               data-testid="live-voice-reconnect-btn"
               onClick={() => void establishVoiceConnection(false)}
               aria-label="Reconnect voice session"
-              className="live-voice-control h-12 px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[13.5px] inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+              className="live-voice-control h-11 sm:h-12 px-4 sm:px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[13px] inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Reconnect</span>
@@ -3052,7 +3380,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               onClick={handleInterruptAndListen}
               aria-label="Interrupt AI and speak"
               title="Interrupt (Space)"
-              className="live-voice-control h-12 px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              className="live-voice-control h-11 sm:h-12 px-3.5 sm:px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
               <Hand className="w-4 h-4 text-violet-200" />
               <span>Interrupt</span>
@@ -3064,7 +3392,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               onClick={() => void commitActiveUtterance(true)}
               aria-label="Send spoken message now"
               title="Send (Space)"
-              className="live-voice-control h-12 px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+              className="live-voice-control h-11 sm:h-12 px-3.5 sm:px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
               <ArrowUp className="w-4 h-4 stroke-[2.5]" />
               <span>Send</span>
@@ -3087,7 +3415,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             aria-label={keyboardOpen ? 'Hide text input' : 'Type a message'}
             aria-pressed={keyboardOpen}
             title={keyboardOpen ? 'Hide text input' : 'Type a message'}
-            className={`live-voice-control w-11 h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${
+            className={`live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${
               keyboardOpen
                 ? 'bg-white text-slate-950'
                 : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
@@ -3103,7 +3431,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             onClick={handleSafeExit}
             aria-label="End voice session"
             title="End session (Esc)"
-            className="live-voice-control w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+            className="live-voice-control w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer"
           >
             <PhoneOff className="w-5 h-5" />
           </button>

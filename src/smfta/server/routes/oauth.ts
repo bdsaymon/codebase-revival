@@ -188,8 +188,26 @@ function resolveBaseOrigin(req: Request): string {
   if (appUrl) {
     return appUrl.replace(/\/+$/, '');
   }
-  const host = req.get('host') || 'localhost:3000';
-  const proto = req.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+  const fwdHost = (req.get('x-forwarded-host') || '').split(',')[0]?.trim();
+  const rawHost = fwdHost || req.get('host') || '';
+  const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(rawHost);
+  if (!rawHost || isLocal) {
+    for (const hdr of [req.get('origin'), req.get('referer')]) {
+      if (!hdr) continue;
+      try {
+        const parsed = new URL(hdr);
+        if (!/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(parsed.host)) {
+          return parsed.origin.replace(/\/+$/, '');
+        }
+      } catch {
+        // ignore invalid URL header
+      }
+    }
+  }
+  const host = rawHost || 'localhost:3000';
+  const proto =
+    (req.get('x-forwarded-proto') || '').split(',')[0]?.trim() ||
+    (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
   return `${proto}://${host}`;
 }
 

@@ -172,7 +172,7 @@ export interface MessageFeedback {
   rating: 'up' | 'down';
   reason?: string;
   createdAt?: number;
-  updatedAt: number;
+  updatedAt?: number;
 }
 
 export interface ChatProject {
@@ -565,6 +565,8 @@ export interface AppSettings {
   streamingReveal?: boolean;
   markdownRender?: boolean;
   codeHighlight?: boolean;
+  highlightCode?: boolean;
+  crossChatReference?: boolean;
   autoScroll?: boolean;
   showTimestamps?: boolean;
   showTokenUsage?: boolean;
