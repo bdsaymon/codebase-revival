@@ -224,4 +224,29 @@ describe('Hybrid Voice Input & Editorial Thinking Formatting', () => {
       'এটি দক্ষিণ এশিয়ায় অবস্থিত।',
     ]);
   });
+
+  it('splits long replies into sentence-aligned chunks and applies extended VAD limits', async () => {
+    const { splitTextForSpeech, formatTextForNaturalSpeech } = await import(
+      '../smfta/src/utils/voiceEngine'
+    );
+    const { DEFAULT_VAD_CONFIG } = await import('../smfta/src/utils/voiceSession');
+
+    expect(DEFAULT_VAD_CONFIG.endOfSpeechSilenceMs).toBe(1500);
+    expect(DEFAULT_VAD_CONFIG.maxUtteranceMs).toBe(180000);
+
+    const longReply = 'এটি একটি দীর্ঘ বাংলা বাক্য যা ভয়েসে পড়া হবে। '.repeat(80);
+    expect(formatTextForNaturalSpeech(longReply).length).toBeGreaterThan(2500);
+
+    const ttsChunks = splitTextForSpeech(longReply, 300);
+    expect(ttsChunks.length).toBeGreaterThan(5);
+    for (const chunk of ttsChunks) {
+      expect(chunk.length).toBeLessThanOrEqual(300);
+    }
+
+    const browserChunks = splitTextForSpeech(longReply, 170);
+    expect(browserChunks.length).toBeGreaterThan(ttsChunks.length);
+    for (const chunk of browserChunks) {
+      expect(chunk.length).toBeLessThanOrEqual(170);
+    }
+  });
 });

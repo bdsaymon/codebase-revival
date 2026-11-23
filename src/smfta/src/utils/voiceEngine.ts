@@ -28,7 +28,7 @@ export function detectLanguageSegments(
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 2200);
+    .slice(0, 8000);
 
   if (!clean) return [];
 
@@ -272,7 +272,7 @@ export function shouldPollRollingVoiceTranscript(params: {
 
 export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
 
-export function formatTextForNaturalSpeech(rawText: string, maxChars = 1500): string {
+export function formatTextForNaturalSpeech(rawText: string, maxChars = 8000): string {
   const cleaned = String(rawText || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
     .replace(/<file\b[^>]*>[\s\S]*?<\/file>/gi, ' I have created that file for you. ')
@@ -292,6 +292,38 @@ export function formatTextForNaturalSpeech(rawText: string, maxChars = 1500): st
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.slice(0, maxChars);
+}
+
+/**
+ * Splits long text into short, sentence-aligned pieces so each TTS request / utterance stays
+ * small. Long single utterances get cut off by Gemini TTS and by Chrome's speechSynthesis
+ * (which silently stops after ~15s), so long replies are read piece by piece instead.
+ */
+export function splitTextForSpeech(text: string, maxLen = 300): string[] {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+  const sentences = clean.match(/[^।.?!]+[।.?!]*\s*/g) || [clean];
+  const out: string[] = [];
+  let cur = '';
+  const flush = () => {
+    if (cur.trim()) out.push(cur.trim());
+    cur = '';
+  };
+  for (const sentence of sentences) {
+    let piece = sentence;
+    while (piece.length > maxLen) {
+      const slice = piece.slice(0, maxLen);
+      let cut = Math.max(slice.lastIndexOf(', '), slice.lastIndexOf(' '));
+      if (cut < maxLen * 0.4) cut = maxLen;
+      flush();
+      out.push(piece.slice(0, cut).trim());
+      piece = piece.slice(cut);
+    }
+    if ((cur + piece).length > maxLen) flush();
+    cur += piece;
+  }
+  flush();
+  return out.filter(Boolean);
 }
 
 export function base64ToUint8Array(base64: string): Uint8Array {
@@ -381,7 +413,7 @@ export function extractReadySpeechChunks(
   if (/<think>/i.test(full) && !/<\/think>/i.test(full)) {
     return { chunks: [], nextCursor: alreadyConsumedChars };
   }
-  const cleanFull = formatTextForNaturalSpeech(full, 2400);
+  const cleanFull = formatTextForNaturalSpeech(full, 12000);
   if (cleanFull.length <= alreadyConsumedChars) {
     return { chunks: [], nextCursor: alreadyConsumedChars };
   }
@@ -438,7 +470,8 @@ export async function streamGeminiPcmSpeech(params: {
   voiceName?: GeminiFemaleVoiceName;
   style?: string;
   signal?: AbortSignal;
-  onPcmChunk: (samples: Float32Array, sampleRate: number) => void;
+  onPcmChunk?: (samples: Float32Array, sampleRate: number) => void;
+  onPcmSamples?: (samples: Float32Array, sampleRate: number) => void;
   fetchImpl?: typeof fetch;
 }): Promise<{
   ok: boolean;
@@ -451,7 +484,12 @@ export async function streamGeminiPcmSpeech(params: {
   if (!cleanText) {
     return { ok: false, receivedAudio: false, error: 'Empty speech text.' };
   }
+  const onChunk = params.onPcmChunk || params.onPcmSamples;
+  if (typeof onChunk !== 'function') {
+    return { ok: false, receivedAudio: false, error: 'Missing onPcmChunk callback.' };
+  }
   const fetcher = params.fetchImpl || fetch;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
     const res = await fetcher('/api/voice/tts-stream', {
       method: 'POST',
@@ -481,7 +519,7 @@ export async function streamGeminiPcmSpeech(params: {
     }
 
     const sampleRate = Number(res.headers.get('X-Voice-Sample-Rate')) || 24000;
-    const reader = res.body.getReader();
+    reader = res.body.getReader();
     const MIN_FRAME_BYTES = 4800; // ~100ms at 24kHz 16-bit mono PCM for click-free playback
     let pendingBytes: Uint8Array = new Uint8Array(0);
     let checkedHeader = false;
@@ -497,7 +535,7 @@ export async function streamGeminiPcmSpeech(params: {
         float32[i] = view.getInt16(i * 2, true) / 32768;
       }
       receivedAudio = true;
-      params.onPcmChunk(float32, sampleRate);
+      onChunk(float32, sampleRate);
       return buf.byteLength > evenBytes ? buf.slice(evenBytes) : new Uint8Array(0);
     };
 
@@ -542,6 +580,9 @@ export async function streamGeminiPcmSpeech(params: {
 
     return { ok: receivedAudio, receivedAudio };
   } catch (err) {
+    if (reader) {
+      void reader.cancel().catch(() => {});
+    }
     return {
       ok: false,
       receivedAudio: false,
@@ -593,6 +634,28 @@ class BilingualSpeechPlayer {
     }
     if (this.activeAudio) {
       try {
+        this.activeAudio.pause();
+        this.activeAudio.src = '';
+      } catch {
+        // Ignore cleanup errors
+      }
+      this.activeAudio = null;
+    }
+    if (this.activeBlobUrl) {
+      try {
+        URL.revokeObjectURL(this.activeBlobUrl);
+      } catch {
+        // Ignore revoke errors
+      }
+      this.activeBlobUrl = null;
+    }
+  }
+
+  private releaseAudioOnly(): void {
+    if (this.activeAudio) {
+      try {
+        this.activeAudio.onended = null;
+        this.activeAudio.onerror = null;
         this.activeAudio.pause();
         this.activeAudio.src = '';
       } catch {
@@ -688,7 +751,7 @@ class BilingualSpeechPlayer {
     const rate = Math.min(2.0, Math.max(0.5, params.rate || 1.0));
     this.emit('speaking');
 
-    const runBrowserFallback = () => {
+    const runBrowserFallback = (fromText: string = cleanText) => {
       if (this.cancelled || !isSpeechSynthesisSupported()) {
         if (!this.cancelled) {
           this.currentMsgId = null;
@@ -703,7 +766,9 @@ class BilingualSpeechPlayer {
         params.preferredLang === 'en-US' || params.voiceProfile?.startsWith('english')
           ? 'en-US'
           : 'bn-BD';
-      const segments = detectLanguageSegments(cleanText, defaultSegLang);
+      const segments = detectLanguageSegments(fromText, defaultSegLang).flatMap((seg) =>
+        splitTextForSpeech(seg.text, 170).map((piece) => ({ lang: seg.lang, text: piece }))
+      );
       if (segments.length === 0) {
         this.stop();
         params.onDone?.();
@@ -788,51 +853,70 @@ class BilingualSpeechPlayer {
             ? 'Zephyr'
             : 'Kore');
 
-      void requestGeminiFemaleSpeech({
-        text: cleanText,
-        voiceName: chosenVoice,
-        signal: ctrl.signal,
-      }).then((ttsRes) => {
-        if (this.cancelled || ctrl.signal.aborted) return;
-        if (!ttsRes.ok || !ttsRes.audioBase64) {
-          runBrowserFallback();
-          return;
-        }
-        try {
-          const bytes = base64ToUint8Array(ttsRes.audioBase64);
-          const blob = new Blob([bytes.buffer as ArrayBuffer], {
-            type: ttsRes.mimeType || 'audio/wav',
-          });
-          const url = URL.createObjectURL(blob);
-          this.activeBlobUrl = url;
-          const audio = new Audio(url);
-          audio.playbackRate = rate;
-          this.activeAudio = audio;
-          audio.onended = () => {
-            if (!this.cancelled) {
-              this.cleanupAudioElement();
-              this.currentMsgId = null;
-              this.paused = false;
-              this.emit('idle');
-              params.onDone?.();
-            }
-          };
-          audio.onerror = () => {
-            if (!this.cancelled) {
-              this.cleanupAudioElement();
-              runBrowserFallback();
-            }
-          };
-          void audio.play().catch(() => {
-            if (!this.cancelled) {
-              this.cleanupAudioElement();
-              runBrowserFallback();
-            }
-          });
-        } catch {
-          runBrowserFallback();
-        }
-      });
+      const chunks = splitTextForSpeech(cleanText, 300);
+      const fetchChunk = (i: number) =>
+        requestGeminiFemaleSpeech({
+          text: chunks[i] || '',
+          voiceName: chosenVoice,
+          signal: ctrl.signal,
+        });
+      const finishAll = () => {
+        this.cleanupAudioElement();
+        this.currentMsgId = null;
+        this.paused = false;
+        this.emit('idle');
+        params.onDone?.();
+      };
+      const playIndex = (i: number, pending: ReturnType<typeof fetchChunk>) => {
+        void pending.then((ttsRes) => {
+          if (this.cancelled || ctrl.signal.aborted) return;
+          if (!ttsRes.ok || !ttsRes.audioBase64) {
+            this.releaseAudioOnly();
+            runBrowserFallback(chunks.slice(i).join(' '));
+            return;
+          }
+          // Prefetch the next piece while this one plays, so reading never pauses between pieces
+          const upcoming = i + 1 < chunks.length ? fetchChunk(i + 1) : null;
+          try {
+            const bytes = base64ToUint8Array(ttsRes.audioBase64);
+            const blob = new Blob([bytes.buffer as ArrayBuffer], {
+              type: ttsRes.mimeType || 'audio/wav',
+            });
+            const url = URL.createObjectURL(blob);
+            this.releaseAudioOnly();
+            this.activeBlobUrl = url;
+            const audio = new Audio(url);
+            audio.playbackRate = rate;
+            this.activeAudio = audio;
+            audio.onended = () => {
+              if (this.cancelled) return;
+              if (upcoming) {
+                playIndex(i + 1, upcoming);
+                return;
+              }
+              finishAll();
+            };
+            audio.onerror = () => {
+              if (this.cancelled) return;
+              this.releaseAudioOnly();
+              runBrowserFallback(chunks.slice(i).join(' '));
+            };
+            void audio.play().catch(() => {
+              if (!this.cancelled) {
+                this.releaseAudioOnly();
+                runBrowserFallback(chunks.slice(i).join(' '));
+              }
+            });
+          } catch {
+            runBrowserFallback(chunks.slice(i).join(' '));
+          }
+        });
+      };
+      if (chunks.length === 0) {
+        finishAll();
+        return;
+      }
+      playIndex(0, fetchChunk(0));
       return;
     }
 

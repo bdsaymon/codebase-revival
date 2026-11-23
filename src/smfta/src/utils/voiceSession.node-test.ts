@@ -78,9 +78,9 @@ describe('voiceSession pure state & VAD logic', () => {
     assert.equal(sawSpeechStart, true);
     assert.equal(vad.speechConfirmed, true);
 
-    // 800ms trailing silence -> should auto-commit swiftly (~740ms)
+    // 1550ms trailing silence -> should auto-commit cleanly (~1500ms)
     const speechEnd = t;
-    for (let i = 0; i < 20; i += 1) {
+    for (let i = 0; i < 40; i += 1) {
       t += 50;
       const res = stepVadTracker(vad, 0.003, t, DEFAULT_VAD_CONFIG);
       vad = res.nextState;
@@ -89,7 +89,7 @@ describe('voiceSession pure state & VAD logic', () => {
         break;
       }
     }
-    assert.ok(committedAt >= 700 && committedAt <= 850, `expected crisp commit ~740ms, got ${committedAt}ms`);
+    assert.ok(committedAt >= 1450 && committedAt <= 1600, `expected crisp commit ~1500ms, got ${committedAt}ms`);
   });
 
   it('detects real speech and auto-commits cleanly after end-of-speech silence', () => {
@@ -108,8 +108,8 @@ describe('voiceSession pure state & VAD logic', () => {
     assert.equal(sawSpeechStart, true);
     assert.equal(vad.speechConfirmed, true);
 
-    // 1.3s of trailing silence -> should commit once
-    for (let i = 0; i < 26; i += 1) {
+    // 1.7s of trailing silence -> should commit once after 1500ms
+    for (let i = 0; i < 34; i += 1) {
       t += 50;
       const res = stepVadTracker(vad, 0.008, t, DEFAULT_VAD_CONFIG);
       vad = res.nextState;

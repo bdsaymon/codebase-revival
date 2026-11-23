@@ -26,6 +26,7 @@ import {
   requestGeminiFemaleSpeech,
   requestServerVoiceTranscription,
   resolveRecognitionLanguage,
+  streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
 import {
   BargeInState,
@@ -594,7 +595,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             const resultsLen = e?.results?.length ?? 0;
             const latestIsFinal =
               resultsLen > 0 && Boolean(e?.results?.[resultsLen - 1]?.isFinal);
-            const commitDelayMs = latestIsFinal ? 460 : 840;
+            const commitDelayMs = latestIsFinal ? 1300 : 2200;
             speechRecCommitTimerRef.current = window.setTimeout(() => {
               speechRecCommitTimerRef.current = null;
               if (
@@ -793,7 +794,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                     ) {
                       void commitActiveUtteranceRef.current(false);
                     }
-                  }, 360);
+                  }, 1200);
                 } else if (chunkCount >= 28 && !vadStateRef.current.isVoiceActive) {
                   // Trim old silent buffer so subsequent speech is transcribed crisply
                   turnChunksRef.current = turnChunksRef.current.slice(-4);
@@ -1059,6 +1060,77 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     [ensurePlaybackAnalyser, scheduleAutoListenAfterSpeech]
   );
 
+  const schedulePcmSamples = useCallback(
+    (
+      ctx: AudioContext,
+      samples: Float32Array,
+      sampleRate: number,
+      ctrl: AbortController | null | undefined,
+      runId: number
+    ) => {
+      if (
+        ctrl?.signal.aborted ||
+        runId !== pipelineRunIdRef.current ||
+        samples.length === 0
+      ) {
+        return;
+      }
+      bilingualSpeechPlayer.stop();
+      const analyser = ensurePlaybackAnalyser(ctx);
+      const audioBuffer = ctx.createBuffer(1, samples.length, sampleRate);
+      audioBuffer.copyToChannel(new Float32Array(samples), 0);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(analyser);
+
+      const now = ctx.currentTime;
+      const startAt = Math.max(now + 0.015, nextPlayTimeRef.current);
+      nextPlayTimeRef.current = startAt + audioBuffer.duration;
+
+      if (activeSourcesRef.current.size === 0) {
+        aiSpeakingStartedAtRef.current = Date.now();
+        bargeInStateRef.current = createBargeInState();
+      }
+      activeSourcesRef.current.add(source);
+      playbackSourceRef.current = source;
+      pendingAudioBufferRef.current = null;
+      setNeedsTapToPlay(false);
+      setIsSynthesizingVoice(false);
+      setIsAiSpeaking(true);
+
+      let settled = false;
+      const finishSource = () => {
+        if (settled) return;
+        settled = true;
+        playbackSafetyTimersRef.current.delete(safetyTimerId);
+        activeSourcesRef.current.delete(source);
+        if (playbackSourceRef.current === source) {
+          playbackSourceRef.current = null;
+        }
+        scheduleAutoListenAfterSpeech(ctrl);
+      };
+
+      const waitMs =
+        Math.max(0, Math.ceil((startAt - now + audioBuffer.duration) * 1000)) + 450;
+      const safetyTimerId = window.setTimeout(finishSource, waitMs);
+      playbackSafetyTimersRef.current.add(safetyTimerId);
+
+      source.onended = () => {
+        window.clearTimeout(safetyTimerId);
+        finishSource();
+      };
+
+      try {
+        source.start(startAt);
+      } catch {
+        window.clearTimeout(safetyTimerId);
+        finishSource();
+      }
+    },
+    [ensurePlaybackAnalyser, scheduleAutoListenAfterSpeech]
+  );
+
   const speakSentenceViaBrowser = useCallback(
     (
       text: string,
@@ -1102,11 +1174,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           !ctrl.signal.aborted &&
           runId === pipelineRunIdRef.current
         ) {
-          // Coalesce queued chunks up to 420 chars so each reply uses ONE unified voice call
+          // Coalesce queued chunks up to 380 chars so each utterance streams with one natural voice cadence
           let sentence = (pendingChunksRef.current.shift() || '').trim();
           while (
             pendingChunksRef.current.length > 0 &&
-            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 420
+            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 380
           ) {
             const nextPart = (pendingChunksRef.current.shift() || '').trim();
             if (nextPart) {
@@ -1135,7 +1207,24 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           }
           if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
 
-          // Single deterministic neural voice endpoint (/api/voice/tts: Gemini TTS + Single-Voice Neural HD MP3)
+          // 1. Primary ultra-low-latency 24kHz PCM stream from Gemini 3.8 Live Native Audio (~320ms first chunk)
+          if (ctx && (ctx.state as string) !== 'suspended') {
+            const streamRes = await streamGeminiPcmSpeech({
+              text: sentence,
+              voiceName: voice,
+              style: voiceStyle,
+              signal: ctrl.signal,
+              onPcmChunk: (samples, sampleRate) => {
+                schedulePcmSamples(ctx, samples, sampleRate, ctrl, runId);
+              },
+            });
+            if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
+            if (streamRes.ok && streamRes.receivedAudio) {
+              continue;
+            }
+          }
+
+          // 2. Unary neural audio endpoint (/api/voice/tts: Gemini 3.8 Live WAV -> Gemini TTS)
           const res = await requestGeminiFemaleSpeech({
             text: sentence,
             voiceName: voice,
@@ -1145,8 +1234,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
 
           if (!res.ok || !res.audioBase64) {
-            // Only fall back to device synthesis if no WebAudio source is active and device is offline
+            // Only fall back to device synthesis if device is strictly offline
             if (
+              stateRef.current.isOffline &&
               !/abort/i.test(res.error || '') &&
               activeSourcesRef.current.size === 0 &&
               isSpeechSynthesisSupported()
@@ -1182,6 +1272,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             await startDecodedBufferPlayback(activeCtx, audioBuffer, ctrl, detuneCents);
           } catch {
             if (
+              stateRef.current.isOffline &&
               !ctrl.signal.aborted &&
               runId === pipelineRunIdRef.current &&
               activeSourcesRef.current.size === 0 &&
@@ -1209,6 +1300,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     [
       ensureAudioContext,
       scheduleAutoListenAfterSpeech,
+      schedulePcmSamples,
       speakSentenceViaBrowser,
       startDecodedBufferPlayback,
     ]

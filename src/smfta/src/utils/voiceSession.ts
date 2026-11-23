@@ -53,8 +53,8 @@ export const DEFAULT_VAD_CONFIG: VadConfig = {
   minSpeechThreshold: 0.0075,
   releaseRatio: 0.58,
   minSpeechDurationMs: 150,
-  endOfSpeechSilenceMs: 740,
-  maxUtteranceMs: 20000,
+  endOfSpeechSilenceMs: 1500,
+  maxUtteranceMs: 180000,
 };
 
 export interface VadTrackerState {
