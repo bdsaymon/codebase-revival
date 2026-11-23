@@ -236,6 +236,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const playbackAnalyserRef = useRef<AnalyserNode | null>(null);
   const nextPlayTimeRef = useRef<number>(0);
   const pendingAudioBufferRef = useRef<AudioBuffer | null>(null);
+  // True when the pipeline stopped because the AudioContext is suspended and the
+  // user must tap to enable audio — keeps the pipeline from re-queueing and losing
+  // chunks already decoded for playback.
+  const suspendedForTapRef = useRef<boolean>(false);
+  const tapResumePendingRef = useRef<boolean>(false);
   const ttsAbortRef = useRef<AbortController | null>(null);
   const pendingChunksRef = useRef<string[]>([]);
   const pipelineBusyRef = useRef<boolean>(false);
@@ -505,6 +510,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       // Ignore speechSynthesis cancel errors
     }
     pendingAudioBufferRef.current = null;
+    suspendedForTapRef.current = false;
+    tapResumePendingRef.current = false;
     setNeedsTapToPlay(false);
     setIsSynthesizingVoice(false);
     setIsAiSpeaking(false);
@@ -1168,6 +1175,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
             if ((activeCtx.state as string) === 'suspended') {
               pendingAudioBufferRef.current = audioBuffer;
+              suspendedForTapRef.current = true;
               setNeedsTapToPlay(true);
               break;
             }
@@ -1194,15 +1202,29 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       } finally {
         if (runId === pipelineRunIdRef.current) {
           pipelineBusyRef.current = false;
-          if (
-            pendingChunksRef.current.length > 0 &&
-            ttsAbortRef.current &&
-            !ttsAbortRef.current.signal.aborted
-          ) {
-            void drainSpeechPipeline(msgId);
-          } else {
-            scheduleAutoListenAfterSpeech(ctrl);
+          if (suspendedForTapRef.current) {
+            // Leave the decoded buffer pending; the tap-to-enable button resumes
+            // the pipeline so nothing is lost or double-spoken.
+            suspendedForTapRef.current = false;
+            setIsSynthesizingVoice(false);
+            setIsAiSpeaking(false);
+            tapResumePendingRef.current = true;
           }
+        }
+      }
+      // After the try/finally: exit silently when waiting on tap-to-play instead
+      // of draining the queue (which would lose the pending decoded buffer).
+      if (tapResumePendingRef.current) return;
+
+      if (runId === pipelineRunIdRef.current) {
+        if (
+          pendingChunksRef.current.length > 0 &&
+          ttsAbortRef.current &&
+          !ttsAbortRef.current.signal.aborted
+        ) {
+          void drainSpeechPipeline(msgId);
+        } else {
+          scheduleAutoListenAfterSpeech(ctrl);
         }
       }
     },
@@ -2511,8 +2533,21 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               const ctx = ensureAudioContext();
               const buf = pendingAudioBufferRef.current;
               if (!ctx || !buf) return;
+              suspendedForTapRef.current = false;
+              tapResumePendingRef.current = false;
               void ctx.resume().then(() => {
-                startDecodedBufferPlayback(ctx, buf, ttsAbortRef.current);
+                void startDecodedBufferPlayback(ctx, buf, ttsAbortRef.current).then(() => {
+                  setNeedsTapToPlay(false);
+                  if (
+                    pendingChunksRef.current.length > 0 &&
+                    ttsAbortRef.current &&
+                    !ttsAbortRef.current.signal.aborted
+                  ) {
+                    void drainSpeechPipeline('tap-resume');
+                  } else {
+                    scheduleAutoListenAfterSpeech(ttsAbortRef.current);
+                  }
+                });
               });
             }}
             className="live-voice-control mt-2.5 inline-flex items-center gap-2 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-semibold px-5 h-10 text-[12.5px] cursor-pointer transition-colors"

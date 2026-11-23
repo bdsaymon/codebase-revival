@@ -571,12 +571,30 @@ class BilingualSpeechPlayer {
   private activeAbort: AbortController | null = null;
   private activeBlobUrl: string | null = null;
   private onStateChange: ((state: SpeechControllerState) => void) | null = null;
+  private pendingOnDone: (() => void) | null = null;
 
   public subscribe(cb: (state: SpeechControllerState) => void): () => void {
     this.onStateChange = cb;
     return () => {
       if (this.onStateChange === cb) this.onStateChange = null;
     };
+  }
+
+  /**
+   * Resolves exactly once for whichever utterance is currently pending and clears
+   * the reference so a later stop/interrupt can never double-resolve.
+   */
+  private settleCompletion(): void {
+    const cb = this.pendingOnDone;
+    this.pendingOnDone = null;
+    if (cb) cb();
+  }
+
+  /** Resolves the stale pending completion from a previous utterance (interrupt). */
+  private resolveStaleCompletion(): void {
+    const cb = this.pendingOnDone;
+    this.pendingOnDone = null;
+    if (cb) cb();
   }
 
   private emit(status: 'idle' | 'speaking' | 'paused') {
@@ -616,9 +634,14 @@ class BilingualSpeechPlayer {
     this.currentMsgId = null;
     this.cleanupAudioElement();
     if (isSpeechSynthesisSupported()) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // Ignore cancel errors; the caller's completion must never hang
+      }
     }
     this.emit('idle');
+    this.settleCompletion();
   }
 
   public pause(): void {
@@ -676,6 +699,10 @@ class BilingualSpeechPlayer {
       return;
     }
 
+    // Resolve any stale outstanding completion from the previous speech so
+    // promise waiters never hang after interrupts or re-triggers.
+    this.resolveStaleCompletion();
+
     this.cleanupAudioElement();
     if (isSpeechSynthesisSupported()) {
       window.speechSynthesis.cancel();
@@ -686,6 +713,7 @@ class BilingualSpeechPlayer {
 
     const wantMale = params.voiceProfile?.endsWith('male');
     const rate = Math.min(2.0, Math.max(0.5, params.rate || 1.0));
+    this.pendingOnDone = params.onDone || null;
     this.emit('speaking');
 
     const runBrowserFallback = () => {
@@ -694,7 +722,7 @@ class BilingualSpeechPlayer {
           this.currentMsgId = null;
           this.paused = false;
           this.emit('idle');
-          params.onDone?.();
+          this.settleCompletion();
         }
         return;
       }
@@ -706,7 +734,6 @@ class BilingualSpeechPlayer {
       const segments = detectLanguageSegments(cleanText, defaultSegLang);
       if (segments.length === 0) {
         this.stop();
-        params.onDone?.();
         return;
       }
 
@@ -742,7 +769,7 @@ class BilingualSpeechPlayer {
             this.currentMsgId = null;
             this.paused = false;
             this.emit('idle');
-            params.onDone?.();
+            this.settleCompletion();
           }
           return;
         }
@@ -814,7 +841,7 @@ class BilingualSpeechPlayer {
               this.currentMsgId = null;
               this.paused = false;
               this.emit('idle');
-              params.onDone?.();
+              this.settleCompletion();
             }
           };
           audio.onerror = () => {
