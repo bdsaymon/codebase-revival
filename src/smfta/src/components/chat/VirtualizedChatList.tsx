@@ -42,6 +42,9 @@ export interface VirtualizedChatListProps {
   ) => void | Promise<void>;
   onRetryMessage: (messageId: string) => void;
   onToast: (msg: string) => void;
+  speakingMsgId?: string | null;
+  speechBackupActive?: boolean;
+  onToggleSpeak?: (message: ChatMessage) => void;
 }
 
 export const VirtualizedChatList: React.FC<VirtualizedChatListProps> = ({
@@ -66,6 +69,9 @@ export const VirtualizedChatList: React.FC<VirtualizedChatListProps> = ({
   onSubmitFeedback,
   onRetryMessage,
   onToast,
+  speakingMsgId = null,
+  speechBackupActive = false,
+  onToggleSpeak,
 }) => {
   const latestAiMsgId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -134,6 +140,9 @@ export const VirtualizedChatList: React.FC<VirtualizedChatListProps> = ({
               onSubmitFeedback={onSubmitFeedback}
               onRetryMessage={onRetryMessage}
               onToast={onToast}
+              isSpeaking={speakingMsgId === m.id}
+              isBackupVoice={Boolean(speechBackupActive && speakingMsgId === m.id)}
+              onToggleSpeak={onToggleSpeak}
             />
           );
         })}
@@ -241,6 +250,9 @@ export const VirtualizedChatList: React.FC<VirtualizedChatListProps> = ({
                   onSubmitFeedback={onSubmitFeedback}
                   onRetryMessage={onRetryMessage}
                   onToast={onToast}
+                  isSpeaking={speakingMsgId === m.id}
+                  isBackupVoice={Boolean(speechBackupActive && speakingMsgId === m.id)}
+                  onToggleSpeak={onToggleSpeak}
                 />
               );
             })()}

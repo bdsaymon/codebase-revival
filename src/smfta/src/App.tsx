@@ -133,6 +133,8 @@ import {
   resolveActiveProfile,
   resolveModelForSlot,
   SAVED_PROFILES_KEY,
+  formatProviderErrorBn,
+  validateGeminiApiKeyFormat,
 } from './utils/providers';
 import {
   decryptSecret,
@@ -398,6 +400,7 @@ import {
   pickSupportedAudioMimeType,
   requestServerVoiceTranscription,
   resolveRecognitionLanguage,
+  resolveTtsVoicePersona,
   shouldPollRollingVoiceTranscript,
   VoiceLangMode,
 } from './utils/voiceEngine';
@@ -480,17 +483,39 @@ export default function App() {
         const ks = await ensureKeystore();
         setKeystoreEphemeral(ks.ephemeral || !ks.available);
         if (sealedSettingsKey && isEncrypted(sealedSettingsKey)) {
-          const plain = await decryptSecret(sealedSettingsKey);
-          if (!cancelled && plain) {
-            setSettings((s) =>
-              s.externalKeys === sealedSettingsKey
-                ? { ...s, externalKeys: plain }
-                : s
-            );
+          try {
+            const plain = await decryptSecret(sealedSettingsKey);
+            if (!cancelled && plain) {
+              setSettings((s) =>
+                s.externalKeys === sealedSettingsKey
+                  ? { ...s, externalKeys: plain }
+                  : s
+              );
+            }
+          } catch {
+            if (!cancelled) {
+              const targetLabel =
+                settings.displayName || settings.provider || 'Saved Key';
+              setDecryptionAlertProfileName(targetLabel);
+              setProviderTestStatus({
+                ok: false,
+                message: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+                testedAt: Date.now(),
+                provider: settings.provider,
+              });
+              showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+            }
           }
         }
         const profiles = await hydrateSavedProfiles();
-        if (!cancelled && profiles.length > 0) setSavedProfiles(profiles);
+        if (!cancelled && profiles.length > 0) {
+          setSavedProfiles(profiles);
+          const failedProf = profiles.find((p) => p.decryptionFailed);
+          if (failedProf) {
+            setDecryptionAlertProfileName(failedProf.name || failedProf.provider);
+            showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+          }
+        }
         const [loadedMcp, loadedDb, loadedKb] = await Promise.all([
           loadMcpServers().catch(() => []),
           loadDbConnections().catch(() => []),
@@ -502,8 +527,10 @@ export default function App() {
           setKnowledgeDocs(loadedKb);
         }
       } catch {
-        // A failed unseal degrades to keyless mode; it must never crash boot.
-        if (!cancelled) setKeystoreEphemeral(true);
+        if (!cancelled) {
+          setKeystoreEphemeral(true);
+          showToast('সিকিউর কী-স্টোর খুলতে সমস্যা হয়েছে, প্রয়োজনে কী আবার দিন', 5000);
+        }
       }
     })();
     return () => {
@@ -770,6 +797,9 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [speechState, setSpeechState] = useState<'idle' | 'speaking' | 'paused'>('idle');
+  const [speechBackupActive, setSpeechBackupActive] = useState(false);
+  const [decryptionAlertProfileName, setDecryptionAlertProfileName] = useState<string | null>(null);
+  const backupNoticeMsgRef = useRef<string | null>(null);
   const [voiceLangMode, setVoiceLangMode] = useState<VoiceLangMode>('auto');
   const [voiceLiveText, setVoiceLiveText] = useState('');
   const [voiceActivityAt, setVoiceActivityAt] = useState(0);
@@ -901,6 +931,14 @@ export default function App() {
     const unsubSpeech = bilingualSpeechPlayer.subscribe((st) => {
       setSpeechState(st.status);
       setSpeakingMsgId(st.msgId);
+      const backupOn = Boolean(st.isBackupVoice && st.status === 'speaking');
+      setSpeechBackupActive(backupOn);
+      if (backupOn && st.msgId && backupNoticeMsgRef.current !== st.msgId) {
+        backupNoticeMsgRef.current = st.msgId;
+        showToast('ব্যাকআপ ভয়েস চলছে', 3000);
+      } else if (st.status === 'idle') {
+        backupNoticeMsgRef.current = null;
+      }
     });
     return () => unsubSpeech();
   }, []);
@@ -2890,11 +2928,18 @@ export default function App() {
       onDone?.();
       return;
     }
+    const { cleanResponse } = extractThinkingAndResponse(text || '');
+    const spokenText = stripContactTokensForText(cleanResponse || text || '').trim();
+    if (!spokenText) {
+      onDone?.();
+      return;
+    }
     bilingualSpeechPlayer.speak({
-      text,
+      text: spokenText,
       msgId,
       preferredLang: voiceLangMode,
       voiceProfile: settings.ttsVoice,
+      geminiVoice: resolveTtsVoicePersona(settings.ttsVoice),
       rate: settings.voiceSpeed || 1.0,
       onDone,
     });
@@ -3840,9 +3885,77 @@ export default function App() {
       : profileSnapshot.externalKeys?.trim() ||
         settings.externalKeys?.trim() ||
         '';
-    const effectiveExternalKeys = isEncrypted(rawEffectiveKeys)
-      ? await decryptSecret(rawEffectiveKeys).catch(() => '')
-      : rawEffectiveKeys;
+    let effectiveExternalKeys = rawEffectiveKeys;
+    if (!isDefaultUnlimitedProfile && profileSnapshot?.decryptionFailed) {
+      window.clearTimeout(phaseFallback);
+      window.clearTimeout(timeoutId);
+      setDecryptionAlertProfileName(profileSnapshot.name || activeProvider);
+      setProviderLimitBanner({
+        profileName: profileSnapshot.name || activeProvider,
+        profileId: profileSnapshot.id,
+        message: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+      });
+      showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+      setIsGenerating(false);
+      setIsWaitingFirstToken(false);
+      setGenPhase(null);
+      return;
+    }
+    if (isEncrypted(rawEffectiveKeys)) {
+      try {
+        effectiveExternalKeys = await decryptSecret(rawEffectiveKeys);
+      } catch {
+        window.clearTimeout(phaseFallback);
+        window.clearTimeout(timeoutId);
+        const failName = profileSnapshot?.name || activeProvider;
+        setDecryptionAlertProfileName(failName);
+        if (profileSnapshot?.id) {
+          setSavedProfiles((prev) =>
+            prev.map((p) =>
+              p.id === profileSnapshot.id
+                ? {
+                    ...p,
+                    decryptionFailed: true,
+                    verificationStatus: 'failed' as const,
+                    statusMessage: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+                  }
+                : p
+            )
+          );
+        }
+        setProviderLimitBanner({
+          profileName: failName,
+          profileId: profileSnapshot?.id,
+          message: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+        });
+        showToast('সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন', 5500);
+        setIsGenerating(false);
+        setIsWaitingFirstToken(false);
+        setGenPhase(null);
+        return;
+      }
+    }
+    if (
+      (activeProvider === 'gemini_openai' || activeProvider === 'gemini_custom') &&
+      effectiveExternalKeys
+    ) {
+      const keyFmt = validateGeminiApiKeyFormat(effectiveExternalKeys);
+      if (!keyFmt.valid) {
+        window.clearTimeout(phaseFallback);
+        window.clearTimeout(timeoutId);
+        const errMsg = keyFmt.error || 'Gemini API Key সাধারণত AIza দিয়ে শুরু হয়।';
+        setProviderLimitBanner({
+          profileName: profileSnapshot?.name || activeProvider,
+          profileId: profileSnapshot?.id,
+          message: errMsg,
+        });
+        showToast(errMsg, 5500);
+        setIsGenerating(false);
+        setIsWaitingFirstToken(false);
+        setGenPhase(null);
+        return;
+      }
+    }
     const effectiveExternalBaseUrl = isDefaultUnlimitedProfile
       ? ''
       : profileSnapshot.externalBaseUrl?.trim() ||
@@ -4177,8 +4290,14 @@ export default function App() {
         targetSession?.incognito || settings.conversationPrivacyMode
       );
 
-      const liveVoiceDirective =
-        'LIVE VOICE MODE: Respond immediately in natural, warm, spoken conversational language (1 to 3 concise sentences, plain spoken text with no markdown bullets or headings unless explicitly requested) so your answer sounds instant and human when spoken aloud.';
+      const wantsDetailedVoiceReply =
+        isLiveVoiceTurn &&
+        /\b(detail|detailed|details|elaborate|explain|full|complete|step\s*by\s*step)\b|(?:বিস্তারিত|ডিটেইল|পুরো|সম্পূর্ণ|ব্যাখ্যা)/i.test(
+          lastUserPrompt
+        );
+      const liveVoiceDirective = wantsDetailedVoiceReply
+        ? 'LIVE VOICE MODE (DETAILED): Speak clearly in natural warm Bengali or English, covering every key point in clear spoken paragraphs without markdown tables or raw code fences unless requested.'
+        : 'LIVE VOICE MODE: Respond immediately in natural, warm, spoken conversational language (2 to 4 concise sentences, plain spoken text with no markdown bullets or headings unless explicitly requested) so your answer sounds instant and human when spoken aloud.';
       const effectiveGlobalInstructions = isLiveVoiceTurn
         ? [liveVoiceDirective, settings.globalInstructions || settings.customInst || '']
             .filter(Boolean)
@@ -4239,7 +4358,9 @@ export default function App() {
         supportsStreaming: profileSnapshot.supportsStreaming !== false,
         allowKeylessFallback: Boolean(settings.allowKeylessFallback),
         maxOutputTokens: isLiveVoiceTurn
-          ? Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1024, 380)
+          ? wantsDetailedVoiceReply
+            ? Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1400, 1400)
+            : Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1024, 380)
           : profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens,
         contextWindow: profileSnapshot.contextWindow,
         weightTemp: settings.weightTemp ?? 0.7,
@@ -5396,27 +5517,27 @@ export default function App() {
         const isTrueQuotaExhausted = errCode === 'QUOTA_EXHAUSTED';
         const isRateLimited = errCode === 'RATE_LIMITED';
 
-        const cleanErr = isNetworkFetchErr
-          ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
-          : rawMsg;
+        const cleanErr = !isV2Request && !isDefaultUnlimitedProfile
+          ? formatProviderErrorBn({
+              code:
+                errCode === 'MODEL_UNAVAILABLE'
+                  ? 'MODEL_NOT_FOUND'
+                  : errCode === 'NETWORK_ERROR'
+                    ? 'UPSTREAM_NETWORK'
+                    : errCode,
+              httpStatus: null,
+              providerLabel: activeDisplayName || activeProvider,
+              modelName: effectiveExternalModel || activeModelName,
+              rawMessage: rawMsg,
+            })
+          : isNetworkFetchErr
+            ? 'সার্ভারের সাথে সংযোগ বিচ্ছিন্ন হয়েছে। অনুগ্রহ করে Retry বাটনে ট্যাপ করুন অথবা অন্য প্রোভাইডার সিলেক্ট করুন।'
+            : rawMsg;
         const finalErrText = cleanErr.startsWith('⚠️')
           ? cleanErr
           : `⚠️ ${cleanErr}`;
 
-        // Toast alert on custom provider HTTP 401 / 404 or connection failure
-        if (errCode === 'AUTH_INVALID') {
-          showToast(
-            `⚠️ HTTP 401 Unauthorized: Invalid API key for ${activeDisplayName || activeProvider}.`,
-            5000
-          );
-        } else if (errCode === 'MODEL_UNAVAILABLE') {
-          showToast(
-            `⚠️ HTTP 404 Model Not Found: "${effectiveExternalModel || activeModelName}" on ${activeDisplayName || activeProvider}.`,
-            5000
-          );
-        } else {
-          showToast(finalErrText.slice(0, 140), 4500);
-        }
+        showToast(finalErrText.slice(0, 160), 5000);
 
         if (!isV2Request) {
           setProviderTestStatus({
@@ -5452,7 +5573,9 @@ export default function App() {
           }
           setProviderLimitBanner({
             profileName: activeDisplayName,
-            message: isTrueQuotaExhausted
+            message: !isDefaultUnlimitedProfile
+              ? cleanErr
+              : isTrueQuotaExhausted
               ? `Quota/credits exhausted on "${activeDisplayName}". Please switch to another saved property manually below.`
               : isRateLimited
               ? `Rate limit (429) reached on "${activeDisplayName}". Wait briefly or switch to another saved property below.`
@@ -6356,7 +6479,10 @@ export default function App() {
 
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--surface-2)] text-[var(--ink)] px-5 py-2.5 rounded-full text-xs font-medium shadow-lg border border-[var(--border)]">
+        <div
+          data-testid="app-toast"
+          className="fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-[90vw] truncate bg-[var(--surface-2)] text-[var(--ink)] px-4 py-2 rounded-xl text-xs font-medium shadow-lg border border-[var(--border)] pointer-events-none"
+        >
           {toastMsg}
         </div>
       )}
@@ -7206,6 +7332,46 @@ export default function App() {
                                   >
                                     <RotateCcw className="w-4 h-4" />
                                   </button>
+
+                                  <button
+                                    type="button"
+                                    data-testid="msg-speak-btn"
+                                    onClick={() => {
+                                      if (speakingMsgId === m.id) {
+                                        bilingualSpeechPlayer.stop();
+                                      } else {
+                                        speakText(m.text, m.id);
+                                      }
+                                    }}
+                                    className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-[11.5px] font-medium transition-colors cursor-pointer ${
+                                      speakingMsgId === m.id
+                                        ? 'bg-[var(--primary-soft)] text-[var(--primary)] border border-[var(--primary-border)]'
+                                        : 'text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]'
+                                    }`}
+                                    title={speakingMsgId === m.id ? 'থামান' : 'পড়ে শোনাও'}
+                                    aria-label={speakingMsgId === m.id ? 'পড়া থামান' : 'পড়ে শোনাও'}
+                                  >
+                                    {speakingMsgId === m.id ? (
+                                      <>
+                                        <Square className="w-3 h-3 fill-current" />
+                                        <span>থামান</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Volume2 className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">পড়ে শোনাও</span>
+                                      </>
+                                    )}
+                                  </button>
+
+                                  {speakingMsgId === m.id && speechBackupActive && (
+                                    <span
+                                      data-testid="msg-backup-voice-notice"
+                                      className="text-[11px] text-amber-400/90 px-1"
+                                    >
+                                      ব্যাকআপ ভয়েস চলছে
+                                    </span>
+                                  )}
                                 </>
                               ) : (
                                 <button
@@ -7334,6 +7500,42 @@ export default function App() {
                       onChangePlan={(updated) => setActiveTaskPlan(updated)}
                       onDismiss={() => setActiveTaskPlan(null)}
                     />
+                  </div>
+                )}
+
+                {decryptionAlertProfileName && (
+                  <div
+                    data-testid="decryption-alert-banner"
+                    className="w-full max-w-[780px] mb-3 px-3.5 py-2.5 rounded-xl border border-rose-500/35 bg-rose-500/10 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-200"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span className="truncate">
+                        {decryptionAlertProfileName}: সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        data-testid="decryption-reenter-btn"
+                        onClick={() => {
+                          setDecryptionAlertProfileName(null);
+                          setSettingsTab('providers');
+                          setSettingsOpen(true);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/30 text-rose-100 font-medium cursor-pointer transition-colors"
+                      >
+                        আবার কী দিন
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDecryptionAlertProfileName(null)}
+                        className="p-1 text-rose-300 hover:text-white cursor-pointer"
+                        aria-label="Dismiss"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -7959,6 +8161,18 @@ export default function App() {
         isOpen={voiceCallOpen}
         userName={profile?.name || settings.displayName}
         preferredLang={settings.vlang || settings.appLanguage || 'auto'}
+        preferredVoice={settings.ttsVoice}
+        realtimeMode={Boolean(settings.liveVoiceRealtimeMode)}
+        onChangePreferredVoice={(nextVoice) => {
+          setSettings((prev) =>
+            sanitizeSettings({ ...prev, ttsVoice: nextVoice })
+          );
+        }}
+        onToggleRealtimeMode={(enabled) => {
+          setSettings((prev) =>
+            sanitizeSettings({ ...prev, liveVoiceRealtimeMode: enabled })
+          );
+        }}
         isListening={isListening}
         isGenerating={isGenerating}
         isTranscribing={isTranscribingVoice}

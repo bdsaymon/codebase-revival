@@ -38,11 +38,14 @@ import {
   DEFAULT_PROVIDER_MODELS,
   QUICK_PROVIDER_CHIPS,
   detectProviderFromKey,
+  formatProviderErrorBn,
   getInitialProviderProfiles,
   isKeylessProviderId,
+  loadSavedProfiles,
   persistSavedProfiles,
   providerEntry,
   sortProvidersByPriority,
+  validateGeminiApiKeyFormat,
 } from '../utils/providers';
 import {
   fetchProviderModelsClientSide,
@@ -574,6 +577,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         ? {
             ...p,
             ...changes,
+            ...('externalKeys' in changes ? { decryptionFailed: false } : {}),
             ...(connectionChanged
               ? {
                   verified: false,
@@ -894,11 +898,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isKeyRequired && !newApiKey.trim()) {
       setNewVerifyResult({
         ok: false,
-        message: `API Key is required for ${
-          providerEntry(newProviderId)?.label || newProviderId
-        }.`,
+        message: `${providerEntry(newProviderId)?.label || newProviderId}-এর জন্য API কী দেওয়া প্রয়োজন।`,
       });
       return;
+    }
+    if (
+      (newProviderId === 'gemini_openai' || newProviderId === 'gemini_custom') &&
+      newApiKey.trim()
+    ) {
+      const keyCheck = validateGeminiApiKeyFormat(newApiKey);
+      if (!keyCheck.valid) {
+        setNewVerifyResult({
+          ok: false,
+          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza...)।',
+        });
+        return;
+      }
     }
     if (newProviderId === 'custom' && !effectiveBaseUrl && !newApiKey.trim()) {
       setNewVerifyResult({
@@ -999,11 +1014,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isKeyRequired && !newApiKey.trim()) {
       setNewVerifyResult({
         ok: false,
-        message: `API Key is required for ${
-          providerEntry(newProviderId)?.label || newProviderId
-        }.`,
+        message: `${providerEntry(newProviderId)?.label || newProviderId}-এর জন্য API কী দেওয়া প্রয়োজন।`,
       });
       return;
+    }
+    if (
+      (newProviderId === 'gemini_openai' || newProviderId === 'gemini_custom') &&
+      newApiKey.trim()
+    ) {
+      const keyCheck = validateGeminiApiKeyFormat(newApiKey);
+      if (!keyCheck.valid) {
+        setNewVerifyResult({
+          ok: false,
+          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza...)।',
+        });
+        return;
+      }
     }
     if (newProviderId === 'custom' && !effectiveBaseUrl) {
       setNewVerifyResult({
@@ -1074,15 +1100,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (fetchedModels.length > 0) {
           setDiscoveredModels(fetchedModels);
         }
-        const msgText =
-          testData?.message ||
-          testData?.error ||
-          'Verification failed. Check API Key, Base URL, or quota. Provider was NOT added.';
+        const msgText = formatProviderErrorBn({
+          code: (testData as { errorCode?: string } | null)?.errorCode,
+          httpStatus: (testData as { httpStatus?: number } | null)?.httpStatus,
+          providerLabel: providerEntry(newProviderId)?.short || cleanName,
+          modelName: newModel.trim() || DEFAULT_PROVIDER_MODELS[newProviderId],
+          rawMessage:
+            testData?.message ||
+            testData?.error ||
+            'কানেকশন যাচাই সফল হয়নি। API কী বা Base URL চেক করুন।',
+        });
         const suggestionSuffix =
           Array.isArray(testData?.suggestedModels) &&
           testData.suggestedModels.length > 0 &&
           !msgText.includes(testData.suggestedModels[0])
-            ? ` (Available: ${testData.suggestedModels.slice(0, 4).join(', ')})`
+            ? ` (উপলব্ধ মডেল: ${testData.suggestedModels.slice(0, 4).join(', ')})`
             : '';
         setNewVerifyResult({
           ok: false,
@@ -1090,7 +1122,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         });
         onProviderTestResult?.({
           ok: false,
-          message: testData?.message || 'Verification failed',
+          message: msgText,
           testedAt: Date.now(),
           provider: newProviderId,
         });

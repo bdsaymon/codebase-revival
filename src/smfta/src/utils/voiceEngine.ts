@@ -272,6 +272,29 @@ export function shouldPollRollingVoiceTranscript(params: {
 
 export type GeminiFemaleVoiceName = 'Kore' | 'Zephyr' | 'Puck' | 'Charon' | 'Fenrir';
 
+export function resolveTtsVoicePersona(
+  voiceProfile?: string | null,
+  geminiVoice?: GeminiFemaleVoiceName | null
+): GeminiFemaleVoiceName {
+  if (
+    geminiVoice === 'Kore' ||
+    geminiVoice === 'Zephyr' ||
+    geminiVoice === 'Puck' ||
+    geminiVoice === 'Charon' ||
+    geminiVoice === 'Fenrir'
+  ) {
+    return geminiVoice;
+  }
+  const p = String(voiceProfile || '').trim();
+  if (p === 'Kore' || p === 'Zephyr' || p === 'Puck' || p === 'Charon' || p === 'Fenrir') {
+    return p;
+  }
+  if (p === 'english_us_female') return 'Zephyr';
+  if (p === 'english_us_male') return 'Charon';
+  if (p === 'bengali_male') return 'Puck';
+  return 'Kore';
+}
+
 export function formatTextForNaturalSpeech(rawText: string, maxChars = 8000): string {
   const cleaned = String(rawText || '')
     .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
@@ -349,6 +372,7 @@ export async function requestGeminiFemaleSpeech(params: {
   mimeType?: string;
   voiceName?: GeminiFemaleVoiceName;
   modelUsed?: string;
+  isBackupVoice?: boolean;
   integrationRequired?: boolean;
   error?: string;
 }> {
@@ -374,6 +398,7 @@ export async function requestGeminiFemaleSpeech(params: {
       mimeType?: string;
       voiceName?: GeminiFemaleVoiceName;
       modelUsed?: string;
+      isBackupVoice?: boolean;
       integrationRequired?: boolean;
       error?: string;
     };
@@ -381,16 +406,19 @@ export async function requestGeminiFemaleSpeech(params: {
       return {
         ok: false,
         modelUsed: data.modelUsed,
+        isBackupVoice: Boolean(data.isBackupVoice || data.modelUsed === 'neural-voice-hd'),
         integrationRequired: Boolean(data.integrationRequired || res.status === 503),
         error: data.error || `HTTP ${res.status}`,
       };
     }
+    const isBackup = Boolean(data.isBackupVoice || data.modelUsed === 'neural-voice-hd');
     return {
       ok: true,
       audioBase64: data.audioBase64,
       mimeType: data.mimeType || 'audio/wav',
       voiceName: data.voiceName || params.voiceName || 'Kore',
       modelUsed: data.modelUsed,
+      isBackupVoice: isBackup,
     };
   } catch (err) {
     return {
@@ -659,12 +687,16 @@ export function isSpeechSynthesisSupported(): boolean {
 export interface SpeechControllerState {
   status: 'idle' | 'speaking' | 'paused';
   msgId: string | null;
+  isBackupVoice?: boolean;
+  modelUsed?: string;
 }
 
-class BilingualSpeechPlayer {
+export class BilingualSpeechPlayer {
   private cancelled = false;
   private paused = false;
   private currentMsgId: string | null = null;
+  private currentIsBackup = false;
+  private currentModelUsed: string | undefined = undefined;
   private activeAudio: HTMLAudioElement | null = null;
   private activeAbort: AbortController | null = null;
   private activeBlobUrl: string | null = null;
@@ -681,6 +713,8 @@ class BilingualSpeechPlayer {
     this.onStateChange?.({
       status,
       msgId: status === 'idle' ? null : this.currentMsgId,
+      isBackupVoice: status === 'idle' ? false : this.currentIsBackup,
+      modelUsed: status === 'idle' ? undefined : this.currentModelUsed,
     });
   }
 
@@ -734,6 +768,8 @@ class BilingualSpeechPlayer {
     this.cancelled = true;
     this.paused = false;
     this.currentMsgId = null;
+    this.currentIsBackup = false;
+    this.currentModelUsed = undefined;
     this.cleanupAudioElement();
     if (isSpeechSynthesisSupported()) {
       window.speechSynthesis.cancel();
@@ -779,11 +815,18 @@ class BilingualSpeechPlayer {
     text: string;
     msgId?: string;
     preferredLang?: VoiceLangMode;
-    voiceProfile?: 'default' | 'bengali_female' | 'bengali_male' | 'english_us_female' | 'english_us_male';
+    voiceProfile?:
+      | 'default'
+      | GeminiFemaleVoiceName
+      | 'bengali_female'
+      | 'bengali_male'
+      | 'english_us_female'
+      | 'english_us_male';
     rate?: number;
     geminiVoice?: GeminiFemaleVoiceName;
     skipServerTts?: boolean;
     onDone?: () => void;
+    fetchImpl?: typeof fetch;
   }): void {
     const cleanText = formatTextForNaturalSpeech(params.text);
     if (!cleanText) {
@@ -803,15 +846,27 @@ class BilingualSpeechPlayer {
     this.cancelled = false;
     this.paused = false;
     this.currentMsgId = params.msgId || 'tts_active';
+    this.currentIsBackup = false;
+    this.currentModelUsed = undefined;
 
-    const wantMale = params.voiceProfile?.endsWith('male');
+    const chosenVoice = resolveTtsVoicePersona(params.voiceProfile, params.geminiVoice);
+    const wantMale =
+      chosenVoice === 'Puck' ||
+      chosenVoice === 'Charon' ||
+      chosenVoice === 'Fenrir' ||
+      params.voiceProfile?.endsWith('male');
     const rate = Math.min(2.0, Math.max(0.5, params.rate || 1.0));
     this.emit('speaking');
 
     const runBrowserFallback = (fromText: string = cleanText) => {
+      this.currentIsBackup = true;
+      this.currentModelUsed = 'browser';
+      this.emit('speaking');
       if (this.cancelled || !isSpeechSynthesisSupported()) {
         if (!this.cancelled) {
           this.currentMsgId = null;
+          this.currentIsBackup = false;
+          this.currentModelUsed = undefined;
           this.paused = false;
           this.emit('idle');
           params.onDone?.();
@@ -897,34 +952,43 @@ class BilingualSpeechPlayer {
       playNext(0);
     };
 
-    if (!params.skipServerTts && typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+    if (!params.skipServerTts && (params.fetchImpl || (typeof window !== 'undefined' && typeof Audio !== 'undefined'))) {
       const ctrl = new AbortController();
       this.activeAbort = ctrl;
-      const chosenVoice: GeminiFemaleVoiceName =
-        params.geminiVoice ||
-        (wantMale
-          ? params.voiceProfile === 'english_us_male'
-            ? 'Charon'
-            : 'Puck'
-          : params.voiceProfile === 'english_us_female'
-            ? 'Zephyr'
-            : 'Kore');
 
       const chunks = splitTextForSpeech(cleanText, 900);
-      const fetchChunk = (i: number) =>
-        requestGeminiFemaleSpeech({
+      const fetchChunkWithRetry = async (i: number) => {
+        const firstTry = await requestGeminiFemaleSpeech({
           text: chunks[i] || '',
           voiceName: chosenVoice,
           signal: ctrl.signal,
+          fetchImpl: params.fetchImpl,
         });
+        if (firstTry.ok || this.cancelled || ctrl.signal.aborted) {
+          return firstTry;
+        }
+        // Retry once in the exact same voice before falling back so voice persona never switches mid-reply
+        await new Promise((r) => setTimeout(r, 350));
+        if (this.cancelled || ctrl.signal.aborted) {
+          return firstTry;
+        }
+        return requestGeminiFemaleSpeech({
+          text: chunks[i] || '',
+          voiceName: chosenVoice,
+          signal: ctrl.signal,
+          fetchImpl: params.fetchImpl,
+        });
+      };
       const finishAll = () => {
         this.cleanupAudioElement();
         this.currentMsgId = null;
+        this.currentIsBackup = false;
+        this.currentModelUsed = undefined;
         this.paused = false;
         this.emit('idle');
         params.onDone?.();
       };
-      const playIndex = (i: number, pending: ReturnType<typeof fetchChunk>) => {
+      const playIndex = (i: number, pending: ReturnType<typeof fetchChunkWithRetry>) => {
         void pending.then((ttsRes) => {
           if (this.cancelled || ctrl.signal.aborted) return;
           if (!ttsRes.ok || !ttsRes.audioBase64) {
@@ -932,8 +996,25 @@ class BilingualSpeechPlayer {
             runBrowserFallback(chunks.slice(i).join(' '));
             return;
           }
+          if (ttsRes.isBackupVoice || ttsRes.modelUsed === 'neural-voice-hd') {
+            this.currentIsBackup = true;
+            this.currentModelUsed = ttsRes.modelUsed;
+            this.emit('speaking');
+          } else if (ttsRes.modelUsed) {
+            this.currentIsBackup = false;
+            this.currentModelUsed = ttsRes.modelUsed;
+            this.emit('speaking');
+          }
           // Prefetch the next piece while this one plays, so reading never pauses between pieces
-          const upcoming = i + 1 < chunks.length ? fetchChunk(i + 1) : null;
+          const upcoming = i + 1 < chunks.length ? fetchChunkWithRetry(i + 1) : null;
+          if (typeof Audio === 'undefined') {
+            if (upcoming) {
+              playIndex(i + 1, upcoming);
+              return;
+            }
+            finishAll();
+            return;
+          }
           try {
             const bytes = base64ToUint8Array(ttsRes.audioBase64);
             const blob = new Blob([bytes.buffer as ArrayBuffer], {
@@ -973,7 +1054,7 @@ class BilingualSpeechPlayer {
         finishAll();
         return;
       }
-      playIndex(0, fetchChunk(0));
+      playIndex(0, fetchChunkWithRetry(0));
       return;
     }
 

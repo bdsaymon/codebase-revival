@@ -233,4 +233,41 @@ describe('voiceSession pure state & VAD logic', () => {
     const bn = buildVoiceGreeting('', 'bn-BD');
     assert.ok(bn.includes('হ্যালো') && bn.includes('SMFTA AI'));
   });
+
+  it('supports tightened Live Voice barge-in config (echoGuardMs: 340, requiredDurationMs: 180)', () => {
+    let state = createBargeInState();
+    const aiStart = 2000;
+
+    for (let t = 2050; t <= 2300; t += 50) {
+      const res = stepBargeInDetector(state, {
+        rms: 0.2,
+        nowMs: t,
+        aiSpeakingStartedAt: aiStart,
+        echoGuardMs: 340,
+        requiredDurationMs: 180,
+        threshold: 0.055,
+      });
+      state = res.nextState;
+      assert.equal(res.shouldInterrupt, false);
+    }
+
+    let interrupted = false;
+    for (let t = 2360; t <= 2650; t += 50) {
+      const res = stepBargeInDetector(state, {
+        rms: 0.14,
+        nowMs: t,
+        aiSpeakingStartedAt: aiStart,
+        echoGuardMs: 340,
+        requiredDurationMs: 180,
+        threshold: 0.055,
+      });
+      state = res.nextState;
+      if (res.shouldInterrupt) {
+        interrupted = true;
+        break;
+      }
+    }
+    assert.equal(interrupted, true);
+  });
 });
+

@@ -353,6 +353,8 @@ export interface SavedProviderProfile {
   priority?: number;
   /** Custom JSON request parameters forwarded cleanly (never overriding model/messages). */
   customParams?: string;
+  /** True when AES-GCM decryption of sealed externalKeys failed on this browser/device. */
+  decryptionFailed?: boolean;
 }
 
 export interface ModelRoleSlots {
@@ -659,7 +661,19 @@ export interface AppSettings {
   /** Simple projects list (id, name, instructions) */
   projects?: ChatProject[];
   /** TTS Voice profile identifier (separate from externalModel so changing voice never alters the chat AI model). */
-  ttsVoice?: 'default' | 'bengali_female' | 'bengali_male' | 'english_us_female' | 'english_us_male';
+  ttsVoice?:
+    | 'default'
+    | 'Kore'
+    | 'Zephyr'
+    | 'Puck'
+    | 'Charon'
+    | 'Fenrir'
+    | 'bengali_female'
+    | 'bengali_male'
+    | 'english_us_female'
+    | 'english_us_male';
+  /** Optional low-latency direct Gemini Live audio mode toggle inside Live Voice overlay. */
+  liveVoiceRealtimeMode?: boolean;
   /** Show real-time live captions above the voice waveform bar while speaking. */
   voiceLiveCaptions?: boolean;
   /** Show compact starter prompt chips on the empty home screen. */

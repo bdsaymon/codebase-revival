@@ -29,9 +29,11 @@ import {
   requestGeminiFemaleSpeech,
   requestServerVoiceTranscription,
   resolveRecognitionLanguage,
+  resolveTtsVoicePersona,
   softLimitPcmSamples,
   streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
+import type { AppSettings } from '../types';
 import {
   BargeInState,
   buildVoiceGreeting,
@@ -57,6 +59,8 @@ export interface LiveVoiceOverlayProps {
   isOpen: boolean;
   userName?: string;
   preferredLang?: string;
+  preferredVoice?: AppSettings['ttsVoice'];
+  realtimeMode?: boolean;
   isListening?: boolean;
   isGenerating: boolean;
   isTranscribing?: boolean;
@@ -64,6 +68,8 @@ export interface LiveVoiceOverlayProps {
   micStream?: MediaStream | null;
   lastUserText: string;
   lastAiMessage: LiveVoiceMessageSnapshot | null;
+  onChangePreferredVoice?: (voice: GeminiFemaleVoiceName) => void;
+  onToggleRealtimeMode?: (enabled: boolean) => void;
   onToggleMic?: () => void;
   onCancelMic?: () => void;
   onAbortGeneration?: () => void;
@@ -215,21 +221,29 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   isOpen,
   userName,
   preferredLang = 'auto',
+  preferredVoice,
+  realtimeMode = false,
   isGenerating,
   lastUserText,
   lastAiMessage,
+  onChangePreferredVoice,
+  onToggleRealtimeMode,
   onCancelMic,
   onAbortGeneration,
   onSendText,
   onEndCall,
 }) => {
-  const [selectedVoice, setSelectedVoice] =
-    useState<GeminiFemaleVoiceName>(loadSavedVoice);
+  const [selectedVoice, setSelectedVoice] = useState<GeminiFemaleVoiceName>(() =>
+    preferredVoice && preferredVoice !== 'default'
+      ? resolveTtsVoicePersona(preferredVoice)
+      : loadSavedVoice()
+  );
   const [voiceLang, setVoiceLang] = useState<'bn-BD' | 'en-US'>(() =>
     loadSavedVoiceLang(preferredLang)
   );
   const [speechRate, setSpeechRate] = useState<VoiceSpeechRate>(loadSavedVoiceRate);
   const [activeVoiceModel, setActiveVoiceModel] = useState<string | null>(null);
+  const [micStreamLive, setMicStreamLive] = useState(false);
   const [expandedTranscript, setExpandedTranscript] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -356,6 +370,13 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     onSendText,
     onAbortGeneration,
   };
+
+  useEffect(() => {
+    if (preferredVoice && preferredVoice !== 'default') {
+      const synced = resolveTtsVoicePersona(preferredVoice);
+      setSelectedVoice(synced);
+    }
+  }, [preferredVoice]);
 
   useEffect(() => {
     try {
@@ -580,6 +601,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   }, []);
 
   const releaseAllMicResources = useCallback(() => {
+    setMicStreamLive(false);
     stopListeningTurnOnly();
     micAnalyserRef.current = null;
     if (micSilentGainRef.current) {
@@ -663,7 +685,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             const resultsLen = e?.results?.length ?? 0;
             const latestIsFinal =
               resultsLen > 0 && Boolean(e?.results?.[resultsLen - 1]?.isFinal);
-            const commitDelayMs = latestIsFinal ? 900 : 1850;
+            const commitDelayMs = latestIsFinal ? 1300 : 2200;
             speechRecCommitTimerRef.current = window.setTimeout(() => {
               speechRecCommitTimerRef.current = null;
               if (
@@ -862,7 +884,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                     ) {
                       void commitActiveUtteranceRef.current(false);
                     }
-                  }, 950);
+                  }, 1200);
                 } else if (chunkCount >= 28 && !vadStateRef.current.isVoiceActive) {
                   // Trim old silent buffer so subsequent speech is transcribed crisply
                   turnChunksRef.current = turnChunksRef.current.slice(-4);
@@ -1310,12 +1332,28 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           }
 
           // 2. Unary neural audio endpoint (/api/voice/tts: Gemini 3.8 Live WAV -> Gemini TTS)
-          const res = await requestGeminiFemaleSpeech({
+          // Retry once in the EXACT same voice before notifying fallback/error so persona never shifts
+          let res = await requestGeminiFemaleSpeech({
             text: sentence,
             voiceName: voice,
             style: voiceStyle,
             signal: ctrl.signal,
           });
+          if (
+            (!res.ok || !res.audioBase64) &&
+            !ctrl.signal.aborted &&
+            runId === pipelineRunIdRef.current
+          ) {
+            await new Promise((r) => setTimeout(r, 320));
+            if (!ctrl.signal.aborted && runId === pipelineRunIdRef.current) {
+              res = await requestGeminiFemaleSpeech({
+                text: sentence,
+                voiceName: voice,
+                style: voiceStyle,
+                signal: ctrl.signal,
+              });
+            }
+          }
           if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
 
           if (!res.ok || !res.audioBase64) {
@@ -1337,6 +1375,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
           if (res.modelUsed) {
             setActiveVoiceModel(res.modelUsed);
+          } else if (res.isBackupVoice) {
+            setActiveVoiceModel('neural-voice-hd');
           }
 
           try {
@@ -1456,10 +1496,12 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         }
 
         persistentStreamRef.current = stream;
+        setMicStreamLive(true);
         stream.getAudioTracks().forEach((track) => {
           track.enabled = !stateRef.current.isMuted;
           track.onended = () => {
             if (token !== sessionTokenRef.current || !stateRef.current.isOpen) return;
+            setMicStreamLive(false);
             setIsSessionListening(false);
             setIsDisconnected(true);
             setStatusNotice('Microphone connection ended. Tap reconnect to continue.');
@@ -1512,17 +1554,18 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         }
       } catch (err) {
         if (token !== sessionTokenRef.current || !stateRef.current.isOpen) return;
+        setMicStreamLive(false);
         setIsConnecting(false);
         setIsDisconnected(true);
         const name = err instanceof Error ? err.name : '';
         if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
           setStatusNotice(
-            'Microphone access denied. Allow mic permission and tap reconnect, or use keyboard.'
+            'মাইক পারমিশন বন্ধ আছে — মাইক অনুমতি দিয়ে Reconnect চাপুন অথবা কীবোর্ডে লিখুন।'
           );
         } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          setStatusNotice('No microphone detected. Connect a microphone or tap keyboard.');
+          setStatusNotice('কোনো মাইক্রোফোন পাওয়া যায়নি। কীবোর্ড ব্যবহার করুন।');
         } else {
-          setStatusNotice('Could not start microphone. Tap reconnect to try again.');
+          setStatusNotice('মাইক্রোফোন চালু করা যায়নি। আবার চেষ্টা করুন।');
         }
 
         if (allowGreeting && !hasGreetedRef.current) {
@@ -1846,6 +1889,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           rms: micRms,
           nowMs,
           aiSpeakingStartedAt: aiSpeakingStartedAtRef.current,
+          echoGuardMs: 340,
+          requiredDurationMs: 180,
         });
         bargeInStateRef.current = barge.nextState;
         if (barge.shouldInterrupt) {
@@ -2374,21 +2419,56 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     ':' +
     String(seconds % 60).padStart(2, '0');
 
+  const isBackupVoiceActive =
+    activeVoiceModel === 'neural-voice-hd' || activeVoiceModel === 'browser';
+  const micOffOrMissing = isMuted || isDisconnected || !micStreamLive;
+
   const activeCopy = STATE_COPY[voiceState];
   const effectiveHeadline =
-    voiceState === 'listening' && isMuted
-      ? 'Microphone muted'
-      : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
-        ? 'Hearing you...'
-        : activeCopy.headline;
+    voiceState === 'thinking'
+      ? voiceLang === 'bn-BD'
+        ? 'ভাবছি…'
+        : 'Thinking...'
+      : voiceState === 'disconnected' || (voiceState === 'listening' && micOffOrMissing)
+        ? voiceLang === 'bn-BD'
+          ? 'মাইক চালু নেই'
+          : isMuted
+            ? 'Microphone muted'
+            : 'Microphone off'
+        : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
+          ? voiceLang === 'bn-BD'
+            ? 'শুনছি…'
+            : 'Hearing you...'
+          : voiceState === 'listening'
+            ? voiceLang === 'bn-BD'
+              ? 'শুনছি…'
+              : activeCopy.headline
+            : voiceState === 'speaking'
+              ? voiceLang === 'bn-BD'
+                ? 'কথা বলছি…'
+                : activeCopy.headline
+              : voiceState === 'connecting' && voiceLang === 'bn-BD'
+                ? 'ভয়েস সংযোগ হচ্ছে…'
+                : activeCopy.headline;
+
   const effectiveHint =
-    voiceState === 'listening' && isMuted
-      ? 'Tap mic below to resume'
-      : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
-        ? 'Pause briefly or tap send to reply'
-        : voiceLang === 'bn-BD' && voiceState === 'listening'
-          ? 'বাংলা বা ইংরেজিতে স্বাভাবিকভাবে কথা বলুন'
-          : activeCopy.hint;
+    voiceState === 'thinking'
+      ? voiceLang === 'bn-BD'
+        ? 'আপনার উত্তর তৈরি হচ্ছে'
+        : 'Crafting your reply'
+      : voiceState === 'disconnected' || (voiceState === 'listening' && micOffOrMissing)
+        ? voiceLang === 'bn-BD'
+          ? 'মাইক অনুমতি দিন বা নিচের মাইক বাটনে ট্যাপ করুন'
+          : 'Tap mic or reconnect below to talk'
+        : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
+          ? voiceLang === 'bn-BD'
+            ? 'কথা শেষ হলে একটু থামুন অথবা Send চাপুন'
+            : 'Pause briefly or tap send to reply'
+          : voiceState === 'speaking' && voiceLang === 'bn-BD'
+            ? 'মাঝে কথা বলে বা ট্যাপ করে থামাতে পারেন'
+            : voiceLang === 'bn-BD' && voiceState === 'listening'
+              ? 'বাংলা বা ইংরেজিতে স্বাভাবিকভাবে কথা বলুন'
+              : activeCopy.hint;
 
   const cleanUserTranscript = sanitizeVoiceUtterance(
     liveCaption || sessionUserText || lastUserText
@@ -2458,6 +2538,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     ensureAudioContext();
     setSelectedVoice(nextVoice);
     stateRef.current.selectedVoice = nextVoice;
+    onChangePreferredVoice?.(nextVoice);
     // Speak a brief natural voice sample in the chosen persona whenever not actively generating
     if (
       !isGenerating &&
@@ -2614,7 +2695,19 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             data-testid="live-voice-status-label"
             className="text-[13px] font-medium tracking-tight text-white/90 whitespace-nowrap"
           >
-            {voiceState === 'listening' && isMuted ? 'Muted' : activeCopy.label}
+            {voiceState === 'thinking'
+              ? voiceLang === 'bn-BD'
+                ? 'ভাবছি…'
+                : 'Thinking'
+              : micOffOrMissing && (voiceState === 'listening' || voiceState === 'disconnected')
+                ? voiceLang === 'bn-BD'
+                  ? 'মাইক বন্ধ'
+                  : 'Mic off'
+                : voiceState === 'speaking' && voiceLang === 'bn-BD'
+                  ? 'কথা বলছি'
+                  : voiceState === 'listening' && voiceLang === 'bn-BD'
+                    ? 'শুনছি'
+                    : activeCopy.label}
           </span>
           <span className="text-white/25 text-[12px]" aria-hidden="true">
             ·
@@ -2622,9 +2715,38 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           <span className="font-mono text-[12px] tabular-nums text-slate-300/75 shrink-0">
             {formattedTime}
           </span>
+          {isBackupVoiceActive && (
+            <span
+              data-testid="live-voice-backup-badge"
+              className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-300/30 text-[10.5px] font-medium text-amber-200 whitespace-nowrap"
+            >
+              ব্যাকআপ ভয়েস চলছে
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {onToggleRealtimeMode && (
+            <button
+              type="button"
+              data-testid="live-voice-realtime-toggle"
+              aria-pressed={realtimeMode}
+              onClick={() => onToggleRealtimeMode(!realtimeMode)}
+              title={
+                realtimeMode
+                  ? 'Low-Latency Live Audio ON (gemini-3.8-live)'
+                  : 'Standard Fast Voice Mode'
+              }
+              className={`live-voice-control h-10 sm:h-11 px-2.5 sm:px-3 rounded-full text-[11.5px] font-medium transition-colors cursor-pointer shrink-0 whitespace-nowrap border ${
+                realtimeMode
+                  ? 'bg-emerald-400/20 border-emerald-300/45 text-emerald-200'
+                  : 'live-voice-ghost-btn border-transparent text-slate-300 hover:text-white'
+              }`}
+            >
+              {realtimeMode ? 'Live 3.8 ⚡' : 'Live'}
+            </button>
+          )}
+
           <button
             type="button"
             data-testid="live-voice-rate-btn"

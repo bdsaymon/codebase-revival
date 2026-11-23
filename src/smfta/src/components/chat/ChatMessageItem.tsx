@@ -5,8 +5,10 @@ import {
   LayoutTemplate,
   RotateCcw,
   Share,
+  Square,
   ThumbsDown,
   ThumbsUp,
+  Volume2,
   Zap,
 } from 'lucide-react';
 import type { ChatMessage, InlineRevision, ProactiveSuggestion } from '../../types';
@@ -53,6 +55,9 @@ export interface ChatMessageItemProps {
   ) => void | Promise<void>;
   onRetryMessage: (messageId: string) => void;
   onToast: (msg: string) => void;
+  isSpeaking?: boolean;
+  isBackupVoice?: boolean;
+  onToggleSpeak?: (message: ChatMessage) => void;
 }
 
 const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
@@ -77,6 +82,9 @@ const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
   onSubmitFeedback,
   onRetryMessage,
   onToast,
+  isSpeaking = false,
+  isBackupVoice = false,
+  onToggleSpeak,
 }) => {
   const [feedbackReasonOpen, setFeedbackReasonOpen] = useState(false);
   const [feedbackReasonInput, setFeedbackReasonInput] = useState(
@@ -371,6 +379,42 @@ const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
+
+                  {onToggleSpeak && (
+                    <button
+                      type="button"
+                      data-testid="msg-speak-btn"
+                      onClick={() => onToggleSpeak(m)}
+                      className={`h-8 px-2 rounded-lg inline-flex items-center gap-1.5 text-[11.5px] font-medium transition-colors cursor-pointer ${
+                        isSpeaking
+                          ? 'bg-[var(--primary-soft)] text-[var(--primary)] border border-[var(--primary-border)]'
+                          : 'text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]'
+                      }`}
+                      title={isSpeaking ? 'থামান' : 'পড়ে শোনাও'}
+                      aria-label={isSpeaking ? 'পড়া থামান' : 'পড়ে শোনাও'}
+                    >
+                      {isSpeaking ? (
+                        <>
+                          <Square className="w-3 h-3 fill-current" />
+                          <span>থামান</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">পড়ে শোনাও</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {isSpeaking && isBackupVoice && (
+                    <span
+                      data-testid="msg-backup-voice-notice"
+                      className="text-[11px] text-amber-400/90 px-1.5"
+                    >
+                      ব্যাকআপ ভয়েস চলছে
+                    </span>
+                  )}
                 </>
               ) : (
                 <button

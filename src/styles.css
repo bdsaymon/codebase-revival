@@ -7189,3 +7189,35 @@ body {
   padding: 0 4px 6px;
 }
 
+@keyframes chatStreamBlink {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0.12; }
+}
+
+.chat-stream-cursor {
+  display: inline-block;
+  width: 2.5px;
+  height: 1.05em;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  vertical-align: -0.14em;
+  animation: chatStreamBlink 0.9s ease-in-out infinite;
+}
+
+.msg-prose {
+  font-feature-settings: "kern" 1, "liga" 1;
+  text-rendering: optimizeLegibility;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.msg-prose p + p {
+  margin-top: 0.55rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-stream-cursor {
+    animation: none;
+  }
+}

@@ -289,6 +289,25 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                   </div>
                 </div>
 
+                {prof.decryptionFailed && (
+                  <div
+                    data-testid={`provider-decrypt-alert-${prof.id}`}
+                    className="mt-2 px-2.5 py-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-[11.5px] text-rose-500 dark:text-rose-300 flex items-center justify-between gap-2"
+                  >
+                    <span>সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingProfileId(prof.id);
+                        setRevealedKeyIds((prev) => ({ ...prev, [prof.id]: true }));
+                      }}
+                      className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 font-semibold text-rose-600 dark:text-rose-200 cursor-pointer shrink-0"
+                    >
+                      আবার কী দিন
+                    </button>
+                  </div>
+                )}
+
                 {isEditing && (
                   <div className="mt-2.5 pt-2.5 border-t border-[var(--border)] space-y-2.5">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

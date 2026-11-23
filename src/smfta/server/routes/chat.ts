@@ -1758,12 +1758,18 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   });
 
   const cleanVoiceUserName = String(nickname || userName || '').trim();
+  const wantsDetailedVoiceReply =
+    /\b(detail|details|detailed|explain\s+(?:deeply|in\s+detail|everything|fully)|elaborate|step\s+by\s+step|step-by-step|complete\s+guide)\b|(?:বিস্তারিত|ডিটেইল|পুরোপুরি|সম্পূর্ণ|খুলে\s+বলো|ভালো\s+করে\s+বোঝাও|ধাপে\s+ধাপে|একেবারে\s+বিস্তারিত)/i.test(
+      lastUserText
+    );
   const liveVoiceSysInstruction = liveVoiceMode
     ? [
         `You are SMFTA AI Pro talking live on a real-time voice call${cleanVoiceUserName ? ` with ${cleanVoiceUserName}` : ''}.`,
         'Speak like a real, warm, emotionally intelligent human friend and expert companion — NEVER sound like a stiff customer-service robot, IVR menu, or translated textbook.',
-        'AVOID robotic clichés such as "আমি খুব ভালো আছি, ধন্যবাদ। আপনাকে কীভাবে সাহায্য করতে পারি?" or "How may I assist you today?". Instead, speak with natural human warmth and spontaneous conversational flow (for example in Bengali: "এই তো, বেশ ভালো আছি! তোমার খবর বলো, আজ কী নিয়ে কথা বলব?" or directly answering their question in natural everyday spoken Bengali or English).',
-        'Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 1 to 3 clear, natural spoken sentences.',
+        'AVOID robotic clichés such as "আমি খুব ভালো আছি, ধন্যবাদ। আপনাকে কীভাবে সাহায্য করতে পারি?" or "How may I assist you today?". Instead, speak with natural human warmth and spontaneous conversational flow.',
+        wantsDetailedVoiceReply
+          ? 'The user explicitly asked for a detailed explanation: deliver a clear, thorough, complete spoken explanation without cutting short, structured smoothly for listening.'
+          : 'Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 3 to 4 crisp, warm, natural spoken sentences — concise and complete without rambling.',
         'NEVER output markdown tables, pipe characters (|), bullet lists, numbered lists, code blocks, raw URLs, asterisks (*), hashtags (#), or emojis — output pure, natural spoken dialogue.',
         replyLang === 'bn'
           ? 'Use warm, natural everyday spoken Bengali (স্বাভাবিক কথ্য বাংলা).'
@@ -1839,7 +1845,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
               contents: voiceHistoryContents,
               config: {
                 systemInstruction: liveVoiceSysInstruction,
-                maxOutputTokens: Math.min(effectiveMaxOutputTokens, 260),
+                maxOutputTokens: wantsDetailedVoiceReply
+                  ? Math.min(effectiveMaxOutputTokens, 1400)
+                  : Math.min(effectiveMaxOutputTokens, 360),
                 ...(cand.level !== undefined
                   ? { thinkingConfig: { thinkingLevel: cand.level } }
                   : {}),

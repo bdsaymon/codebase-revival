@@ -144,6 +144,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   responseLength: 'medium',
   projects: [],
   ttsVoice: 'default',
+  liveVoiceRealtimeMode: false,
   voiceLiveCaptions: true,
   showHomeStarters: false,
   showThinkingTopic: true,
@@ -505,8 +506,23 @@ export function sanitizeSettings(input: unknown): AppSettings {
     projects: sanitizeProjects(raw.projects),
     ttsVoice: oneOf(
       raw.ttsVoice,
-      ['default', 'bengali_female', 'bengali_male', 'english_us_female', 'english_us_male'] as const,
+      [
+        'default',
+        'Kore',
+        'Zephyr',
+        'Puck',
+        'Charon',
+        'Fenrir',
+        'bengali_female',
+        'bengali_male',
+        'english_us_female',
+        'english_us_male',
+      ] as const,
       DEFAULT_SETTINGS.ttsVoice ?? 'default'
+    ),
+    liveVoiceRealtimeMode: bool(
+      raw.liveVoiceRealtimeMode,
+      DEFAULT_SETTINGS.liveVoiceRealtimeMode ?? false
     ),
     voiceLiveCaptions: bool(raw.voiceLiveCaptions, DEFAULT_SETTINGS.voiceLiveCaptions ?? true),
     showHomeStarters: bool(raw.showHomeStarters, DEFAULT_SETTINGS.showHomeStarters ?? false),

@@ -1102,6 +1102,23 @@ export async function generateTtsWithRetry(
   }
 }
 
+export async function generateTtsStreamWithRetry(
+  ai: Pick<GoogleGenAI, 'models'>,
+  params: Parameters<GoogleGenAI['models']['generateContentStream']>[0],
+  retryDelayMs = 1500
+) {
+  try {
+    return await ai.models.generateContentStream(params);
+  } catch (err) {
+    const errMsg = sanitizeErrorMsg(err);
+    if (/429|resource_exhausted|quota|rate/i.test(errMsg)) {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+      return await ai.models.generateContentStream(params);
+    }
+    throw err;
+  }
+}
+
 toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
   if (!speechText) {
@@ -1188,17 +1205,14 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
     const ttsModels = [
       'gemini-3.8-flash-tts',
       'gemini-3.8-flash-lite-tts',
-      'gemini-2.5-flash-preview-tts',
     ].filter((m) => !isTtsModelCoolingDown(m));
 
     for (const model of ttsModels) {
       try {
-        const partPayload = model.startsWith('gemini-3.8')
-          ? ({
-              text: speechText,
-              speechMetadata: { style: customStyle },
-            } as { text: string; speechMetadata?: { style?: string } })
-          : { text: speechText };
+        const partPayload = {
+          text: speechText,
+          speechMetadata: { style: customStyle },
+        } as { text: string; speechMetadata?: { style?: string } };
         const response = await generateTtsWithRetry(ai, {
           model,
           contents: [
@@ -1282,6 +1296,7 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
       mimeType: 'audio/mpeg',
       voiceName,
       modelUsed: 'neural-voice-hd',
+      isBackupVoice: true,
     });
   }
 
@@ -1421,11 +1436,10 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   const allStreamModels = [
     'gemini-3.8-flash-tts',
     'gemini-3.8-flash-lite-tts',
-    'gemini-2.5-flash-preview-tts',
   ];
   const cooledStreamModels = allStreamModels.filter((m) => !isTtsModelCoolingDown(m));
   const ttsStreamModels =
-    cooledStreamModels.length > 0 ? cooledStreamModels : ['gemini-2.5-flash-preview-tts'];
+    cooledStreamModels.length > 0 ? cooledStreamModels : ['gemini-3.8-flash-lite-tts'];
 
   for (const model of ttsStreamModels) {
     if (clientClosed || req.signal?.aborted) break;
@@ -1434,13 +1448,11 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     let streamSampleRate = 24000;
 
     try {
-      const partPayload = model.startsWith('gemini-3.8')
-        ? ({
-            text: speechText,
-            speechMetadata: { style: customStyle },
-          } as { text: string; speechMetadata?: { style?: string } })
-        : { text: speechText };
-      const responseStream = await ai.models.generateContentStream({
+      const partPayload = {
+        text: speechText,
+        speechMetadata: { style: customStyle },
+      } as { text: string; speechMetadata?: { style?: string } };
+      const responseStream = await generateTtsStreamWithRetry(ai, {
         model,
         contents: [
           {

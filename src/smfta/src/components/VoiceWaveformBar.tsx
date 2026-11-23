@@ -22,8 +22,12 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
   onCancel,
   onConfirm,
 }) => {
+  const hasLiveMic = Boolean(
+    audioStream &&
+      audioStream.getAudioTracks().some((t) => t.readyState === 'live' && t.enabled)
+  );
   const [levels, setLevels] = useState<number[]>(() =>
-    Array.from({ length: BAR_COUNT }, () => 0.2)
+    Array.from({ length: BAR_COUNT }, () => 0.1)
   );
   const [elapsedSec, setElapsedSec] = useState(0);
   const rafRef = useRef<number | null>(null);
@@ -48,11 +52,16 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
   useEffect(() => {
     if (!isListening) return;
 
+    if (!hasLiveMic || !audioStream) {
+      setLevels(Array.from({ length: BAR_COUNT }, () => 0.08));
+      return;
+    }
+
     let cancelled = false;
-    let tick = 0;
     let audioCtx: AudioContext | null = null;
     let analyser: AnalyserNode | null = null;
     let freqData: Uint8Array<ArrayBuffer> | null = null;
+    let timeData: Uint8Array<ArrayBuffer> | null = null;
 
     const attachStream = (stream: MediaStream) => {
       const AudioContextCtor =
@@ -62,43 +71,48 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
       if (!AudioContextCtor) return;
       try {
         audioCtx = new AudioContextCtor();
+        if (audioCtx.state === 'suspended') {
+          void audioCtx.resume().catch(() => {});
+        }
         const source = audioCtx.createMediaStreamSource(stream);
         analyser = audioCtx.createAnalyser();
         analyser.fftSize = 64;
-        analyser.smoothingTimeConstant = 0.72;
+        analyser.smoothingTimeConstant = 0.68;
         source.connect(analyser);
         freqData = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+        timeData = new Uint8Array(new ArrayBuffer(analyser.fftSize));
       } catch {
-        // Fallback smoothly if WebAudio is blocked
+        // Ignore WebAudio block cleanly
       }
     };
 
-    if (audioStream) attachStream(audioStream);
+    attachStream(audioStream);
 
     const loop = () => {
       if (cancelled) return;
-      tick += 0.16;
+      if (audioCtx && audioCtx.state === 'suspended') {
+        void audioCtx.resume().catch(() => {});
+      }
 
       const msSinceSpeech = Date.now() - (activityRef.current || 0);
-      const isSpeakingNow = msSinceSpeech >= 0 && msSinceSpeech < 750;
-      const boost = isSpeakingNow
-        ? 0.65 + 0.35 * Math.max(0, 1 - msSinceSpeech / 750)
-        : 0.3;
+      const recentSpeech = msSinceSpeech >= 0 && msSinceSpeech < 650;
+      let rms = 0;
 
-      if (analyser && freqData) {
+      if (analyser && freqData && timeData) {
         analyser.getByteFrequencyData(freqData);
+        analyser.getByteTimeDomainData(timeData);
+        let sumSq = 0;
+        for (let j = 0; j < timeData.length; j += 1) {
+          const centered = (timeData[j]! - 128) / 128;
+          sumSq += centered * centered;
+        }
+        rms = Math.sqrt(sumSq / timeData.length);
       }
 
       setLevels(
         Array.from({ length: BAR_COUNT }, (_, idx) => {
           const center =
             1 - Math.abs(idx - (BAR_COUNT - 1) / 2) / (BAR_COUNT / 1.4);
-          const primaryWave =
-            0.46 +
-            0.34 * Math.sin(tick * (isSpeakingNow ? 2.1 : 1.1) + idx * 0.52) +
-            0.2 * Math.cos(tick * (isSpeakingNow ? 3.2 : 1.6) - idx * 0.37);
-          const syntheticRatio =
-            primaryWave * boost * (0.4 + Math.max(0.18, center) * 0.75);
 
           if (freqData && freqData.length > 0) {
             const binIdx = Math.min(
@@ -106,16 +120,13 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
               Math.floor((idx / BAR_COUNT) * Math.min(freqData.length, 24))
             );
             const micRatio = (freqData[binIdx] || 0) / 255;
-            if (micRatio > 0.04) {
-              const blended = Math.max(
-                syntheticRatio * 0.65,
-                micRatio * (0.55 + center * 0.55)
-              );
-              return Math.max(0.14, Math.min(1, blended));
+            const liveLevel = Math.max(micRatio, Math.min(1, rms * 5.2));
+            if (liveLevel > 0.025) {
+              return Math.max(0.12, Math.min(1, liveLevel * (0.55 + center * 0.55)));
             }
           }
 
-          return Math.max(0.14, Math.min(1, syntheticRatio));
+          return recentSpeech ? 0.16 + center * 0.14 : 0.1 + center * 0.06;
         })
       );
 
@@ -131,7 +142,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
         audioCtx.close().catch(() => {});
       }
     };
-  }, [isListening, audioStream]);
+  }, [isListening, audioStream, hasLiveMic]);
 
   if (!isListening && !isTranscribing) return null;
 
@@ -158,9 +169,15 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
         <div className="flex flex-col gap-1 px-1">
           <div className="flex items-center justify-between text-[11.5px] text-[var(--ink-dim)]">
             <span className="inline-flex items-center gap-1.5 font-medium">
-              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  hasLiveMic ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'
+                }`}
+              />
               <Mic className="w-3 h-3 text-[var(--primary)]" />
-              <span>{cleanLive ? 'লাইভ ভয়েস টেক্সট' : 'শুনছি…'}</span>
+              <span data-testid={hasLiveMic ? 'voice-listening-label' : 'voice-mic-off-label'}>
+                {!hasLiveMic ? 'মাইক চালু নেই' : cleanLive ? 'লাইভ ভয়েস টেক্সট' : 'শুনছি…'}
+              </span>
             </span>
             <span className="font-mono text-[11px] tabular-nums text-[var(--text-3)]">
               {formattedTime}
@@ -178,7 +195,7 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
       )}
 
       <div className="flex items-center justify-between gap-3">
-        {/* Animated Audio Waveform Bars */}
+        {/* Audio Waveform Bars (flat when mic is off) */}
         <div
           className="flex-1 flex items-center justify-center gap-[3px] h-9 overflow-hidden"
           aria-hidden="true"
@@ -188,8 +205,8 @@ export const VoiceWaveformBar: React.FC<VoiceWaveformBarProps> = ({
               key={i}
               className="w-[3px] rounded-full bg-[var(--primary)]/80 motion-safe:transition-[height] duration-75 ease-out"
               style={{
-                height: `${Math.round(5 + lvl * 28)}px`,
-                opacity: isTranscribing ? 0.35 : 0.4 + lvl * 0.6,
+                height: `${hasLiveMic ? Math.round(5 + lvl * 28) : 5}px`,
+                opacity: isTranscribing || !hasLiveMic ? 0.28 : 0.4 + lvl * 0.6,
               }}
             />
           ))}

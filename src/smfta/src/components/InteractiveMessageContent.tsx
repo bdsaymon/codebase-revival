@@ -1406,7 +1406,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
       )}
 
       {isStreaming && (
-        <span className="inline-block w-2 h-4 bg-[var(--primary)] rounded-sm animate-pulse ml-1 align-middle" />
+        <span className="chat-stream-cursor" aria-hidden="true" />
       )}
 
       {/* Revision History & Undo Bar if user made inline edits */}

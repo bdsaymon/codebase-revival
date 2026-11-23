@@ -1034,10 +1034,13 @@ function writeProfiles(
     try {
       if (typeof localStorage === 'undefined') return 'blocked';
       const sealed = await Promise.all(
-        list.map(async (p) => ({
-          ...p,
-          externalKeys: await encryptSecret(p.externalKeys || ''),
-        }))
+        list.map(async (p) => {
+          const { decryptionFailed: _dropDecryptionFlag, ...rest } = p;
+          return {
+            ...rest,
+            externalKeys: await encryptSecret(p.externalKeys || ''),
+          };
+        })
       );
       localStorage.setItem(SAVED_PROFILES_KEY, JSON.stringify(sealed));
       return 'saved';
@@ -1085,11 +1088,101 @@ export function hasSealedProfileSecrets(): boolean {
 export async function hydrateSavedProfiles(): Promise<SavedProviderProfile[]> {
   const sealed = loadSavedProfiles({ keepSealed: true });
   return Promise.all(
-    sealed.map(async (p) => ({
-      ...p,
-      externalKeys: await decryptSecret(p.externalKeys || ''),
-    }))
+    sealed.map(async (p) => {
+      const raw = String(p.externalKeys || '').trim();
+      if (!raw) {
+        return { ...p, externalKeys: '', decryptionFailed: false };
+      }
+      try {
+        const plain = await decryptSecret(raw);
+        return {
+          ...p,
+          externalKeys: plain,
+          decryptionFailed: false,
+        };
+      } catch {
+        return {
+          ...p,
+          externalKeys: '',
+          decryptionFailed: true,
+          verified: false,
+          verificationStatus: 'failed' as const,
+          statusMessage: 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন',
+        };
+      }
+    })
   );
+}
+
+/**
+ * Validates non-empty custom Gemini API keys supplied by the user (AIza... prefix).
+ * Empty string is allowed when using the built-in server GEMINI_API_KEY on `gemini_custom`.
+ */
+export function validateGeminiApiKeyFormat(rawKeys: string): {
+  valid: boolean;
+  error?: string;
+} {
+  const keys = String(rawKeys || '')
+    .split(/[\n,;]+/)
+    .map((k) => k.trim())
+    .filter(Boolean);
+  if (keys.length === 0) {
+    return { valid: true };
+  }
+  const invalid = keys.find(
+    (k) => !k.startsWith('AIza') || k.length < 20 || /\s/.test(k)
+  );
+  if (invalid) {
+    return {
+      valid: false,
+      error:
+        'ভুল Gemini API কী ফরম্যাট: কাস্টম Gemini কী অবশ্যই "AIza" দিয়ে শুরু হতে হবে (কমপক্ষে ২০ অক্ষর, কোনো স্পেস ছাড়া)। Settings → Custom Providers থেকে সঠিক কী দিন।',
+    };
+  }
+  return { valid: true };
+}
+
+/**
+ * Formats upstream/provider errors into clear, actionable Bengali messages (without raw jargon).
+ */
+export function formatProviderErrorBn(params: {
+  code?: string;
+  httpStatus?: number | null;
+  providerLabel?: string;
+  modelName?: string;
+  rawMessage?: string;
+}): string {
+  const code = String(params.code || '').toUpperCase();
+  const status = params.httpStatus ?? 0;
+  const raw = String(params.rawMessage || '').trim();
+  const label = params.providerLabel || 'কাস্টম প্রোভাইডার';
+  const model = params.modelName || 'নির্বাচিত মডেল';
+
+  if (code === 'KEY_DECRYPT_FAILED' || /decrypt/i.test(raw)) {
+    return 'সেভ করা কী পড়া যাচ্ছে না, আবার কী দিন। Settings → Custom Providers থেকে কী-টি পুনরায় সেভ করুন।';
+  }
+  if (status === 401 || status === 403 || code === 'AUTH_INVALID') {
+    return `${label} API কী সঠিক নয় বা অনুমতি নেই (HTTP ${status || 401})। Settings → Custom Providers থেকে সঠিক কী আপডেট করুন।`;
+  }
+  if (status === 404 || code === 'MODEL_NOT_FOUND') {
+    return `"${model}" মডেল বা এন্ডপয়েন্ট ${label}-এ পাওয়া যায়নি (404)। Settings থেকে বৈধ মডেল বা Base URL পরীক্ষা করুন।`;
+  }
+  if (status === 429 || code === 'RATE_LIMITED') {
+    return `${label}-এ সাময়িক রিকোয়েস্ট সীমা (429) শেষ হয়েছে। একটু অপেক্ষা করে আবার চেষ্টা করুন বা অন্য প্রোভাইডার বেছে নিন।`;
+  }
+  if (status === 402 || code === 'QUOTA_EXCEEDED' || /credit|billing|insufficient/i.test(raw)) {
+    return `${label} অ্যাকাউন্টের কোটা বা ক্রেডিট শেষ (402)। প্রোভাইডারের বিলিং চেক করুন অথবা অন্য প্রোভাইডারে সুইচ করুন।`;
+  }
+  if (status === 400 || code === 'BAD_REQUEST') {
+    return `${label} রিকোয়েস্টটি গ্রহণ করেনি (400: ${raw.slice(0, 120) || 'মডেল বা প্যারামিটার ভুল'})। মডেল নাম ও Base URL যাচাই করুন।`;
+  }
+  if (code === 'TIMEOUT' || /timeout|timed\s*out/i.test(raw)) {
+    return `${label} সার্ভার থেকে উত্তর আসতে দেরি হয়েছে (Timeout)। আবার চেষ্টা করুন।`;
+  }
+  if (code === 'UPSTREAM_NETWORK' || /network|fetch|econn|enotfound/i.test(raw)) {
+    return `${label} সার্ভারে সংযোগ করা যায়নি। ইন্টারনেট বা Base URL ঠিক আছে কিনা দেখুন।`;
+  }
+  return raw || `${label} থেকে উত্তর আনা যায়নি। আবার চেষ্টা করুন।`;
 }
 
 export function providerReadiness(settings: AppSettings): {

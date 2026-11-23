@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Mic, Volume2, Play, Square } from 'lucide-react';
 import { AppSettings } from '../../types';
-import { bilingualSpeechPlayer } from '../../utils/voiceEngine';
+import {
+  bilingualSpeechPlayer,
+  resolveTtsVoicePersona,
+} from '../../utils/voiceEngine';
 import {
   SettingSelect,
   SettingToggle,
@@ -22,19 +25,40 @@ export const VoiceAudioSection: React.FC<VoiceAudioSectionProps> = ({
   notify,
 }) => {
   const [testingSpeech, setTestingSpeech] = useState(false);
+  const [testUsingBackup, setTestUsingBackup] = useState(false);
 
   const vlang = settings.vlang || 'bn-BD';
   const voiceSpeed =
     typeof settings.voiceSpeed === 'number' ? settings.voiceSpeed : 1.0;
-  const ttsVoice = settings.ttsVoice || 'default';
+  const resolvedPersona = resolveTtsVoicePersona(settings.ttsVoice);
+  const ttsSelectValue =
+    settings.ttsVoice &&
+    ['Kore', 'Zephyr', 'Puck', 'Charon', 'Fenrir'].includes(settings.ttsVoice)
+      ? settings.ttsVoice
+      : resolvedPersona;
+
+  useEffect(() => {
+    const unsub = bilingualSpeechPlayer.subscribe((st) => {
+      if (st.msgId === 'settings-voice-test') {
+        setTestingSpeech(st.status !== 'idle');
+        setTestUsingBackup(Boolean(st.isBackupVoice));
+      } else if (st.status === 'idle') {
+        setTestingSpeech(false);
+        setTestUsingBackup(false);
+      }
+    });
+    return unsub;
+  }, []);
 
   const handleTestVoice = () => {
     if (testingSpeech) {
       bilingualSpeechPlayer.stop();
       setTestingSpeech(false);
+      setTestUsingBackup(false);
       return;
     }
     setTestingSpeech(true);
+    setTestUsingBackup(false);
     const sample =
       vlang === 'en-US'
         ? 'Hello! SMFTA voice system is active and ready to assist you.'
@@ -43,11 +67,15 @@ export const VoiceAudioSection: React.FC<VoiceAudioSectionProps> = ({
       text: sample,
       msgId: 'settings-voice-test',
       preferredLang: vlang === 'en-US' ? 'en-US' : 'bn-BD',
-      voiceProfile: ttsVoice,
+      voiceProfile: ttsSelectValue,
+      geminiVoice: resolvedPersona,
       rate: voiceSpeed,
-      onDone: () => setTestingSpeech(false),
+      onDone: () => {
+        setTestingSpeech(false);
+        setTestUsingBackup(false);
+      },
     });
-    notify?.('ভয়েস টেস্ট চালু হয়েছে');
+    notify?.(`ভয়েস টেস্ট চালু হয়েছে (${resolvedPersona})`);
   };
 
   return (
@@ -116,20 +144,29 @@ export const VoiceAudioSection: React.FC<VoiceAudioSectionProps> = ({
         }
       >
         <SettingSelect
-          label="TTS Voice Profile"
+          label="Voice Persona (Synced with Live Call & Read Aloud)"
           testId="voice-tts-profile-select"
-          value={ttsVoice}
+          value={ttsSelectValue}
           options={[
-            { value: 'default', label: 'Default Neural Voice (Auto)' },
-            { value: 'bengali_female', label: 'বাংলা Natural Female (Srabani)' },
-            { value: 'bengali_male', label: 'বাংলা Deep Male (Tanvir)' },
-            { value: 'english_us_female', label: 'English US Female (Ava)' },
-            { value: 'english_us_male', label: 'English US Male (Andrew)' },
+            { value: 'Kore', label: 'Kore — Natural Female (Warm · বাংলা/English)' },
+            { value: 'Zephyr', label: 'Zephyr — Natural Female (Bright · Clear)' },
+            { value: 'Puck', label: 'Puck — Crisp Male' },
+            { value: 'Charon', label: 'Charon — Deep Male' },
+            { value: 'Fenrir', label: 'Fenrir — Bold Male' },
           ]}
           onChange={(val) =>
             onUpdate({ ttsVoice: val as AppSettings['ttsVoice'] })
           }
         />
+
+        {testUsingBackup && (
+          <div
+            data-testid="voice-backup-notice"
+            className="mt-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11.5px] text-amber-500 dark:text-amber-300"
+          >
+            ব্যাকআপ ভয়েস চলছে — প্রাইমারি Gemini ভয়েস সাময়িকভাবে পাওয়া যায়নি।
+          </div>
+        )}
 
         <div className="py-2.5 space-y-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">

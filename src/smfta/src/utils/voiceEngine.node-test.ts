@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  BilingualSpeechPlayer,
   extractReadySpeechChunks,
   formatTextForNaturalSpeech,
   requestGeminiFemaleSpeech,
+  resolveTtsVoicePersona,
   softLimitPcmSamples,
   splitTextForSpeech,
   streamGeminiPcmSpeech,
@@ -190,3 +192,102 @@ test('softLimitPcmSamples applies turn-start fade-in and analog soft peak limiti
   const cont = softLimitPcmSamples(raw, 0, 24000);
   assert.ok(cont[0]! > 0.85 && cont[0]! <= 0.98);
 });
+
+test('resolveTtsVoicePersona syncs Kore (default), Zephyr, and male personas cleanly', () => {
+  assert.equal(resolveTtsVoicePersona('default'), 'Kore');
+  assert.equal(resolveTtsVoicePersona('bengali_female'), 'Kore');
+  assert.equal(resolveTtsVoicePersona('english_us_female'), 'Zephyr');
+  assert.equal(resolveTtsVoicePersona('Zephyr'), 'Zephyr');
+  assert.equal(resolveTtsVoicePersona('Puck'), 'Puck');
+  assert.equal(resolveTtsVoicePersona('default', 'Charon'), 'Charon');
+});
+
+test('splitTextForSpeech caps browser fallback segments to <=170 chars', () => {
+  const longText = 'বাংলা ও ইংরেজি মিশ্রিত দীর্ঘ অনুচ্ছেদ টেস্ট। '.repeat(12);
+  const segs = splitTextForSpeech(longText, 170);
+  assert.ok(segs.length >= 2);
+  for (const seg of segs) {
+    assert.ok(seg.length <= 170, `Segment exceeded 170 chars: ${seg.length}`);
+  }
+});
+
+test('BilingualSpeechPlayer retries same voice once before fallback and flags backup voice', async () => {
+  let calls = 0;
+  let capturedVoice = '';
+  const retryFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    calls += 1;
+    const body = JSON.parse(String(init?.body || '{}'));
+    capturedVoice = body.voiceName;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ ok: false, error: 'temporary hiccup' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        audioBase64: 'UklGRg==',
+        mimeType: 'audio/wav',
+        voiceName: body.voiceName,
+        modelUsed: 'gemini-3.8-live',
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as unknown as typeof fetch;
+
+  const player = new BilingualSpeechPlayer();
+  const events: Array<{ status: string; isBackupVoice?: boolean; modelUsed?: string }> = [];
+  const unsub = player.subscribe((st) =>
+    events.push({ status: st.status, isBackupVoice: st.isBackupVoice, modelUsed: st.modelUsed })
+  );
+
+  // Stub minimal browser audio decode path isn't present in pure Node, so test retry + state before Audio play
+  await new Promise<void>((resolve) => {
+    player.speak({
+      text: 'হ্যালো, কেমন আছেন?',
+      msgId: 'test-1',
+      voiceProfile: 'Zephyr',
+      fetchImpl: retryFetch,
+      onDone: resolve,
+    });
+  });
+  unsub();
+
+  assert.equal(calls, 2);
+  assert.equal(capturedVoice, 'Zephyr');
+  assert.ok(events.some((e) => e.modelUsed === 'gemini-3.8-live' && !e.isBackupVoice));
+
+  // Now verify backup voice notice flag when server returns neural-voice-hd
+  const backupFetch = (async () =>
+    new Response(
+      JSON.stringify({
+        ok: true,
+        audioBase64: 'UklGRg==',
+        mimeType: 'audio/wav',
+        voiceName: 'Kore',
+        modelUsed: 'neural-voice-hd',
+        isBackupVoice: true,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )) as unknown as typeof fetch;
+
+  const backupPlayer = new BilingualSpeechPlayer();
+  const backupEvents: Array<{ isBackupVoice?: boolean; modelUsed?: string }> = [];
+  backupPlayer.subscribe((st) =>
+    backupEvents.push({ isBackupVoice: st.isBackupVoice, modelUsed: st.modelUsed })
+  );
+
+  await new Promise<void>((resolve) => {
+    backupPlayer.speak({
+      text: 'ব্যাকআপ পরীক্ষা।',
+      msgId: 'test-2',
+      voiceProfile: 'Kore',
+      fetchImpl: backupFetch,
+      onDone: resolve,
+    });
+  });
+
+  assert.ok(backupEvents.some((e) => e.isBackupVoice === true && e.modelUsed === 'neural-voice-hd'));
+});
+
