@@ -1,0 +1,11 @@
+ভয়েস রোবটের মতো শোনাচ্ছে। কারণ: Gemini TTS ফেল করলে সার্ভার Google Translate TTS (neural-voice-hd) এ, আর তারপর ব্রাউজারের speechSynthesis এ চলে যায়। এটা ঠিক করো:
+
+1) src/smfta/src/utils/voiceEngine.ts এ BilingualSpeechPlayer.speak() এর ভেতরে splitTextForSpeech(cleanText, 300) কে 900 করো (কম রিকোয়েস্ট, যাতে রেট-লিমিট না লাগে)।
+
+2) src/smfta/server/routes/tools.ts এ generateTtsWithRetry নামে একটা helper যোগ করো: ai.models.generateContent ফেল করলে এরর মেসেজে 429 / resource_exhausted / quota / rate থাকলে ১.৫ সেকেন্ড অপেক্ষা করে একই মডেলে আরেকবার চেষ্টা করবে, নইলে এরর ছুঁড়বে। শুধু /voice/tts রুটের generateContent কলটা এটা দিয়ে মোড়াও।
+
+3) /voice/tts আর /voice/tts-stream এ Gemini TTS কেন ফেল করছে সেটার lastError সার্ভার কনসোলে console.warn করো (মডেলের নামসহ), আর রেসপন্সে modelUsed ঠিকমতো পাঠাও।
+
+4) এরপর কোন মডেলে ভয়েস চলছে (gemini-3.8-flash-lite-tts / gemini-3.8-flash-tts / gemini-2.5-flash-preview-tts / neural-voice-hd) সেটা আমাকে বলো। আর যদি Gemini TTS কোনো মডেলেই না চলে, তাহলে কারণটা (GEMINI_API_KEY নেই, মডেল নেই, কোটা শেষ, ইত্যাদি) বাংলায় বলো।
+
+bun run typecheck আর ভয়েসের টেস্ট চালিয়ে দেখাও।

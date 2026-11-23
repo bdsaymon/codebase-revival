@@ -932,7 +932,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       ? Math.min(200, Math.max(1, Math.round(topK)))
       : undefined;
   const requestedThinkingMode: 'off' | 'low' | 'medium' | 'high' =
-    thinkingEnabled === false || thinkingMode === 'off'
+    liveVoiceMode || thinkingEnabled === false || thinkingMode === 'off'
       ? 'off'
       : thinkingMode === 'low' ||
         thinkingMode === 'medium' ||
@@ -1790,7 +1790,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     detail: `Routing to ${effectiveProvider}${activeCustomModelName ? ` · ${activeCustomModelName}` : ''}`,
   });
 
-  if (requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
+  if (!liveVoiceMode && requestedThinkingMode !== 'off' && !INSTANT_GREETING_REGEX.test(lastUserText)) {
     emitStatus('চিন্তা করছি…', 'thinking', 'Reasoning in progress');
   }
 
@@ -1802,14 +1802,10 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     effectiveProvider !== 'xrahat' &&
     effectiveProvider !== 'smfta_cloud';
 
-  let fastVoiceTriedServerGemini = false;
   if (liveVoiceMode && !isCustomNonGeminiProvider && !clientClosed) {
     const fastGeminiKey =
       (parsedKeys.find((k) => k.startsWith('AIza')) || getV2GeminiApiKey() || '').trim();
     if (fastGeminiKey) {
-      if (!built.hasUserKeys) {
-        fastVoiceTriedServerGemini = true;
-      }
       const fastAi = new GoogleGenAI({
         apiKey: fastGeminiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
@@ -1819,49 +1815,55 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         formattedTurns.length > 0
           ? formattedTurns
           : [{ role: 'user' as const, parts: [{ text: lastUserText || 'Hello' }] }];
-      const fastVoiceCandidates: Array<{ model: string; level: ThinkingLevel }> = [
+      const fastVoiceCandidates: Array<{ model: string; level?: ThinkingLevel }> = [
+        { model: 'gemini-flash-lite-latest', level: ThinkingLevel.MINIMAL },
         { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
-        { model: 'gemini-4-hydrogen', level: ThinkingLevel.LOW },
+        { model: 'gemini-3-flash-preview' },
       ];
 
       for (const cand of fastVoiceCandidates) {
         if (clientClosed || upstreamAbortController.signal.aborted) break;
-        let receivedFirstChunk = false;
         let candidateTimedOut = false;
         let firstTokenTimer: ReturnType<typeof setTimeout> | null = null;
         try {
-          const streamPromise = fastAi.models.generateContentStream({
-            model: cand.model,
-            contents: voiceHistoryContents,
-            config: {
-              systemInstruction: liveVoiceSysInstruction,
-              maxOutputTokens: Math.min(effectiveMaxOutputTokens, 260),
-              thinkingConfig: { thinkingLevel: cand.level },
-            },
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            firstTokenTimer = setTimeout(() => {
+              candidateTimedOut = true;
+              reject(new Error(`Voice fast-lane ${cand.model} first-token timeout`));
+            }, 3600);
           });
 
           const fastStream = await Promise.race([
-            streamPromise,
-            new Promise<never>((_, reject) => {
-              firstTokenTimer = setTimeout(() => {
-                candidateTimedOut = true;
-                reject(new Error(`Voice fast-lane ${cand.model} connect timeout`));
-              }, 3800);
+            fastAi.models.generateContentStream({
+              model: cand.model,
+              contents: voiceHistoryContents,
+              config: {
+                systemInstruction: liveVoiceSysInstruction,
+                maxOutputTokens: Math.min(effectiveMaxOutputTokens, 260),
+                ...(cand.level !== undefined
+                  ? { thinkingConfig: { thinkingLevel: cand.level } }
+                  : {}),
+              },
             }),
+            timeoutPromise,
           ]);
 
-          for await (const chunk of fastStream) {
+          const iterator = fastStream[Symbol.asyncIterator]();
+          // Race the very first yielded chunk against the same first-token watchdog
+          while (true) {
             if (clientClosed || upstreamAbortController.signal.aborted || candidateTimedOut) {
               break;
             }
-            const deltaText = chunk.text || '';
+            const nextStep = !fullReplyAccumulator
+              ? await Promise.race([iterator.next(), timeoutPromise])
+              : await iterator.next();
+
+            if (nextStep.done) break;
+            const deltaText = nextStep.value?.text || '';
             if (deltaText) {
-              if (!receivedFirstChunk) {
-                receivedFirstChunk = true;
-                if (firstTokenTimer) {
-                  clearTimeout(firstTokenTimer);
-                  firstTokenTimer = null;
-                }
+              if (firstTokenTimer) {
+                clearTimeout(firstTokenTimer);
+                firstTokenTimer = null;
               }
               emitDelta(deltaText);
             }
@@ -1886,10 +1888,16 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             });
             return;
           }
-        } catch {
+        } catch (err) {
           if (firstTokenTimer) {
             clearTimeout(firstTokenTimer);
             firstTokenTimer = null;
+          }
+          console.warn(
+            `[chat/stream] voice fast-lane failed for model="${cand.model}": ${err instanceof Error ? err.message : String(err)}`
+          );
+          if (fullReplyAccumulator.trim()) {
+            break;
           }
           // Try next fast voice candidate or fall through to standard engine
         }
@@ -1899,9 +1907,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   // 4. Route through HardenedAIEngine.stream() when provider/server-key candidates exist
   const shouldTryEngineCandidates =
-    !fastVoiceTriedServerGemini &&
-    (built.adHocProviders.length > 0 ||
-      (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud'));
+    built.adHocProviders.length > 0 ||
+    (effectiveProvider !== 'xrahat' && effectiveProvider !== 'smfta_cloud');
 
   let streamResAttempts: AttemptRecord[] = [];
   let nonStreamAttempts: AttemptRecord[] = [];

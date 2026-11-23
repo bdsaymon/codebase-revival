@@ -3776,8 +3776,11 @@ export default function App() {
     overrideProvider?: AppSettings['provider'],
     appendToMsg?: { id: string; prefixText: string }
   ) => {
+    const isLiveVoiceTurn = Boolean(voiceCallOpenRef.current || voiceCallOpen);
     const isThinkingEnabledAtStart =
-      settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
+      !isLiveVoiceTurn &&
+      settings.thinkingEnabled !== false &&
+      settings.thinkingMode !== 'off';
     setIsGenerating(true);
     setIsWaitingFirstToken(!appendToMsg && !isThinkingEnabledAtStart);
     setGenPhase(nextGenPhase(null, { type: 'start' }));
@@ -3880,7 +3883,9 @@ export default function App() {
 
     let bubbleCreated = Boolean(appendToMsg);
     const isThinkingEnabledForTurn =
-      settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
+      !isLiveVoiceTurn &&
+      settings.thinkingEnabled !== false &&
+      settings.thinkingMode !== 'off';
     const rawLastUserMsg =
       [...historyMsgs].reverse().find((m) => m.role === 'user')?.text || '';
     const initialTurnTopic = deriveInitialThinkingTopic(rawLastUserMsg);
@@ -4124,7 +4129,11 @@ export default function App() {
         text: clampMsgText(m.text, `message[${idx}]`),
       }));
 
-      const isLiveVoiceTurn = Boolean(voiceCallOpenRef.current || voiceCallOpen);
+      const isVoiceWorkspaceQuery =
+        !isLiveVoiceTurn ||
+        /\b(github|repo|drive|google|supabase|vercel|deploy|database|file|code|project|workspace|app|bug|error|doc|knowledge)\b|ফাইল|কোড|প্রজেক্ট|ডাটাবেস/i.test(
+          lastUserPrompt
+        );
       const shouldFetchLiveIntegrations =
         !isLiveVoiceTurn ||
         /\b(github|repo|drive|google|supabase|vercel|deploy|database|file)\b/i.test(
@@ -4138,22 +4147,28 @@ export default function App() {
           ).catch(() => '')
         : '';
 
-      const combinedProjectContext = [
-        smartCtx?.envelopeBlock || '',
-        projectPromptBlock(project, 80, 18000, lastUserPrompt),
-        liveIntegrationContext,
-        ...overflowChunks,
-      ]
-        .filter(Boolean)
-        .join('\n\n')
-        .slice(0, 110_000);
+      const combinedProjectContext = isVoiceWorkspaceQuery
+        ? [
+            smartCtx?.envelopeBlock || '',
+            projectPromptBlock(project, 80, 18000, lastUserPrompt),
+            liveIntegrationContext,
+            ...overflowChunks,
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+            .slice(0, 110_000)
+        : liveIntegrationContext;
 
-      const kbResult = buildKnowledgePromptContext(
-        lastUserPrompt,
-        knowledgeDocs,
-        settings.knowledgeSettings
-      );
-      const mcpToolsContext = buildMcpPromptContext(mcpServers);
+      const kbResult = isVoiceWorkspaceQuery
+        ? buildKnowledgePromptContext(
+            lastUserPrompt,
+            knowledgeDocs,
+            settings.knowledgeSettings
+          )
+        : { promptContext: '' };
+      const mcpToolsContext = isVoiceWorkspaceQuery
+        ? buildMcpPromptContext(mcpServers)
+        : '';
 
       const activeChatProject = (settings.projects || []).find(
         (p) => p.id === targetSession?.projectId
@@ -4496,7 +4511,9 @@ export default function App() {
 
       const scheduleFlush = () => {
         if (frameTimer !== null) return;
-        if (useGpuRaf) {
+        if (isLiveVoiceTurn) {
+          frameTimer = window.setTimeout(() => flushStreamText(true), 0);
+        } else if (useGpuRaf) {
           frameTimer = window.requestAnimationFrame(() => flushStreamText(false));
         } else {
           flushStreamText(false);

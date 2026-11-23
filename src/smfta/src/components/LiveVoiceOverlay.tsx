@@ -4,10 +4,13 @@ import {
   ChevronDown,
   Hand,
   Keyboard,
+  Maximize2,
   Mic,
   MicOff,
+  Minimize2,
   PhoneOff,
   RefreshCw,
+  RotateCcw,
   Volume2,
   X,
 } from 'lucide-react';
@@ -26,6 +29,7 @@ import {
   requestGeminiFemaleSpeech,
   requestServerVoiceTranscription,
   resolveRecognitionLanguage,
+  softLimitPcmSamples,
   streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
 import {
@@ -71,16 +75,21 @@ const VOICE_OPTIONS: Array<{
   id: GeminiFemaleVoiceName;
   name: string;
   subtitle: string;
+  tone: string;
 }> = [
-  { id: 'Kore', name: 'Kore', subtitle: 'Female' },
-  { id: 'Zephyr', name: 'Zephyr', subtitle: 'Female' },
-  { id: 'Puck', name: 'Puck', subtitle: 'Male' },
-  { id: 'Charon', name: 'Charon', subtitle: 'Male' },
-  { id: 'Fenrir', name: 'Fenrir', subtitle: 'Male' },
+  { id: 'Kore', name: 'Kore', subtitle: 'Female', tone: 'Warm' },
+  { id: 'Zephyr', name: 'Zephyr', subtitle: 'Female', tone: 'Bright' },
+  { id: 'Puck', name: 'Puck', subtitle: 'Male', tone: 'Crisp' },
+  { id: 'Charon', name: 'Charon', subtitle: 'Male', tone: 'Deep' },
+  { id: 'Fenrir', name: 'Fenrir', subtitle: 'Male', tone: 'Bold' },
 ];
+
+const VOICE_RATE_STEPS = [0.9, 1, 1.15, 1.3] as const;
+type VoiceSpeechRate = (typeof VOICE_RATE_STEPS)[number];
 
 const VOICE_PREF_KEY = 'smfta_live_voice_persona_v1';
 const VOICE_LANG_PREF_KEY = 'smfta_live_voice_lang_v1';
+const VOICE_RATE_PREF_KEY = 'smfta_live_voice_rate_v1';
 
 let sharedLiveAudioCtx: AudioContext | null = null;
 
@@ -129,11 +138,27 @@ function loadSavedVoiceLang(fallback?: string): 'bn-BD' | 'en-US' {
   );
 }
 
+function loadSavedVoiceRate(): VoiceSpeechRate {
+  try {
+    const raw = Number(localStorage.getItem(VOICE_RATE_PREF_KEY));
+    if (VOICE_RATE_STEPS.includes(raw as VoiceSpeechRate)) {
+      return raw as VoiceSpeechRate;
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return 1;
+}
+
 function buildVoiceStylePrompt(voice: GeminiFemaleVoiceName): string {
-  const isMale = voice === 'Puck' || voice === 'Charon' || voice === 'Fenrir';
-  return isMale
-    ? 'Crystal clear, warm natural human male conversational voice with accurate standard Bengali and English pronunciation, smooth sentence pacing, never robotic or rushed'
-    : 'Crystal clear, warm natural human female conversational voice with accurate standard Bengali and English pronunciation, smooth sentence pacing, never robotic or rushed';
+  const styles: Record<GeminiFemaleVoiceName, string> = {
+    Kore: 'Intimate studio-mic warmth, velvety natural human female voice with lyrical Bengali and English cadence and gentle conversational warmth',
+    Zephyr: 'Crystal clear, silky, poised human female studio voice with natural rhythmic pauses and expressive Bengali and English articulation',
+    Puck: 'Crisp, friendly, articulate human male studio voice with relaxed natural pacing and accurate Bengali and English pronunciation',
+    Charon: 'Calm, rich, resonant deep male studio voice with soothing human warmth and natural conversational phrasing',
+    Fenrir: 'Warm, grounded, charismatic human male studio voice with confident depth and smooth bilingual flow',
+  };
+  return styles[voice] || styles.Kore;
 }
 
 const STATE_COPY: Record<
@@ -203,6 +228,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const [voiceLang, setVoiceLang] = useState<'bn-BD' | 'en-US'>(() =>
     loadSavedVoiceLang(preferredLang)
   );
+  const [speechRate, setSpeechRate] = useState<VoiceSpeechRate>(loadSavedVoiceRate);
+  const [activeVoiceModel, setActiveVoiceModel] = useState<string | null>(null);
+  const [expandedTranscript, setExpandedTranscript] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -306,6 +334,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     isSessionListening,
     selectedVoice,
     voiceLang,
+    speechRate,
     userName,
     onSendText,
     onAbortGeneration,
@@ -322,6 +351,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     isSessionListening,
     selectedVoice,
     voiceLang,
+    speechRate,
     userName,
     onSendText,
     onAbortGeneration,
@@ -343,6 +373,14 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     }
   }, [voiceLang]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(VOICE_RATE_PREF_KEY, String(speechRate));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [speechRate]);
+
   const ensureAudioContext = useCallback((): AudioContext | null => {
     const ctx = unlockSharedLiveAudioContext();
     audioCtxRef.current = ctx;
@@ -356,7 +394,37 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.72;
-    analyser.connect(ctx.destination);
+
+    // Studio vocal mastering chain: warm chest low-shelf, soft consonant clarity, silky de-ess & even leveling
+    const lowShelf = ctx.createBiquadFilter();
+    lowShelf.type = 'lowshelf';
+    lowShelf.frequency.value = 155;
+    lowShelf.gain.value = 1.6;
+
+    const presence = ctx.createBiquadFilter();
+    presence.type = 'peaking';
+    presence.frequency.value = 2800;
+    presence.Q.value = 0.85;
+    presence.gain.value = 1.25;
+
+    const highShelf = ctx.createBiquadFilter();
+    highShelf.type = 'highshelf';
+    highShelf.frequency.value = 7600;
+    highShelf.gain.value = -1.5;
+
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -18;
+    compressor.knee.value = 14;
+    compressor.ratio.value = 2.8;
+    compressor.attack.value = 0.006;
+    compressor.release.value = 0.16;
+
+    analyser.connect(lowShelf);
+    lowShelf.connect(presence);
+    presence.connect(highShelf);
+    highShelf.connect(compressor);
+    compressor.connect(ctx.destination);
+
     playbackAnalyserRef.current = analyser;
     return analyser;
   }, []);
@@ -595,7 +663,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             const resultsLen = e?.results?.length ?? 0;
             const latestIsFinal =
               resultsLen > 0 && Boolean(e?.results?.[resultsLen - 1]?.isFinal);
-            const commitDelayMs = latestIsFinal ? 1300 : 2200;
+            const commitDelayMs = latestIsFinal ? 900 : 1850;
             speechRecCommitTimerRef.current = window.setTimeout(() => {
               speechRecCommitTimerRef.current = null;
               if (
@@ -794,7 +862,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                     ) {
                       void commitActiveUtteranceRef.current(false);
                     }
-                  }, 1200);
+                  }, 950);
                 } else if (chunkCount >= 28 && !vadStateRef.current.isVoiceActive) {
                   // Trim old silent buffer so subsequent speech is transcribed crisply
                   turnChunksRef.current = turnChunksRef.current.slice(-4);
@@ -1005,6 +1073,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         const analyser = ensurePlaybackAnalyser(ctx);
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
+        const rate = stateRef.current.speechRate || 1;
+        if (rate !== 1) {
+          source.playbackRate.value = rate;
+        }
         if (detuneCents !== 0 && source.detune) {
           try {
             source.detune.value = detuneCents;
@@ -1016,7 +1088,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
         const now = ctx.currentTime;
         const startAt = Math.max(now + 0.02, nextPlayTimeRef.current);
-        nextPlayTimeRef.current = startAt + audioBuffer.duration;
+        const effectiveDuration = audioBuffer.duration / rate;
+        nextPlayTimeRef.current = startAt + effectiveDuration;
 
         activeSourcesRef.current.add(source);
         playbackSourceRef.current = source;
@@ -1041,7 +1114,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         };
 
         const waitMs =
-          Math.max(0, Math.ceil((startAt - now + audioBuffer.duration) * 1000)) + 450;
+          Math.max(0, Math.ceil((startAt - now + effectiveDuration) * 1000)) + 450;
         const safetyTimerId = window.setTimeout(finishSource, waitMs);
         playbackSafetyTimersRef.current.add(safetyTimerId);
 
@@ -1077,16 +1150,23 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       }
       bilingualSpeechPlayer.stop();
       const analyser = ensurePlaybackAnalyser(ctx);
-      const audioBuffer = ctx.createBuffer(1, samples.length, sampleRate);
-      audioBuffer.copyToChannel(new Float32Array(samples), 0);
+      const isTurnStart = activeSourcesRef.current.size === 0;
+      const smoothed = softLimitPcmSamples(samples, isTurnStart ? 3.5 : 0, sampleRate);
+      const audioBuffer = ctx.createBuffer(1, smoothed.length, sampleRate);
+      audioBuffer.copyToChannel(new Float32Array(smoothed), 0);
 
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
+      const rate = stateRef.current.speechRate || 1;
+      if (rate !== 1) {
+        source.playbackRate.value = rate;
+      }
       source.connect(analyser);
 
       const now = ctx.currentTime;
       const startAt = Math.max(now + 0.015, nextPlayTimeRef.current);
-      nextPlayTimeRef.current = startAt + audioBuffer.duration;
+      const effectiveDuration = audioBuffer.duration / rate;
+      nextPlayTimeRef.current = startAt + effectiveDuration;
 
       if (activeSourcesRef.current.size === 0) {
         aiSpeakingStartedAtRef.current = Date.now();
@@ -1112,7 +1192,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       };
 
       const waitMs =
-        Math.max(0, Math.ceil((startAt - now + audioBuffer.duration) * 1000)) + 450;
+        Math.max(0, Math.ceil((startAt - now + effectiveDuration) * 1000)) + 450;
       const safetyTimerId = window.setTimeout(finishSource, waitMs);
       playbackSafetyTimersRef.current.add(safetyTimerId);
 
@@ -1146,6 +1226,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         }
         aiSpeakingStartedAtRef.current = Date.now();
         bargeInStateRef.current = createBargeInState();
+        setActiveVoiceModel('browser');
         setIsSynthesizingVoice(false);
         setIsAiSpeaking(true);
         bilingualSpeechPlayer.speak({
@@ -1153,6 +1234,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           text,
           voiceProfile: isMaleVoice ? 'bengali_male' : 'bengali_female',
           geminiVoice: voice,
+          rate: stateRef.current.speechRate || 1,
           skipServerTts: true,
           onDone: () => resolve(),
         });
@@ -1174,11 +1256,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           !ctrl.signal.aborted &&
           runId === pipelineRunIdRef.current
         ) {
-          // Coalesce queued chunks up to 380 chars so each utterance streams with one natural voice cadence
+          // Coalesce queued chunks up to 560 chars so multi-sentence replies share one continuous vocal breath
           let sentence = (pendingChunksRef.current.shift() || '').trim();
           while (
             pendingChunksRef.current.length > 0 &&
-            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 380
+            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 560
           ) {
             const nextPart = (pendingChunksRef.current.shift() || '').trim();
             if (nextPart) {
@@ -1220,6 +1302,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             });
             if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
             if (streamRes.ok && streamRes.receivedAudio) {
+              if (streamRes.modelUsed) {
+                setActiveVoiceModel(streamRes.modelUsed);
+              }
               continue;
             }
           }
@@ -1248,6 +1333,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               setStatusNotice(res.error);
             }
             break;
+          }
+
+          if (res.modelUsed) {
+            setActiveVoiceModel(res.modelUsed);
           }
 
           try {
@@ -1487,7 +1576,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
     spokenMsgIdRef.current = lastAiMessage?.id || null;
     activeTurnMsgIdRef.current = lastAiMessage?.id || null;
-    spokenCursorRef.current = lastAiMessage?.text ? lastAiMessage.text.length : 0;
+    spokenCursorRef.current = lastAiMessage?.text
+      ? formatTextForNaturalSpeech(lastAiMessage.text, 12000).length
+      : 0;
     setSessionUserText('');
     setGreetingText('');
     onCancelMic?.();
@@ -1520,11 +1611,59 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !keyboardOpen) {
+      const target = e.target as HTMLElement | null;
+      const isTypingTarget =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT';
+
+      if (e.key === 'Escape') {
         e.preventDefault();
         stopAiSpeechPlayback();
         releaseAllMicResources();
         onEndCall();
+        return;
+      }
+      if (isTypingTarget) return;
+
+      if (e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setIsMuted((prev) => {
+          const nextMuted = !prev;
+          if (persistentStreamRef.current) {
+            persistentStreamRef.current.getAudioTracks().forEach((track) => {
+              track.enabled = !nextMuted;
+            });
+          }
+          if (nextMuted) {
+            stopTurnRecognition();
+            setIsUserVoicing(false);
+          } else if (
+            visualStateRef.current === 'listening' &&
+            !stateRef.current.isGenerating &&
+            !stateRef.current.isAiSpeaking &&
+            !stateRef.current.isDisconnected
+          ) {
+            startListeningTurn();
+          }
+          return nextMuted;
+        });
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        if (
+          visualStateRef.current === 'speaking' ||
+          stateRef.current.isSynthesizingVoice
+        ) {
+          handleInterruptAndListen();
+        } else if (
+          visualStateRef.current === 'listening' &&
+          !stateRef.current.isMuted &&
+          (turnHadRealSpeechRef.current ||
+            recognitionLiveTextRef.current.trim() ||
+            turnChunksRef.current.length >= 2)
+        ) {
+          void commitActiveUtteranceRef.current(true);
+        }
       }
     };
 
@@ -1549,11 +1688,16 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     if (!isOpen) return;
     if (!lastAiMessage || !lastAiMessage.id) return;
 
+    const cleanTextLen = formatTextForNaturalSpeech(lastAiMessage.text, 12000).length;
+
     if (
       spokenMsgIdRef.current === lastAiMessage.id &&
       activeTurnMsgIdRef.current === lastAiMessage.id &&
-      spokenCursorRef.current >= (lastAiMessage.text?.length || 0)
+      spokenCursorRef.current >= cleanTextLen
     ) {
+      if (!isGenerating) {
+        scheduleAutoListenAfterSpeech(ttsAbortRef.current);
+      }
       return;
     }
 
@@ -1569,7 +1713,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       if (lastAiMessage.isError) {
         const errClean = formatTextForNaturalSpeech(lastAiMessage.text, 200);
         if (errClean) setStatusNotice(errClean);
-        spokenCursorRef.current = lastAiMessage.text.length;
+        spokenCursorRef.current = cleanTextLen;
         scheduleAutoListenAfterSpeech(null);
         return;
       }
@@ -1579,13 +1723,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
     if (lastAiMessage.isError) return;
 
-    // Wait until streaming finishes OR a full paragraph (>= 160 chars) is ready
-    // so short 1-3 sentence voice replies are synthesized in ONE single voice request!
-    const unqueuedLen = Math.max(0, (lastAiMessage.text?.length || 0) - spokenCursorRef.current);
-    if (isGenerating && unqueuedLen < 160) {
-      return;
-    }
-
+    // Stream speech immediately as the first sentence/clause arrives without waiting for the full reply
     const { chunks, nextCursor } = extractReadySpeechChunks(
       lastAiMessage.text,
       spokenCursorRef.current,
@@ -2255,15 +2393,66 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const cleanUserTranscript = sanitizeVoiceUtterance(
     liveCaption || sessionUserText || lastUserText
   );
-  const cleanAiTranscript =
+  const fullAiSourceText =
     lastAiMessage?.text && activeTurnMsgIdRef.current === lastAiMessage.id
-      ? formatTextForNaturalSpeech(lastAiMessage.text, 240)
+      ? lastAiMessage.text
       : greetingText;
+  const cleanAiTranscript = formatTextForNaturalSpeech(fullAiSourceText, 900);
 
   const hasCapturedSpeechToSend =
     voiceState === 'listening' &&
     !isMuted &&
     (isUserVoicing || Boolean(liveCaption.trim()) || hasRecordedAudio);
+
+  const quickStarters =
+    voiceLang === 'bn-BD'
+      ? [
+          'আজকের ফোকাস টিপস দাও',
+          'মজার একটি বিজ্ঞানের তথ্য বলো',
+        ]
+      : [
+          '3 focus tips for today',
+          'Tell me a short story',
+        ];
+
+  const handleCycleSpeechRate = () => {
+    ensureAudioContext();
+    setSpeechRate((prev) => {
+      const idx = VOICE_RATE_STEPS.indexOf(prev);
+      return VOICE_RATE_STEPS[(idx + 1) % VOICE_RATE_STEPS.length]!;
+    });
+  };
+
+  const handleReplayAiSpeech = () => {
+    const source = fullAiSourceText.trim();
+    if (!source || isGenerating || isOffline) return;
+    ensureAudioContext();
+    stopListeningTurnOnly();
+    stopAiSpeechPlayback();
+    setStatusNotice(null);
+    const { chunks } = extractReadySpeechChunks(source, 0, true);
+    if (chunks.length === 0) return;
+    ttsAbortRef.current = new AbortController();
+    pendingChunksRef.current = chunks;
+    void drainSpeechPipeline(`replay-${Date.now()}`);
+  };
+
+  const handleQuickPrompt = (promptText: string) => {
+    const verdict = shouldSubmitVoiceUtterance({
+      rawText: promptText,
+      hadRealSpeechEnergy: true,
+      lastSubmitted: lastSubmittedRef.current,
+      nowMs: Date.now(),
+    });
+    if (!verdict.accept) return;
+    ensureAudioContext();
+    stopListeningTurnOnly();
+    stopAiSpeechPlayback();
+    lastSubmittedRef.current = { text: verdict.cleanText, at: Date.now() };
+    setSessionUserText(verdict.cleanText);
+    setStatusNotice(null);
+    onSendText(verdict.cleanText);
+  };
 
   const handleSelectVoicePersona = (nextVoice: GeminiFemaleVoiceName) => {
     ensureAudioContext();
@@ -2405,48 +2594,52 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     <div
       data-testid="voice-call-overlay"
       data-voice-state={voiceState}
+      data-voice-model={activeVoiceModel || ''}
       role="dialog"
       aria-modal="true"
       aria-label="SMFTA Live Voice Conversation"
       className={`live-voice-overlay live-voice-state-${voiceState} fixed inset-0 z-[70] h-[100dvh] w-full text-white flex flex-col justify-between select-none overflow-hidden`}
     >
-      {/* Ambient Architectural Halo & Horizon Aurora Layers */}
-      <div className="live-voice-ambient-grid pointer-events-none" aria-hidden="true" />
+      {/* Ambient Obsidian Horizon Glow */}
       <div className="live-voice-aurora-horizon pointer-events-none" aria-hidden="true" />
 
-      {/* Top Spatial HUD Bar: Sculpted Telemetry Pill + Natural Voice Selector + Exit */}
-      <header className="relative z-10 w-full max-w-3xl mx-auto flex items-center justify-between gap-2 px-3.5 sm:px-6 pt-[max(1rem,env(safe-area-inset-top))] pb-1.5">
-        <div className="live-voice-hud-pill inline-flex items-center gap-2.5 pl-3 pr-4 h-11 rounded-full shrink-0">
+      {/* Top Uncluttered Bar: Minimal Live Status & Timer + Quiet Controls */}
+      <header className="relative z-10 w-full max-w-4xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-7 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
+        <div className="inline-flex items-center gap-2 min-w-0 shrink-0">
           <span
             className={`w-2 h-2 rounded-full shrink-0 transition-colors ${stateDotColor}`}
             aria-hidden="true"
           />
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[12.5px] font-semibold tracking-tight text-white/95 whitespace-nowrap">
-                SMFTA Voice
-              </span>
-              <span className="hidden sm:inline-block text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-400/15 text-cyan-200/90">
-                Natural HD
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-300/80 whitespace-nowrap leading-none mt-0.5">
-              <span data-testid="live-voice-status-label" className="font-medium text-cyan-100/90">
-                {voiceState === 'listening' && isMuted ? 'Muted' : activeCopy.label}
-              </span>
-              <span className="text-white/25" aria-hidden="true">
-                ·
-              </span>
-              <span className="font-mono text-[10.5px] tabular-nums text-slate-300/75">
-                {formattedTime}
-              </span>
-            </div>
-          </div>
+          <span
+            data-testid="live-voice-status-label"
+            className="text-[13px] font-medium tracking-tight text-white/90 whitespace-nowrap"
+          >
+            {voiceState === 'listening' && isMuted ? 'Muted' : activeCopy.label}
+          </span>
+          <span className="text-white/25 text-[12px]" aria-hidden="true">
+            ·
+          </span>
+          <span className="font-mono text-[12px] tabular-nums text-slate-300/75 shrink-0">
+            {formattedTime}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <label className="live-voice-select-wrap live-voice-hud-pill relative inline-flex items-center h-11 px-3 sm:px-3.5 rounded-full hover:bg-white/[0.11] transition-colors cursor-pointer">
-            <Volume2 className="w-3.5 h-3.5 text-cyan-300/95 mr-1.5 shrink-0 pointer-events-none" />
+          <button
+            type="button"
+            data-testid="live-voice-rate-btn"
+            onClick={handleCycleSpeechRate}
+            aria-label={`Speech playback speed ${speechRate}x`}
+            title={`Speed: ${speechRate}x`}
+            className="live-voice-control live-voice-ghost-btn h-10 sm:h-11 px-2.5 sm:px-3 rounded-full text-[12px] font-mono tabular-nums font-medium text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+          >
+            {speechRate === 1 ? '1.0×' : `${speechRate}×`}
+          </button>
+
+          <label className="live-voice-select-wrap live-voice-ghost-btn relative inline-flex items-center h-10 sm:h-11 px-3 sm:px-3.5 rounded-full transition-colors cursor-pointer shrink-0">
+            <span className="text-[12.5px] font-medium text-white/90 pr-4 whitespace-nowrap pointer-events-none">
+              {selectedVoice}
+            </span>
             <select
               aria-label="Voice persona"
               data-testid="live-voice-persona-select"
@@ -2454,15 +2647,15 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               onChange={(e) =>
                 handleSelectVoicePersona(e.target.value as GeminiFemaleVoiceName)
               }
-              className="live-voice-select appearance-none bg-transparent pr-4 sm:pr-5 text-[11.5px] sm:text-[12.5px] font-medium text-white/95 cursor-pointer max-w-[96px] sm:max-w-[156px] truncate"
+              className="live-voice-select absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             >
               {VOICE_OPTIONS.map((v) => (
                 <option key={v.id} value={v.id} className="bg-slate-950 text-white">
-                  {v.name} · {v.subtitle}
+                  {v.name} · {v.subtitle} ({v.tone})
                 </option>
               ))}
             </select>
-            <ChevronDown className="w-3.5 h-3.5 text-white/60 absolute right-2.5 pointer-events-none" />
+            <ChevronDown className="w-3.5 h-3.5 text-white/55 absolute right-2.5 pointer-events-none" />
           </label>
 
           <button
@@ -2470,16 +2663,16 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             data-testid="live-voice-close-btn"
             onClick={handleSafeExit}
             aria-label="Exit Voice Mode"
-            title="Exit Voice Mode"
-            className="live-voice-control live-voice-hud-pill w-11 h-11 rounded-full inline-flex items-center justify-center hover:bg-white/[0.14] text-white/85 hover:text-white transition-colors cursor-pointer shrink-0"
+            title="Exit"
+            className="live-voice-control live-voice-ghost-btn w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Center Stage: Sculptural 3D Quantum Orb + 36-Bar Mirrored Spectrum + Persona Strip + Live Dialogue Card */}
-      <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center text-center w-full max-w-xl mx-auto px-4 py-1">
+      {/* Center Stage: Luminous Quantum Orb + Minimal Waveform + Calm Dialogue */}
+      <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center text-center w-full max-w-xl mx-auto px-5 py-2">
         <div className="relative flex items-center justify-center">
           <div
             className={`live-voice-orb-pedestal pointer-events-none ${
@@ -2504,95 +2697,127 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             <canvas
               ref={orbCanvasRef}
               data-testid="live-voice-orb-canvas"
-              className="w-[236px] h-[236px] sm:w-[288px] sm:h-[288px] block"
+              className="w-[216px] h-[216px] sm:w-[268px] sm:h-[268px] block"
               aria-hidden="true"
             />
           </button>
         </div>
 
-        {/* Symmetrical 36-Bar Mirrored Harmonic Spectrum */}
-        <div className="mt-0.5 mb-1.5 flex items-center justify-center h-10">
+        {/* Clean Mirrored Harmonic Spectrum */}
+        <div className="mt-1 mb-1.5 flex items-center justify-center h-9">
           <canvas
             ref={waveCanvasRef}
             data-testid="live-voice-waveform-canvas"
-            className="w-[264px] h-[42px] block"
+            className="w-[240px] sm:w-[264px] h-[42px] block"
             aria-label="Live audio waveform"
           />
         </div>
 
-        {/* Crisp State Headline & Bilingual Micro-Guidance */}
+        {/* Serene Typographic State Readout */}
         <div className="space-y-1 max-w-md px-2">
           <h2
             data-testid="live-voice-headline"
-            className="live-voice-headline-glow text-[23px] sm:text-[28px] font-semibold tracking-tight text-white leading-tight"
+            className="live-voice-headline-glow text-[24px] sm:text-[30px] font-medium tracking-tight text-white leading-tight [text-wrap:balance]"
           >
             {effectiveHeadline}
           </h2>
-          <p className="text-[13px] sm:text-[13.5px] font-normal text-slate-300/80 leading-snug">
+          <p className="text-[13px] sm:text-[13.5px] font-normal text-slate-300/70 leading-snug">
             {effectiveHint}
           </p>
         </div>
 
-        {/* Interactive Natural Voice Persona Quick-Switch Bar */}
-        <div
-          role="group"
-          aria-label="Natural voice personas"
-          className="mt-2.5 flex items-center justify-center gap-1.5 flex-wrap max-w-md px-1"
-        >
-          {VOICE_OPTIONS.map((v) => {
-            const active = selectedVoice === v.id;
-            return (
-              <button
-                key={v.id}
-                type="button"
-                data-testid={`live-voice-chip-${v.id.toLowerCase()}`}
-                onClick={() => handleSelectVoicePersona(v.id)}
-                aria-pressed={active}
-                className={`live-voice-control live-voice-persona-chip h-7 px-2.5 rounded-full text-[11px] font-medium inline-flex items-center gap-1 transition-all cursor-pointer ${
-                  active
-                    ? 'is-active text-white'
-                    : 'text-slate-300/75 hover:text-white/95'
-                }`}
-              >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    active ? 'bg-cyan-300 shadow-[0_0_6px_rgba(103,232,249,0.9)]' : 'bg-white/25'
-                  }`}
-                  aria-hidden="true"
-                />
-                <span>{v.name}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Frosted-Glass Live Dialogue Deck (never exposes <think> reasoning) */}
-        {(cleanUserTranscript || cleanAiTranscript) && (
+        {/* Clean Live Dialogue Captions OR Minimal Conversation Starters */}
+        {cleanUserTranscript || cleanAiTranscript ? (
           <div
             data-testid="live-voice-transcript-box"
-            className="live-voice-transcript live-voice-dialogue-card mt-3 w-full max-w-md px-3.5 py-2.5 rounded-2xl text-left space-y-1.5 max-h-[112px] overflow-y-auto"
+            className={`live-voice-transcript live-voice-dialogue-card mt-5 w-full px-4 py-3 rounded-2xl text-left space-y-2.5 overflow-y-auto transition-[max-height] duration-200 ${
+              expandedTranscript ? 'max-h-[210px]' : 'max-h-[126px] sm:max-h-[144px]'
+            }`}
           >
             {cleanUserTranscript && (
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wider bg-emerald-400/15 text-emerald-200/95">
-                  {voiceLang === 'bn-BD' ? 'আপনি' : 'YOU'}
+              <div className="space-y-0.5">
+                <span className="text-[11px] font-medium text-emerald-300/85">
+                  {voiceLang === 'bn-BD' ? 'আপনি' : 'You'}
                 </span>
-                <p className="text-[13px] text-cyan-100/95 leading-snug line-clamp-2">
+                <p
+                  className={`text-[13px] text-slate-200/90 leading-relaxed ${
+                    expandedTranscript ? '' : 'line-clamp-2'
+                  }`}
+                >
                   {cleanUserTranscript}
                 </p>
               </div>
             )}
+
+            {cleanUserTranscript && cleanAiTranscript && (
+              <div className="h-px bg-white/[0.06]" aria-hidden="true" />
+            )}
+
             {cleanAiTranscript && (
-              <div className="flex items-start gap-2">
-                <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[9.5px] font-semibold uppercase tracking-wider bg-violet-400/20 text-violet-200/95">
-                  {selectedVoice}
-                </span>
-                <p className="text-[13.5px] text-white/95 font-normal leading-snug line-clamp-2">
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-medium text-violet-300/85">
+                    {selectedVoice}
+                  </span>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {!isGenerating && (
+                      <button
+                        type="button"
+                        data-testid="live-voice-replay-btn"
+                        onClick={handleReplayAiSpeech}
+                        aria-label="Replay voice response"
+                        title="Replay"
+                        className="live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/70 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="live-voice-expand-btn"
+                      onClick={() => setExpandedTranscript((v) => !v)}
+                      aria-label={expandedTranscript ? 'Collapse transcript' : 'Expand transcript'}
+                      title={expandedTranscript ? 'Collapse' : 'Expand'}
+                      className="live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/70 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+                    >
+                      {expandedTranscript ? (
+                        <Minimize2 className="w-3.5 h-3.5" />
+                      ) : (
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <p
+                  className={`text-[13.5px] sm:text-[14px] text-white/95 font-normal leading-relaxed ${
+                    expandedTranscript ? '' : 'line-clamp-3'
+                  }`}
+                >
                   {cleanAiTranscript}
                 </p>
               </div>
             )}
           </div>
+        ) : (
+          !isOffline &&
+          !isGenerating && (
+            <div
+              data-testid="live-voice-quick-prompts"
+              className="mt-5 flex flex-wrap items-center justify-center gap-2 max-w-md"
+            >
+              {quickStarters.map((promptText, idx) => (
+                <button
+                  key={promptText}
+                  type="button"
+                  data-testid={`live-voice-starter-${idx}`}
+                  onClick={() => handleQuickPrompt(promptText)}
+                  className="live-voice-control live-voice-starter-btn h-10 px-4 rounded-full text-[12.5px] font-medium text-slate-200/85 hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  {promptText}
+                </button>
+              ))}
+            </div>
+          )
         )}
 
         {needsTapToPlay && pendingAudioBufferRef.current && (
@@ -2607,10 +2832,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                 startDecodedBufferPlayback(ctx, buf, ttsAbortRef.current);
               });
             }}
-            className="live-voice-control mt-2.5 inline-flex items-center gap-2 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-semibold px-5 h-10 text-[12.5px] cursor-pointer transition-colors"
+            className="live-voice-control mt-3 inline-flex items-center gap-2 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-medium px-5 h-11 text-[13px] cursor-pointer transition-colors"
           >
             <Volume2 className="w-4 h-4" />
-            <span>Tap to enable voice audio</span>
+            <span>Tap to enable audio</span>
           </button>
         )}
 
@@ -2618,15 +2843,15 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           <p
             data-testid="live-voice-status-notice"
             role="status"
-            className="mt-2 max-w-sm text-[12px] text-amber-200/90 leading-snug"
+            className="mt-3 max-w-sm text-[12px] text-slate-300/65 leading-snug"
           >
             {statusNotice}
           </p>
         )}
       </main>
 
-      {/* Bottom Elevated Glassmorphic Thumb Dock */}
-      <footer className="relative z-10 w-full max-w-md mx-auto px-4 pt-1.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2.5">
+      {/* Bottom Sculpted Floating Studio Capsule */}
+      <footer className="relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2.5">
         {keyboardOpen && (
           <form
             onSubmit={handleSubmitTyped}
@@ -2639,7 +2864,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
               placeholder={voiceLang === 'bn-BD' ? 'মেসেজ লিখুন...' : 'Type a message...'}
-              className="live-voice-input flex-1 min-w-0 bg-transparent text-[14.5px] text-white placeholder:text-white/50"
+              className="live-voice-input flex-1 min-w-0 bg-transparent text-[14.5px] text-white placeholder:text-white/45"
             />
             <button
               type="submit"
@@ -2653,7 +2878,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           </form>
         )}
 
-        <div className="live-voice-dock inline-flex items-center justify-center gap-2.5 sm:gap-3 px-3.5 py-2 rounded-full">
+        <div className="live-voice-dock inline-flex items-center justify-center gap-2 sm:gap-2.5 px-2.5 py-2 rounded-full">
           {/* Mute / Unmute Microphone */}
           <button
             type="button"
@@ -2662,38 +2887,38 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             disabled={voiceState === 'disconnected' || voiceState === 'connecting'}
             aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
             aria-pressed={isMuted}
-            title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+            title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
             className={`live-voice-control w-12 h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 ${
               isMuted
                 ? 'bg-white text-slate-950'
                 : isUserVoicing
-                  ? 'bg-emerald-400/25 text-emerald-200 ring-2 ring-emerald-400/75 shadow-[0_0_18px_rgba(16,185,129,0.38)]'
-                  : 'bg-white/[0.08] hover:bg-white/[0.15] text-white'
+                  ? 'bg-emerald-400/25 text-emerald-200 ring-2 ring-emerald-400/75'
+                  : 'bg-white/[0.07] hover:bg-white/[0.14] text-white'
             }`}
           >
             {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>
 
-          {/* 1-Tap Bangla / English Speech Recognition Language Switch */}
+          {/* 1-Tap Bangla / English Switch */}
           <button
             type="button"
             data-testid="live-voice-lang-btn"
             onClick={handleToggleVoiceLang}
             aria-label={`Switch speech recognition language (current: ${voiceLang === 'bn-BD' ? 'Bangla' : 'English'})`}
-            title={voiceLang === 'bn-BD' ? 'Listening in Bangla — tap for English' : 'Listening in English — tap for Bangla'}
-            className="live-voice-control w-11 h-11 rounded-full bg-white/[0.08] hover:bg-white/[0.16] text-[12px] font-semibold tracking-tight text-cyan-200 inline-flex items-center justify-center transition-colors cursor-pointer"
+            title={voiceLang === 'bn-BD' ? 'Bangla — tap for English' : 'English — tap for Bangla'}
+            className="live-voice-control w-11 h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer"
           >
             {voiceLang === 'bn-BD' ? 'বাং' : 'EN'}
           </button>
 
-          {/* Contextual Primary Action: Instant Send / Interrupt AI / Reconnect */}
+          {/* Contextual Primary Action */}
           {voiceState === 'disconnected' ? (
             <button
               type="button"
               data-testid="live-voice-reconnect-btn"
               onClick={() => void establishVoiceConnection(false)}
               aria-label="Reconnect voice session"
-              className="live-voice-control h-12 px-5 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-semibold text-[13.5px] inline-flex items-center gap-2 transition-colors cursor-pointer"
+              className="live-voice-control h-12 px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[13.5px] inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
             >
               <RefreshCw className="w-4 h-4" />
               <span>Reconnect</span>
@@ -2704,9 +2929,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               data-testid="live-voice-interrupt-btn"
               onClick={handleInterruptAndListen}
               aria-label="Interrupt AI and speak"
-              className="live-voice-control h-12 px-4 rounded-full bg-violet-400/20 hover:bg-violet-400/30 text-violet-100 font-medium text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Interrupt (Space)"
+              className="live-voice-control h-12 px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Hand className="w-4 h-4 text-violet-300" />
+              <Hand className="w-4 h-4 text-violet-200" />
               <span>Interrupt</span>
             </button>
           ) : hasCapturedSpeechToSend ? (
@@ -2715,7 +2941,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               data-testid="live-voice-send-now-btn"
               onClick={() => void commitActiveUtterance(true)}
               aria-label="Send spoken message now"
-              className="live-voice-control h-12 px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-emerald-950/50"
+              title="Send (Space)"
+              className="live-voice-control h-12 px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[13px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
             >
               <ArrowUp className="w-4 h-4 stroke-[2.5]" />
               <span>Send</span>
@@ -2740,21 +2967,21 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             title={keyboardOpen ? 'Hide text input' : 'Type a message'}
             className={`live-voice-control w-11 h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${
               keyboardOpen
-                ? 'bg-cyan-400/25 text-cyan-200'
-                : 'bg-white/[0.08] hover:bg-white/[0.15] text-white/85 hover:text-white'
+                ? 'bg-white text-slate-950'
+                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
             }`}
           >
             <Keyboard className="w-4 h-4" />
           </button>
 
-          {/* Safe End Call / Disconnect Button */}
+          {/* Safe End Call Button */}
           <button
             type="button"
             data-testid="live-voice-end-btn"
             onClick={handleSafeExit}
             aria-label="End voice session"
-            title="End voice session"
-            className="live-voice-control w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-pink-600 hover:from-rose-400 hover:to-pink-500 text-white inline-flex items-center justify-center transition-all cursor-pointer shadow-lg shadow-rose-950/60"
+            title="End session (Esc)"
+            className="live-voice-control w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer"
           >
             <PhoneOff className="w-5 h-5" />
           </button>

@@ -380,6 +380,7 @@ export async function requestGeminiFemaleSpeech(params: {
     if (!res.ok || !data.ok || !data.audioBase64) {
       return {
         ok: false,
+        modelUsed: data.modelUsed,
         integrationRequired: Boolean(data.integrationRequired || res.status === 503),
         error: data.error || `HTTP ${res.status}`,
       };
@@ -428,9 +429,9 @@ export function extractReadySpeechChunks(
       break;
     }
 
-    // Split strictly on complete sentence boundaries (Bengali dari ।, ., ?, !, newline)
-    // so Bengali & English intonation and pronunciation remain completely natural and clear.
-    const sentenceMatch = remaining.match(/^(.{6,280}?[।.?!\n])(?:\s+|$)/);
+    // Split on complete sentence boundaries (Bengali dari ।, non-decimal ., ?, !, newline)
+    // so AI begins speaking immediately on sentence 1 while the rest of the reply streams.
+    const sentenceMatch = remaining.match(/^(.{4,280}?(?:[।?!\n]|(?<!\d)\.))(?:\s+|$)/);
     if (sentenceMatch && sentenceMatch[1]) {
       const piece = sentenceMatch[1].trim();
       if (piece) chunks.push(piece);
@@ -438,11 +439,33 @@ export function extractReadySpeechChunks(
       continue;
     }
 
-    // Only split a single uninterrupted run without punctuation if it gets very long (>240 chars)
-    if (remaining.length >= 240) {
-      const slice = remaining.slice(0, 240);
+    // For the very first live chunk (cursor === 0), do not wait >75 chars if a natural
+    // clause boundary (comma, semicolon, colon, dash) is ready, so voice starts mid-stream.
+    if (!flushFinal && cursor === 0 && remaining.length >= 75) {
+      const clauseMatch = remaining.match(/^(.{20,120}?[,;:—–])(?:\s+|$)/);
+      if (clauseMatch && clauseMatch[1]) {
+        const piece = clauseMatch[1].trim();
+        if (piece) chunks.push(piece);
+        cursor += clauseMatch[0].length;
+        continue;
+      }
+      if (remaining.length >= 115) {
+        const slice = remaining.slice(0, 115);
+        const lastSpace = slice.lastIndexOf(' ');
+        const cut = lastSpace >= 45 ? lastSpace : 115;
+        const piece = remaining.slice(0, cut).trim();
+        if (piece) chunks.push(piece);
+        cursor += cut;
+        while (cursor < cleanFull.length && cleanFull[cursor] === ' ') cursor += 1;
+        continue;
+      }
+    }
+
+    // Split any long uninterrupted run without punctuation cleanly at a word boundary
+    if (remaining.length >= 220) {
+      const slice = remaining.slice(0, 220);
       const lastSpace = slice.lastIndexOf(' ');
-      const cut = lastSpace >= 100 ? lastSpace : 240;
+      const cut = lastSpace >= 90 ? lastSpace : 220;
       const piece = remaining.slice(0, cut).trim();
       if (piece) chunks.push(piece);
       cursor += cut;
@@ -462,6 +485,36 @@ export function extractReadySpeechChunks(
 }
 
 /**
+ * Applies transparent analog-style soft peak limiting and optional turn-start fade-in
+ * so streamed 24kHz PCM voices never digitally clip or click on onset.
+ */
+export function softLimitPcmSamples(
+  samples: Float32Array,
+  fadeInMs = 0,
+  sampleRate = 24000
+): Float32Array {
+  if (samples.length === 0) return samples;
+  const out = new Float32Array(samples.length);
+  const fadeSamples =
+    fadeInMs > 0 ? Math.min(samples.length, Math.round((fadeInMs / 1000) * sampleRate)) : 0;
+
+  for (let i = 0; i < samples.length; i += 1) {
+    let v = samples[i]!;
+    if (v > 0.85 || v < -0.85) {
+      const sign = v < 0 ? -1 : 1;
+      const excess = Math.abs(v) - 0.85;
+      v = sign * (0.85 + Math.tanh(excess * 4) * 0.13);
+    }
+    if (i < fadeSamples && fadeSamples > 1) {
+      const gain = 0.5 * (1 - Math.cos((Math.PI * i) / fadeSamples));
+      v *= gain;
+    }
+    out[i] = v;
+  }
+  return out;
+}
+
+/**
  * Streams headerless 24kHz 16-bit LE mono PCM audio chunks from POST /api/voice/tts-stream
  * and yields Float32 samples incrementally for gapless AudioContext playback.
  */
@@ -476,6 +529,7 @@ export async function streamGeminiPcmSpeech(params: {
 }): Promise<{
   ok: boolean;
   receivedAudio: boolean;
+  modelUsed?: string;
   integrationRequired?: boolean;
   fallbackToBrowser?: boolean;
   error?: string;
@@ -506,12 +560,14 @@ export async function streamGeminiPcmSpeech(params: {
     if (!res.ok || !res.body || contentType.includes('application/json')) {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
+        modelUsed?: string;
         integrationRequired?: boolean;
         fallbackToBrowser?: boolean;
       };
       return {
         ok: false,
         receivedAudio: false,
+        modelUsed: data.modelUsed,
         integrationRequired: Boolean(data.integrationRequired || res.status === 503),
         fallbackToBrowser: Boolean(data.fallbackToBrowser),
         error: data.error || `HTTP ${res.status}`,
@@ -519,6 +575,7 @@ export async function streamGeminiPcmSpeech(params: {
     }
 
     const sampleRate = Number(res.headers.get('X-Voice-Sample-Rate')) || 24000;
+    const modelUsed = res.headers.get('X-Voice-Model-Used') || undefined;
     reader = res.body.getReader();
     const MIN_FRAME_BYTES = 4800; // ~100ms at 24kHz 16-bit mono PCM for click-free playback
     let pendingBytes: Uint8Array = new Uint8Array(0);
@@ -544,7 +601,7 @@ export async function streamGeminiPcmSpeech(params: {
       if (done) break;
       if (params.signal?.aborted) {
         void reader.cancel().catch(() => {});
-        return { ok: false, receivedAudio, error: 'Aborted' };
+        return { ok: false, receivedAudio, modelUsed, error: 'Aborted' };
       }
       if (!value || value.byteLength === 0) continue;
 
@@ -578,7 +635,7 @@ export async function streamGeminiPcmSpeech(params: {
       emitEvenPcm(pendingBytes);
     }
 
-    return { ok: receivedAudio, receivedAudio };
+    return { ok: receivedAudio, receivedAudio, modelUsed };
   } catch (err) {
     if (reader) {
       void reader.cancel().catch(() => {});
@@ -853,7 +910,7 @@ class BilingualSpeechPlayer {
             ? 'Zephyr'
             : 'Kore');
 
-      const chunks = splitTextForSpeech(cleanText, 300);
+      const chunks = splitTextForSpeech(cleanText, 900);
       const fetchChunk = (i: number) =>
         requestGeminiFemaleSpeech({
           text: chunks[i] || '',

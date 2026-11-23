@@ -237,10 +237,10 @@ describe('Hybrid Voice Input & Editorial Thinking Formatting', () => {
     const longReply = 'এটি একটি দীর্ঘ বাংলা বাক্য যা ভয়েসে পড়া হবে। '.repeat(80);
     expect(formatTextForNaturalSpeech(longReply).length).toBeGreaterThan(2500);
 
-    const ttsChunks = splitTextForSpeech(longReply, 300);
-    expect(ttsChunks.length).toBeGreaterThan(5);
+    const ttsChunks = splitTextForSpeech(longReply, 900);
+    expect(ttsChunks.length).toBeGreaterThanOrEqual(3);
     for (const chunk of ttsChunks) {
-      expect(chunk.length).toBeLessThanOrEqual(300);
+      expect(chunk.length).toBeLessThanOrEqual(900);
     }
 
     const browserChunks = splitTextForSpeech(longReply, 170);
@@ -248,5 +248,50 @@ describe('Hybrid Voice Input & Editorial Thinking Formatting', () => {
     for (const chunk of browserChunks) {
       expect(chunk.length).toBeLessThanOrEqual(170);
     }
+  });
+
+  it('retries Gemini TTS generateContent once on 429/quota/rate errors and fails fast on non-rate errors', async () => {
+    const { generateTtsWithRetry } = await import('../smfta/server/routes/tools');
+
+    let rateCalls = 0;
+    const fakeAiRetry = {
+      models: {
+        generateContent: async (params: { model: string }) => {
+          rateCalls += 1;
+          expect(params.model).toBe('gemini-3.8-flash-tts');
+          if (rateCalls === 1) {
+            throw new Error('429 RESOURCE_EXHAUSTED: rate limit reached');
+          }
+          return { candidates: [{ content: { parts: [{ inlineData: { data: 'AAAA', mimeType: 'audio/wav' } }] } }] };
+        },
+      },
+    };
+
+    const res = await generateTtsWithRetry(
+      fakeAiRetry as never,
+      { model: 'gemini-3.8-flash-tts', contents: [{ role: 'user', parts: [{ text: 'hello' }] }] } as never,
+      10
+    );
+    expect(rateCalls).toBe(2);
+    expect(res.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data).toBe('AAAA');
+
+    let fatalCalls = 0;
+    const fakeAiFatal = {
+      models: {
+        generateContent: async () => {
+          fatalCalls += 1;
+          throw new Error('404 NOT_FOUND: model does not exist');
+        },
+      },
+    };
+
+    await expect(
+      generateTtsWithRetry(
+        fakeAiFatal as never,
+        { model: 'gemini-3.8-flash-tts', contents: [{ role: 'user', parts: [{ text: 'hello' }] }] } as never,
+        10
+      )
+    ).rejects.toThrow(/404 NOT_FOUND/);
+    expect(fatalCalls).toBe(1);
   });
 });

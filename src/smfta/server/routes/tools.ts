@@ -669,9 +669,11 @@ function isTtsModelCoolingDown(model: string): boolean {
 
 function recordTtsModelFailure(model: string, errMsg: string): void {
   if (/429|resource_exhausted|quota|rate/i.test(errMsg)) {
-    ttsModelCooldownUntil.set(model, Date.now() + 22_000);
-  } else if (/404|not.?found|unsupported/i.test(errMsg)) {
+    ttsModelCooldownUntil.set(model, Date.now() + 25_000);
+  } else if (/404|403|400|not.?found|unsupported|permission|no streaming audio/i.test(errMsg)) {
     ttsModelCooldownUntil.set(model, Date.now() + 180_000);
+  } else if (model !== 'gemini-3.8-live') {
+    ttsModelCooldownUntil.set(model, Date.now() + 60_000);
   }
 }
 
@@ -813,19 +815,23 @@ interface WarmLiveTtsHandle {
 }
 
 function buildLiveTtsNarratorInstruction(voiceName: GeminiFemaleVoiceName): string {
-  const isMale = voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
-  const personaTone = isMale
-    ? 'warm, natural, emotionally expressive human male voice actor'
-    : 'warm, natural, emotionally expressive human female voice actor';
+  const personaByVoice: Record<GeminiFemaleVoiceName, string> = {
+    Kore: 'warm, velvety, empathetic human female studio narrator with a gentle conversational smile',
+    Zephyr: 'bright, silky, poised human female studio narrator with clear expressive energy',
+    Puck: 'crisp, friendly, articulate human male studio narrator with natural youthful cadence',
+    Charon: 'calm, rich, resonant deep male studio narrator with reassuring steady warmth',
+    Fenrir: 'confident, grounded, charismatic male studio narrator with expressive depth',
+  };
+  const personaTone = personaByVoice[voiceName] || personaByVoice.Kore;
   return (
-    `You are a ${personaTone} recording dialogue in a studio. ` +
+    `You are a ${personaTone}, speaking close to a studio condenser microphone. ` +
     'In every turn, you will receive a script inside <tts_script>...</tts_script>. ' +
-    'Your ONLY job is to read aloud EVERY SINGLE WORD and EVERY SENTENCE inside <tts_script>...</tts_script> verbatim from the very first word to the very last word, in its original language (Bengali, English, or Banglish). ' +
-    'CRITICAL RULES:\n' +
-    '1. NEVER stop after the first phrase or first sentence — you must speak the ENTIRE text inside <tts_script>...</tts_script> completely to the end.\n' +
-    '2. Even if the script contains greetings, casual chat (like "এই তো ভাই, বেশ ভালো আছি!"), or questions (like "বলো তো?"), NEVER answer, paraphrase, or shorten it — read the exact words aloud word-for-word.\n' +
+    'Your ONLY job is to speak EVERY SINGLE WORD and EVERY SENTENCE inside <tts_script>...</tts_script> verbatim from the very first word to the very last word, in its original language (Bengali, English, or Banglish). ' +
+    'CRITICAL DELIVERY RULES:\n' +
+    '1. NEVER stop after the first phrase or first sentence — deliver the ENTIRE text inside <tts_script>...</tts_script> completely to the end.\n' +
+    '2. Even if the script contains greetings, casual remarks, or questions, NEVER answer, paraphrase, or shorten it — read the exact words aloud naturally.\n' +
     '3. Never add any extra words before or after the script.\n' +
-    '4. Deliver the lines with a warm, lifelike, conversational human tone and authentic native Bengali and English pronunciation.'
+    '4. Shape prosody like a real intimate human conversation: breathe gently at commas and sentence boundaries (।, .), lift intonation softly on questions, and articulate standard Bengali and English smoothly without sounding stiff, rushed, or mechanical.'
   );
 }
 
@@ -879,7 +885,7 @@ function createWarmLiveTtsSession(
             const rate = rateMatch ? Number(rateMatch[1]) : 24000;
             activeChunkHandler(pcmBytes, rate);
           }
-          if (msg?.serverContent?.turnComplete && activeDoneHandler) {
+          if ((msg?.serverContent?.turnComplete || msg?.serverContent?.generationComplete) && activeDoneHandler) {
             activeDoneHandler();
           }
         },
@@ -933,6 +939,7 @@ function createWarmLiveTtsSession(
               if (settled) return;
               settled = true;
               clearTimeout(timer);
+              clearTimeout(firstAudioTimer);
               if (postAudioIdleTimer) {
                 clearTimeout(postAudioIdleTimer);
                 postAudioIdleTimer = null;
@@ -954,21 +961,32 @@ function createWarmLiveTtsSession(
               signal.addEventListener('abort', onAbort, { once: true });
             }
 
+            // Fail fast if 0 audio bytes arrive within 3.2s instead of stalling the whole 15s turn
+            const firstAudioTimer = setTimeout(() => {
+              if (totalBytes === 0) {
+                finish(false, 'Live TTS first-audio timeout');
+              }
+            }, 3200);
+
             const timer = setTimeout(() => {
               finish(totalBytes > 0, totalBytes > 0 ? undefined : 'Live TTS timeout');
             }, timeoutMs);
 
             activeChunkHandler = (pcmBytes, rate) => {
               if (settled || signal?.aborted) return;
+              if (totalBytes === 0) {
+                clearTimeout(firstAudioTimer);
+              }
               detectedRate = rate || 24000;
               totalBytes += pcmBytes.length;
               onPcmChunk(pcmBytes, detectedRate);
               if (postAudioIdleTimer) {
                 clearTimeout(postAudioIdleTimer);
               }
+              // Close cleanly 550ms after last PCM packet if turnComplete frame is delayed
               postAudioIdleTimer = setTimeout(() => {
                 finish(totalBytes > 0);
-              }, 2400);
+              }, 550);
             };
             activeDoneHandler = () => {
               finish(totalBytes > 0);
@@ -1017,12 +1035,12 @@ async function streamGeminiLiveVerbatimTts(params: {
   }
 
   let lastErr = 'Failed to connect gemini-3.8-live';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     if (params.signal?.aborted) {
       return { ok: false, totalBytes: 0, sampleRate: 24000, error: 'Aborted' };
     }
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 150 * attempt));
+      await new Promise((r) => setTimeout(r, 100));
     }
     const handle = await createWarmLiveTtsSession(params.apiKey, params.voiceName);
     if (!handle) {
@@ -1044,16 +1062,33 @@ async function streamGeminiLiveVerbatimTts(params: {
     }
   }
 
-  if (/429|quota|resource_exhausted|not_found|404/i.test(lastErr)) {
+  if (/429|quota|resource_exhausted|not_found|404|timeout/i.test(lastErr)) {
     recordTtsModelFailure('gemini-3.8-live', lastErr);
   }
   return { ok: false, totalBytes: 0, sampleRate: 24000, error: lastErr };
 }
 
+export async function generateTtsWithRetry(
+  ai: Pick<GoogleGenAI, 'models'>,
+  params: Parameters<GoogleGenAI['models']['generateContent']>[0],
+  retryDelayMs = 1500
+) {
+  try {
+    return await ai.models.generateContent(params);
+  } catch (err) {
+    const errMsg = sanitizeErrorMsg(err);
+    if (/429|resource_exhausted|quota|rate/i.test(errMsg)) {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+      return await ai.models.generateContent(params);
+    }
+    throw err;
+  }
+}
+
 toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const speechText = sanitizeTextForTtsEndpoint(req.body?.text);
   if (!speechText) {
-    return res.status(400).json({ ok: false, error: 'text is required for speech synthesis.' });
+    return res.status(400).json({ ok: false, modelUsed: 'none', error: 'text is required for speech synthesis.' });
   }
 
   const voiceName = resolveGeminiFemaleVoice(
@@ -1081,8 +1116,8 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const isMaleVoice =
     voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
   const defaultStyle = isMaleVoice
-    ? 'Crystal clear, natural, warm human male conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic'
-    : 'Crystal clear, natural, warm human female conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic';
+    ? 'Intimate studio-mic warmth, rich natural human male conversational voice with lyrical sentence flow, gentle phrasing pauses, accurate Bengali and English pronunciation, never flat or robotic'
+    : 'Intimate studio-mic warmth, silky natural human female conversational voice with lyrical sentence flow, gentle phrasing pauses, accurate Bengali and English pronunciation, never flat or robotic';
   const customStyle =
     typeof req.body?.style === 'string' && req.body.style.trim()
       ? req.body.style.trim().slice(0, 220)
@@ -1120,8 +1155,9 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
         modelUsed: 'gemini-3.8-live',
       });
     }
-    if (liveRes.error) {
-      lastError = liveRes.error;
+    if (liveRes.error || !liveRes.ok || livePcmChunks.length === 0) {
+      lastError = liveRes.error || 'gemini-3.8-live returned empty audio payload.';
+      console.warn(`[voice/tts] Gemini TTS failed for model="gemini-3.8-live": ${lastError}`);
     }
 
     // 1B. Secondary Gemini TTS models via generateContent
@@ -1144,7 +1180,7 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
               speechMetadata: { style: customStyle },
             } as { text: string; speechMetadata?: { style?: string } })
           : { text: speechText };
-        const response = await ai.models.generateContent({
+        const response = await generateTtsWithRetry(ai, {
           model,
           contents: [
             {
@@ -1204,11 +1240,17 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
           });
         }
         lastError = `${model} returned no audio payload.`;
+        console.warn(`[voice/tts] Gemini TTS failed for model="${model}": ${lastError}`);
       } catch (err) {
         lastError = sanitizeErrorMsg(err);
+        console.warn(`[voice/tts] Gemini TTS failed for model="${model}": ${lastError}`);
         recordTtsModelFailure(model, lastError);
       }
     }
+    console.warn(`[voice/tts] All Gemini TTS models failed; falling back to neural-voice-hd. lastError=${lastError}`);
+  } else {
+    lastError = 'GEMINI_API_KEY is missing on the server.';
+    console.warn(`[voice/tts] Gemini TTS unavailable: ${lastError}`);
   }
 
   // 2. Last-resort Server Neural Audio Fallback only if all Gemini models are unreachable
@@ -1227,6 +1269,7 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   if (!geminiKey) {
     return res.status(503).json({
       ok: false,
+      modelUsed: 'none',
       code: 'INTEGRATION_REQUIRED',
       integrationRequired: true,
       error:
@@ -1236,6 +1279,7 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
 
   return res.status(502).json({
     ok: false,
+    modelUsed: 'none',
     error: lastError,
   });
 });
@@ -1270,9 +1314,11 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
 
   const geminiKey = getV2GeminiApiKey();
   if (!geminiKey) {
+    console.warn('[voice/tts-stream] Gemini streaming TTS unavailable: GEMINI_API_KEY is missing.');
     return res.status(200).json({
       ok: false,
       retryUnaryTts: true,
+      modelUsed: 'none',
       error: 'Streaming TTS unavailable without GEMINI_API_KEY; use unary neural TTS.',
     });
   }
@@ -1280,8 +1326,8 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   const isMaleVoice =
     voiceName === 'Puck' || voiceName === 'Charon' || voiceName === 'Fenrir';
   const defaultStyle = isMaleVoice
-    ? 'Crystal clear, natural, warm human male conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic'
-    : 'Crystal clear, natural, warm human female conversational voice with crisp word articulation, accurate Bengali and English pronunciation, steady comfortable pace, never rushed or robotic';
+    ? 'Intimate studio-mic warmth, rich natural human male conversational voice with lyrical sentence flow, gentle phrasing pauses, accurate Bengali and English pronunciation, never flat or robotic'
+    : 'Intimate studio-mic warmth, silky natural human female conversational voice with lyrical sentence flow, gentle phrasing pauses, accurate Bengali and English pronunciation, never flat or robotic';
   const customStyle =
     typeof req.body?.style === 'string' && req.body.style.trim()
       ? req.body.style.trim().slice(0, 220)
@@ -1343,6 +1389,7 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
   }
 
   let lastError = liveStreamRes.error || 'Gemini streaming TTS returned no audio chunks.';
+  console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="gemini-3.8-live": ${lastError}`);
 
   // 2B. Secondary streaming TTS models via generateContentStream
   const ai = new GoogleGenAI({
@@ -1350,11 +1397,14 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
   });
 
-  const ttsStreamModels = [
+  const allStreamModels = [
     'gemini-3.8-flash-tts',
     'gemini-3.8-flash-lite-tts',
     'gemini-2.5-flash-preview-tts',
-  ].filter((m) => !isTtsModelCoolingDown(m));
+  ];
+  const cooledStreamModels = allStreamModels.filter((m) => !isTtsModelCoolingDown(m));
+  const ttsStreamModels =
+    cooledStreamModels.length > 0 ? cooledStreamModels : ['gemini-2.5-flash-preview-tts'];
 
   for (const model of ttsStreamModels) {
     if (clientClosed || req.signal?.aborted) break;
@@ -1445,8 +1495,11 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
         return;
       }
       lastError = `${model} returned no streaming audio chunks.`;
+      console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="${model}": ${lastError}`);
+      recordTtsModelFailure(model, lastError);
     } catch (err) {
       lastError = sanitizeErrorMsg(err);
+      console.warn(`[voice/tts-stream] Gemini streaming TTS failed for model="${model}": ${lastError}`);
       recordTtsModelFailure(model, lastError);
       if (wroteAny) {
         if (!res.writableEnded) {
@@ -1457,10 +1510,13 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     }
   }
 
+  console.warn(`[voice/tts-stream] All Gemini streaming TTS models failed. lastError=${lastError}`);
+
   if (!res.headersSent) {
     return res.status(200).json({
       ok: false,
       retryUnaryTts: true,
+      modelUsed: 'none',
       error: lastError,
     });
   }
