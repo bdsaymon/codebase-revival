@@ -274,6 +274,7 @@ import {
   SelfSkill,
   SelfSkillDraft,
   applyAutoRepairs,
+  applySkillDirectiveToMessages,
   buildSkillInstruction,
   loadAutonomy,
   loadSkills,
@@ -746,6 +747,14 @@ export default function App() {
       doc?: ReadDocumentResult;
     }>
   >([]);
+  const prevActiveIdRef = useRef<number>(activeId);
+  useEffect(() => {
+    if (prevActiveIdRef.current !== activeId) {
+      prevActiveIdRef.current = activeId;
+      setPendingImgs([]);
+      setPendingFiles([]);
+    }
+  }, [activeId]);
   // v18.6.0 — a loaded .zip project: the assistant can edit exact paths and
   // hand back a repacked archive.
   const [project, setProject] = useState<Project | null>(null);
@@ -4250,17 +4259,10 @@ export default function App() {
         return `${head}\n\n[... ${middleOverflow.length} middle characters routed to extended projectContext ...]\n\n${tail}`;
       };
 
-      const rawTargetMsgs: StreamMsg[] = activeSkillPrompt
-        ? [
-            ...contextSlice,
-            {
-              role: 'user',
-              text:
-                contextSlice[contextSlice.length - 1]?.text +
-                `\n\n[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}`,
-            },
-          ]
-        : contextSlice;
+      const rawTargetMsgs: StreamMsg[] = applySkillDirectiveToMessages(
+        contextSlice,
+        activeSkillPrompt
+      );
 
       const safeTargetMsgs: StreamMsg[] = rawTargetMsgs.map((m, idx) => ({
         ...m,
@@ -8184,6 +8186,7 @@ export default function App() {
 
       <LiveVoiceOverlay
         isOpen={voiceCallOpen}
+        chatId={activeChat.id}
         userName={profile?.name || settings.displayName}
         preferredLang={settings.vlang || settings.appLanguage || 'auto'}
         preferredVoice={settings.ttsVoice}
@@ -8203,6 +8206,7 @@ export default function App() {
         isTranscribing={isTranscribingVoice}
         liveTranscript={voiceLiveText}
         micStream={voiceAudioStream}
+        messages={activeChat.msgs}
         lastUserText={lastUserMessage}
         lastAiMessage={lastAiVoiceSnapshot}
         onToggleMic={toggleMic}

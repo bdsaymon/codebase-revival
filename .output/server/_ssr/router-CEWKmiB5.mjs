@@ -3,10 +3,10 @@ import { n as require_jsx_runtime, r as require_react, t as QueryClientProvider 
 import { _ as createFileRoute, b as useRouter, d as Scripts, f as HeadContent, g as lazyRouteComponent, h as Outlet, m as createRouter, v as createRootRouteWithContext, y as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { i as shouldAttemptChunkReload, n as isDynamicImportError } from "./dynamicImportRecovery-BoPXERDS.mjs";
 import { t as QueryClient } from "../_libs/tanstack__query-core.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-DBMADn09.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-CEWKmiB5.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
-var styles_default = "/assets/styles-BIHinL8h.css";
+var styles_default = "/assets/styles-CwMepB0x.css";
 function reportLovableError(error, context = {}) {
 	if (typeof window === "undefined") return;
 	window.__lovableEvents?.captureException?.(error, {
@@ -177,7 +177,7 @@ function RootComponent() {
 		children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Outlet, {})
 	});
 }
-var $$splitComponentImporter = () => import("./routes-BtFPExG6.mjs");
+var $$splitComponentImporter = () => import("./routes-DOrHDn_L.mjs");
 var Route$3 = createFileRoute("/")({
 	head: () => ({ meta: [
 		{ title: "SMFTA AI Pro" },

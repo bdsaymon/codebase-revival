@@ -138,35 +138,84 @@ export interface SpeechResultLike {
 export function accumulateSpeechResults(
   results: ArrayLike<SpeechResultLike> | undefined | null,
   previousFinalPrefix = ''
-): { finalPrefix: string; liveTranscript: string } {
-  const prefix = String(previousFinalPrefix || '').trim();
+): { finalPrefix: string; interimText: string; liveTranscript: string } {
+  const prefix = String(previousFinalPrefix || '').replace(/\s+/g, ' ').trim();
   if (!results || results.length === 0) {
-    return { finalPrefix: prefix, liveTranscript: prefix };
+    return { finalPrefix: prefix, interimText: '', liveTranscript: prefix };
   }
   let sessionFinal = '';
   let sessionInterim = '';
   for (let i = 0; i < results.length; i++) {
     const item = results[i];
-    const seg = String(item?.[0]?.transcript || '').trim();
+    const seg = String(item?.[0]?.transcript || '').replace(/\s+/g, ' ').trim();
     if (!seg) continue;
     if (item?.isFinal) {
-      sessionFinal = sessionFinal ? `${sessionFinal} ${seg}` : seg;
+      if (!sessionFinal) {
+        sessionFinal = seg;
+      } else {
+        const curLower = sessionFinal.toLowerCase();
+        const segLower = seg.toLowerCase();
+        if (segLower === curLower || curLower.endsWith(` ${segLower}`)) {
+          // Skip exact or tail-repeated final segment (common on Android continuous SpeechRecognition)
+        } else if (segLower.startsWith(`${curLower} `)) {
+          // Android Chrome continuous recognition often emits cumulative final strings
+          sessionFinal = seg;
+        } else {
+          sessionFinal = `${sessionFinal} ${seg}`;
+        }
+      }
     } else {
-      sessionInterim = sessionInterim ? `${sessionInterim} ${seg}` : seg;
+      const curInterimLower = sessionInterim.toLowerCase();
+      const segLower = seg.toLowerCase();
+      if (!sessionInterim) {
+        sessionInterim = seg;
+      } else if (segLower === curInterimLower || curInterimLower.endsWith(` ${segLower}`)) {
+        // Skip duplicate interim segment
+      } else if (segLower.startsWith(`${curInterimLower} `)) {
+        sessionInterim = seg;
+      } else {
+        sessionInterim = `${sessionInterim} ${seg}`;
+      }
     }
   }
-  const combinedFinal = [prefix, sessionFinal]
-    .filter(Boolean)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  const liveTranscript = [combinedFinal, sessionInterim]
+
+  let combinedFinal = prefix;
+  if (sessionFinal) {
+    if (!prefix) {
+      combinedFinal = sessionFinal;
+    } else {
+      const prefixLower = prefix.toLowerCase();
+      const sessionLower = sessionFinal.toLowerCase();
+      if (sessionLower === prefixLower || prefixLower.endsWith(` ${sessionLower}`)) {
+        combinedFinal = prefix;
+      } else if (sessionLower.startsWith(`${prefixLower} `)) {
+        combinedFinal = sessionFinal;
+      } else {
+        combinedFinal = `${prefix} ${sessionFinal}`;
+      }
+    }
+  }
+  combinedFinal = combinedFinal.replace(/\s+/g, ' ').trim();
+
+  let cleanInterim = sessionInterim.replace(/\s+/g, ' ').trim();
+  if (combinedFinal && cleanInterim) {
+    const finalLower = combinedFinal.toLowerCase();
+    const interimLower = cleanInterim.toLowerCase();
+    if (interimLower === finalLower) {
+      cleanInterim = '';
+    } else if (interimLower.startsWith(`${finalLower} `)) {
+      cleanInterim = cleanInterim.slice(combinedFinal.length).trim();
+    }
+  }
+
+  const liveTranscript = [combinedFinal, cleanInterim]
     .filter(Boolean)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
   return {
     finalPrefix: combinedFinal,
+    interimText: cleanInterim,
     liveTranscript,
   };
 }
@@ -694,6 +743,7 @@ export interface SpeechControllerState {
 export class BilingualSpeechPlayer {
   private cancelled = false;
   private paused = false;
+  private sessionSeq = 0;
   private currentMsgId: string | null = null;
   private currentIsBackup = false;
   private currentModelUsed: string | undefined = undefined;
@@ -725,6 +775,8 @@ export class BilingualSpeechPlayer {
     }
     if (this.activeAudio) {
       try {
+        this.activeAudio.onended = null;
+        this.activeAudio.onerror = null;
         this.activeAudio.pause();
         this.activeAudio.src = '';
       } catch {
@@ -765,6 +817,7 @@ export class BilingualSpeechPlayer {
   }
 
   public stop(): void {
+    this.sessionSeq += 1;
     this.cancelled = true;
     this.paused = false;
     this.currentMsgId = null;
@@ -839,6 +892,8 @@ export class BilingualSpeechPlayer {
       return;
     }
 
+    this.sessionSeq += 1;
+    const sessionId = this.sessionSeq;
     this.cleanupAudioElement();
     if (isSpeechSynthesisSupported()) {
       window.speechSynthesis.cancel();
@@ -858,12 +913,15 @@ export class BilingualSpeechPlayer {
     const rate = Math.min(2.0, Math.max(0.5, params.rate || 1.0));
     this.emit('speaking');
 
+    const isStaleSession = () => this.cancelled || sessionId !== this.sessionSeq;
+
     const runBrowserFallback = (fromText: string = cleanText) => {
+      if (isStaleSession()) return;
       this.currentIsBackup = true;
       this.currentModelUsed = 'browser';
       this.emit('speaking');
-      if (this.cancelled || !isSpeechSynthesisSupported()) {
-        if (!this.cancelled) {
+      if (isStaleSession() || !isSpeechSynthesisSupported()) {
+        if (!isStaleSession()) {
           this.currentMsgId = null;
           this.currentIsBackup = false;
           this.currentModelUsed = undefined;
@@ -882,8 +940,10 @@ export class BilingualSpeechPlayer {
         splitTextForSpeech(seg.text, 170).map((piece) => ({ lang: seg.lang, text: piece }))
       );
       if (segments.length === 0) {
-        this.stop();
-        params.onDone?.();
+        if (!isStaleSession()) {
+          this.stop();
+          params.onDone?.();
+        }
         return;
       }
 
@@ -914,13 +974,14 @@ export class BilingualSpeechPlayer {
       };
 
       const playNext = (index: number) => {
-        if (this.cancelled || index >= segments.length) {
-          if (!this.cancelled) {
-            this.currentMsgId = null;
-            this.paused = false;
-            this.emit('idle');
-            params.onDone?.();
-          }
+        if (isStaleSession()) return;
+        if (index >= segments.length) {
+          this.currentMsgId = null;
+          this.currentIsBackup = false;
+          this.currentModelUsed = undefined;
+          this.paused = false;
+          this.emit('idle');
+          params.onDone?.();
           return;
         }
 
@@ -935,16 +996,16 @@ export class BilingualSpeechPlayer {
         }
         utter.rate = rate;
 
-        utter.onend = () => {
-          if (!this.cancelled) {
-            playNext(index + 1);
-          }
+        let utterSettled = false;
+        const advance = () => {
+          if (utterSettled || isStaleSession()) return;
+          utterSettled = true;
+          utter.onend = null;
+          utter.onerror = null;
+          playNext(index + 1);
         };
-        utter.onerror = () => {
-          if (!this.cancelled) {
-            playNext(index + 1);
-          }
-        };
+        utter.onend = advance;
+        utter.onerror = advance;
 
         window.speechSynthesis.speak(utter);
       };
@@ -964,12 +1025,12 @@ export class BilingualSpeechPlayer {
           signal: ctrl.signal,
           fetchImpl: params.fetchImpl,
         });
-        if (firstTry.ok || this.cancelled || ctrl.signal.aborted) {
+        if (firstTry.ok || isStaleSession() || ctrl.signal.aborted) {
           return firstTry;
         }
         // Retry once in the exact same voice before falling back so voice persona never switches mid-reply
         await new Promise((r) => setTimeout(r, 350));
-        if (this.cancelled || ctrl.signal.aborted) {
+        if (isStaleSession() || ctrl.signal.aborted) {
           return firstTry;
         }
         return requestGeminiFemaleSpeech({
@@ -980,6 +1041,7 @@ export class BilingualSpeechPlayer {
         });
       };
       const finishAll = () => {
+        if (isStaleSession()) return;
         this.cleanupAudioElement();
         this.currentMsgId = null;
         this.currentIsBackup = false;
@@ -990,8 +1052,9 @@ export class BilingualSpeechPlayer {
       };
       const playIndex = (i: number, pending: ReturnType<typeof fetchChunkWithRetry>) => {
         void pending.then((ttsRes) => {
-          if (this.cancelled || ctrl.signal.aborted) return;
+          if (isStaleSession() || ctrl.signal.aborted) return;
           if (!ttsRes.ok || !ttsRes.audioBase64) {
+            ctrl.abort();
             this.releaseAudioOnly();
             runBrowserFallback(chunks.slice(i).join(' '));
             return;
@@ -1015,6 +1078,14 @@ export class BilingualSpeechPlayer {
             finishAll();
             return;
           }
+          let chunkSettled = false;
+          const fallbackFromCurrentChunk = () => {
+            if (chunkSettled || isStaleSession() || ctrl.signal.aborted) return;
+            chunkSettled = true;
+            ctrl.abort();
+            this.releaseAudioOnly();
+            runBrowserFallback(chunks.slice(i).join(' '));
+          };
           try {
             const bytes = base64ToUint8Array(ttsRes.audioBase64);
             const blob = new Blob([bytes.buffer as ArrayBuffer], {
@@ -1027,26 +1098,18 @@ export class BilingualSpeechPlayer {
             audio.playbackRate = rate;
             this.activeAudio = audio;
             audio.onended = () => {
-              if (this.cancelled) return;
+              if (chunkSettled || isStaleSession() || ctrl.signal.aborted) return;
+              chunkSettled = true;
               if (upcoming) {
                 playIndex(i + 1, upcoming);
                 return;
               }
               finishAll();
             };
-            audio.onerror = () => {
-              if (this.cancelled) return;
-              this.releaseAudioOnly();
-              runBrowserFallback(chunks.slice(i).join(' '));
-            };
-            void audio.play().catch(() => {
-              if (!this.cancelled) {
-                this.releaseAudioOnly();
-                runBrowserFallback(chunks.slice(i).join(' '));
-              }
-            });
+            audio.onerror = fallbackFromCurrentChunk;
+            void audio.play().catch(fallbackFromCurrentChunk);
           } catch {
-            runBrowserFallback(chunks.slice(i).join(' '));
+            fallbackFromCurrentChunk();
           }
         });
       };

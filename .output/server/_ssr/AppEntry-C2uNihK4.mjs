@@ -1,5 +1,5 @@
 import { o as __toESM } from "../_runtime.mjs";
-import { t as supabase } from "./client-BSBW-TU9.mjs";
+import { t as supabase } from "./client-SAOWSTXM.mjs";
 import { t as APP_VERSION } from "./version-DomTpKw0.mjs";
 import { a as stripContactTokensForText, i as resolveActiveSystemLabel, n as buildCreatorAndSecurityDirective, r as maskAndNormalizeIdentityOutput, t as CREATOR_NAME } from "./creatorIdentity-TTkWUL_b.mjs";
 import { C as extractMemoryCandidates, D as getRiyadhDateKey, E as getNextRiyadhResetInfo, F as mergeExtractedMemories, H as sortV2ModelsFlashFirst, I as migrateMemory, M as looksTruncated, N as matchAnswerLength, O as getV2ModelLabel, P as mergeContinuationText, R as polishReply, S as extractFileArtifacts, T as formatArtifactSize, U as toggleMemoryPin, V as searchMemoryFacts, W as updateMemoryFact, _ as downloadArtifactsAsZip, a as MASTER_PROFILE_FACTS, b as ensureMasterProfileMemory, c as V2_MODEL_IDS, d as addManualMemoryFact, g as deleteMemoryFact, h as createIdleWatchdog, i as FILE_ARTIFACT_SYSTEM_DIRECTIVE, j as isV2ModelId, k as getV2ModelSpec, l as V2_SPECIAL_MODELS, m as continuationDirective, n as DEFAULT_IDLE_TIMEOUT_MS, o as MASTER_PROFILE_NAME, p as clearEntireMemoryBank, r as DEFAULT_V2_QUOTA_CONFIG, t as ADMIN_EMAILS, u as addFacts, v as downloadSingleArtifactFile, w as factsToText, x as evaluateV2ModelQuota, y as dropStallSentences, z as retrieveRelevantMemories } from "./v2UsageLimits-BjYCttv1.mjs";
@@ -11,7 +11,7 @@ import { a as readDocumentFile, t as buildQueryAwareDocumentPayload } from "./do
 import { a as saveMcpServers, i as loadMcpServers, n as buildMcpPromptContext, t as MCP_STORAGE_KEY } from "./mcpClient-C7x9GZ2O.mjs";
 import { a as loadDbConnections, c as saveDbConnections, i as loadDataBridgeConfig, n as DB_CONNECTIONS_STORAGE_KEY, s as saveDataBridgeConfig, t as DB_BRIDGE_CONFIG_STORAGE_KEY } from "./dbBridge-CysaMxOA.mjs";
 import { n as require_jsx_runtime, r as require_react } from "../_libs/react+tanstack__react-query.mjs";
-import { $ as Lock, $t as ChartColumn, A as Search, At as FileArchive, B as Pencil, Bt as CodeXml, C as SlidersVertical, Ct as FolderKanban, D as Settings, Dt as FilePlus, E as ShieldAlert, Et as FileSearch, F as Plus, Ft as Download, G as Moon, Gt as CirclePause, H as Pause, Ht as Clock, I as Plug, It as Database, J as Mic, Jt as ChevronUp, K as Monitor, Kt as CircleCheck, L as Play, Lt as Cpu, M as RotateCw, Mt as EyeOff, N as RotateCcw, Nt as ExternalLink, O as Settings2, Ot as FilePlus2, P as RefreshCw, Pt as Ellipsis, Q as Maximize2, Qt as Check, R as Pin, Rt as Copy, S as Smartphone, St as FolderOpen, T as ShieldCheck, Tt as FileSpreadsheet, U as Paperclip, Ut as CircleX, V as PenLine, Vt as CloudUpload, W as NotebookPen, Wt as CirclePlay, X as MessageSquare, Xt as ChevronLeft, Y as MicOff, Yt as ChevronRight, Z as MessageSquarePlus, Zt as ChevronDown, _ as Table, _t as GitCommitHorizontal, a as Volume2, an as ArrowLeft, at as Layers, b as Square, bt as FolderTree, c as Upload, ct as KeyRound, d as TriangleAlert, dt as History, en as Brain, et as LoaderCircle, f as Trash2, ft as HardDrive, g as Tablet, gt as GitBranch, h as Terminal, ht as GitPullRequest, i as WandSparkles, in as ArrowRight, it as LayoutTemplate, j as Save, jt as Eye, k as Send, kt as FileCode2, l as Unplug, lt as Image$1, m as ThumbsDown, mt as Globe, n as X, nn as AudioLines, nt as Link2, o as Video, on as ArrowDown, ot as Laptop, p as ThumbsUp, pt as Hand, q as Minimize2, qt as CircleAlert, r as Wrench, rn as ArrowUp, rt as Lightbulb, s as User, sn as Activity, st as Keyboard, t as Zap, tn as BookOpen, tt as ListOrdered, u as Trophy, ut as ImagePlus, v as Swords, vt as Gauge, w as Shield, wt as FileText, x as Sparkles, xt as FolderPlus, y as Sun, yt as Folder, z as PhoneOff, zt as Code } from "../_libs/lucide-react.mjs";
+import { $ as Maximize2, $t as Check, A as Send, At as FileCode2, B as PhoneOff, Bt as Code, C as Smartphone, Ct as FolderOpen, D as ShieldAlert, Dt as FileSearch, E as ShieldCheck, Et as FileSpreadsheet, F as RefreshCw, Ft as Ellipsis, G as NotebookPen, Gt as CirclePlay, H as PenLine, Ht as CloudUpload, I as Plus, It as Download, J as Minimize2, Jt as CircleAlert, K as Moon, Kt as CirclePause, L as Plug, Lt as Database, M as Save, Mt as Eye, N as RotateCw, Nt as EyeOff, O as Settings, Ot as FilePlus, P as RotateCcw, Pt as ExternalLink, Q as MessageSquarePlus, Qt as ChevronDown, R as Play, Rt as Cpu, S as Sparkles, St as FolderPlus, T as Shield, Tt as FileText, U as Pause, Ut as Clock, V as Pencil, Vt as CodeXml, W as Paperclip, Wt as CircleX, X as MicOff, Xt as ChevronRight, Y as Mic, Yt as ChevronUp, Z as MessageSquare, Zt as ChevronLeft, _ as Tablet, _t as GitBranch, a as WandSparkles, an as ArrowRight, at as LayoutTemplate, b as Sun, bt as Folder, c as User, cn as Activity, ct as Keyboard, d as Trophy, dt as ImagePlus, en as ChartColumn, et as Lock, f as TriangleAlert, ft as History, g as Terminal, gt as GitPullRequest, h as ThumbsDown, ht as Globe, i as Wrench, in as ArrowUp, it as Lightbulb, j as Search, jt as FileArchive, k as Settings2, kt as FilePlus2, l as Upload, lt as KeyRound, m as ThumbsUp, mt as Hand, n as Zap, nn as BookOpen, nt as ListOrdered, o as Volume2, on as ArrowLeft, ot as Layers, p as Trash2, pt as HardDrive, q as Monitor, qt as CircleCheck, r as X, rn as AudioLines, rt as Link2, s as Video, sn as ArrowDown, st as Laptop, t as ZoomIn, tn as Brain, tt as LoaderCircle, u as Unplug, ut as Image$1, v as Table, vt as GitCommitHorizontal, w as SlidersVertical, wt as FolderKanban, x as Square, xt as FolderTree, y as Swords, yt as Gauge, z as Pin, zt as Copy } from "../_libs/lucide-react.mjs";
 import { t as oneDark } from "../_libs/codemirror__theme-one-dark.mjs";
 import { t as ReactCodeMirror } from "../_libs/uiw__react-codemirror.mjs";
 import { t as css } from "../_libs/@codemirror/lang-css+[...].mjs";
@@ -28,7 +28,7 @@ import "../_libs/firebase.mjs";
 import { n as initializeAppCheck, t as ReCaptchaV3Provider } from "../_libs/firebase__app-check.mjs";
 import { i as signInWithPopup, n as getAuth, r as onAuthStateChanged, t as GoogleAuthProvider } from "../_libs/firebase__auth.mjs";
 import { a as query, c as collection, d as getFirestore, f as initializeFirestore, i as onSnapshot, l as doc, n as getDocFromServer, o as runTransaction, p as serverTimestamp, r as getDocs, s as where, t as deleteDoc, u as enableNetwork } from "../_libs/@firebase/firestore+[...].mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/AppEntry-B6sgy87w.js
+//#region node_modules/.nitro/vite/services/ssr/assets/AppEntry-C2uNihK4.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var DEFAULT_KNOWLEDGE_SETTINGS = {
@@ -6703,6 +6703,7 @@ function accumulateSpeechResults(results, previousFinalPrefix = "") {
 	const prefix = String(previousFinalPrefix || "").trim();
 	if (!results || results.length === 0) return {
 		finalPrefix: prefix,
+		interimText: "",
 		liveTranscript: prefix
 	};
 	let sessionFinal = "";
@@ -6715,9 +6716,11 @@ function accumulateSpeechResults(results, previousFinalPrefix = "") {
 		else sessionInterim = sessionInterim ? `${sessionInterim} ${seg}` : seg;
 	}
 	const combinedFinal = [prefix, sessionFinal].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+	const cleanInterim = sessionInterim.replace(/\s+/g, " ").trim();
 	return {
 		finalPrefix: combinedFinal,
-		liveTranscript: [combinedFinal, sessionInterim].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+		interimText: cleanInterim,
+		liveTranscript: [combinedFinal, cleanInterim].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
 	};
 }
 async function blobToBase64Data(blob) {
@@ -7591,6 +7594,265 @@ function buildVoiceGreeting(userName, preferredLang) {
 	if (/^bn\b/i.test((preferredLang || "").trim())) return firstName ? `হ্যালো ${firstName}, আমি স্মার্ট ভয়েস অ্যাসিস্ট্যান্ট। বলুন, কীভাবে সাহায্য করতে পারি?` : "হ্যালো, আমি SMFTA AI। বলুন, কীভাবে সাহায্য করতে পারি?";
 	return firstName ? `Hello ${firstName}, I'm SMFTA AI. How can I help you today?` : "Hello, I'm SMFTA AI. How can I help you today?";
 }
+/**
+* Formats an epoch timestamp (ms) into a concise HH:MM string for the live timeline.
+*/
+function formatVoiceTimelineTimestamp(ts) {
+	if (!Number.isFinite(ts) || ts <= 0) return "";
+	try {
+		const d = new Date(ts);
+		const hours = d.getHours();
+		const minutes = String(d.getMinutes()).padStart(2, "0");
+		const period = hours >= 12 ? "PM" : "AM";
+		return `${hours % 12 || 12}:${minutes} ${period}`;
+	} catch {
+		return "";
+	}
+}
+/**
+* Strips inline ⟦FILE:name⟧...⟦/FILE⟧ blocks from voice timeline message text
+* so attached code/text files show up as clean filename chips rather than raw dumps.
+*/
+function stripInlineFileBlocksForVoiceTimeline(rawText) {
+	if (!rawText) return {
+		cleanText: "",
+		attachedFileNames: []
+	};
+	const attachedFileNames = [];
+	return {
+		cleanText: sanitizeVoiceUtterance(rawText.replace(/⟦FILE:([^\n⟧]+)⟧[\s\S]*?⟦\/FILE⟧/g, (_match, fileName) => {
+			const trimmed = (fileName || "").trim();
+			if (trimmed) attachedFileNames.push(trimmed);
+			return "";
+		})),
+		attachedFileNames
+	};
+}
+/**
+* Collects user-shared images for the top Live Image Preview bar:
+*  - Staged images ready to send or currently being discussed (`isStaged: true`)
+*  - Images shared in the active live conversation (`isStaged: false`), newest first
+*/
+function collectLiveConversationImages(input) {
+	const nowMs = input.nowMs ?? Date.now();
+	const items = [];
+	const seenKeys = /* @__PURE__ */ new Set();
+	const makeKey = (img) => `${img.mime || "image"}::${(img.data || img.url || "").slice(0, 96)}`;
+	(input.stagedImgs || []).forEach((img, idx) => {
+		if (!img || !img.url && !img.data) return;
+		const key = makeKey(img);
+		seenKeys.add(key);
+		const url = img.url || (img.data.startsWith("data:") ? img.data : `data:${img.mime || "image/png"};base64,${img.data}`);
+		items.push({
+			id: `staged-${idx}-${img.name || "img"}`,
+			url,
+			mime: img.mime || "image/png",
+			data: img.data || url,
+			name: img.name || `Image ${idx + 1}`,
+			ts: nowMs,
+			formattedTime: formatVoiceTimelineTimestamp(nowMs),
+			isStaged: true,
+			stagedIndex: idx
+		});
+	});
+	const historyCandidates = [];
+	(input.messages || []).forEach((msg) => {
+		if (!msg.imgs || msg.imgs.length === 0) return;
+		msg.imgs.forEach((img, idx) => {
+			if (!img || !img.url && !img.data) return;
+			historyCandidates.push({
+				img,
+				ts: msg.ts || nowMs,
+				messageId: msg.id,
+				idx
+			});
+		});
+	});
+	(input.sessionSharedImgs || []).forEach((img, idx) => {
+		if (!img || !img.url && !img.data) return;
+		historyCandidates.push({
+			img,
+			ts: img.ts || nowMs,
+			messageId: img.id,
+			idx
+		});
+	});
+	historyCandidates.sort((a, b) => b.ts - a.ts).forEach(({ img, ts, messageId, idx }) => {
+		const key = makeKey(img);
+		if (seenKeys.has(key)) return;
+		seenKeys.add(key);
+		const url = img.url || (img.data.startsWith("data:") ? img.data : `data:${img.mime || "image/png"};base64,${img.data}`);
+		items.push({
+			id: `shared-${messageId || ts}-${idx}`,
+			url,
+			mime: img.mime || "image/png",
+			data: img.data || url,
+			name: img.name || "Shared image",
+			ts,
+			formattedTime: formatVoiceTimelineTimestamp(ts),
+			isStaged: false,
+			messageId
+		});
+	});
+	return items;
+}
+/**
+* Builds the chronological Unified Live Conversation Timeline combining:
+*  - Shared images, finalized user transcripts, and AI responses from `messages`
+*  - Fallback to `lastUserText` / `lastAiMessage` when full `messages` array isn't provided
+*  - Real-time partial speech transcription bubble (`transcriptState: 'partial'`)
+*  - Streaming AI response with thinking indicator (`streamState: 'thinking' | 'streaming' | 'complete'`)
+*/
+function buildUnifiedVoiceTimeline(input) {
+	const nowMs = input.nowMs ?? Date.now();
+	const isBn = input.voiceLang === "bn-BD";
+	const userOwnerLabel = (input.userName || "").trim().split(/\s+/)[0] || (isBn ? "আপনি" : "You");
+	const aiOwnerLabel = input.voiceName ? `${input.voiceName} · AI` : "SMFTA AI";
+	const entries = [];
+	const rawMessages = input.messages || [];
+	if (input.greetingText && rawMessages.length === 0 && !input.lastAiMessage) {
+		const cleanGreeting = sanitizeVoiceUtterance(input.greetingText);
+		if (cleanGreeting) entries.push({
+			id: "voice-greeting",
+			role: "ai",
+			ownerLabel: aiOwnerLabel,
+			text: cleanGreeting,
+			ts: nowMs - 1e3,
+			formattedTime: formatVoiceTimelineTimestamp(nowMs - 1e3),
+			transcriptState: "finalized",
+			streamState: "complete",
+			imgs: [],
+			attachedFileNames: [],
+			isGreeting: true
+		});
+	}
+	if (rawMessages.length > 0) rawMessages.forEach((msg, index) => {
+		const isLastMsg = index === rawMessages.length - 1;
+		const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(msg.text || "");
+		const imgs = (msg.imgs || []).map((img) => ({
+			mime: img.mime || "image/png",
+			data: img.data || img.url || "",
+			url: img.url || (img.data?.startsWith("data:") ? img.data : `data:${img.mime || "image/png"};base64,${img.data || ""}`),
+			name: img.name
+		}));
+		if (msg.role === "user") {
+			if (!cleanText && imgs.length === 0 && attachedFileNames.length === 0) return;
+			entries.push({
+				id: msg.id || `user-${index}`,
+				role: "user",
+				ownerLabel: userOwnerLabel,
+				text: cleanText,
+				ts: msg.ts || nowMs,
+				formattedTime: formatVoiceTimelineTimestamp(msg.ts || nowMs),
+				transcriptState: "finalized",
+				streamState: "complete",
+				imgs,
+				attachedFileNames
+			});
+		} else {
+			const isActivelyGenerating = msg.status === "queued" || msg.status === "running" || msg.status === "streaming" || isLastMsg && Boolean(input.isGenerating) && msg.status !== "complete" && msg.status !== "failed";
+			let streamState = "complete";
+			if (isActivelyGenerating) streamState = cleanText.length > 0 ? "streaming" : "thinking";
+			const thinkingStep = msg.thinking || (msg.statusSteps && msg.statusSteps.length > 0 ? msg.statusSteps[msg.statusSteps.length - 1] : void 0);
+			if (!cleanText && streamState === "complete" && !msg.isError && imgs.length === 0) return;
+			entries.push({
+				id: msg.id || `ai-${index}`,
+				role: "ai",
+				ownerLabel: aiOwnerLabel,
+				text: cleanText,
+				ts: msg.ts || nowMs,
+				formattedTime: formatVoiceTimelineTimestamp(msg.ts || nowMs),
+				transcriptState: "finalized",
+				streamState,
+				imgs,
+				attachedFileNames: [],
+				thinkingText: thinkingStep ? sanitizeVoiceUtterance(thinkingStep) : void 0,
+				isError: msg.isError
+			});
+		}
+	});
+	else {
+		if (input.lastUserText) {
+			const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(input.lastUserText);
+			if (cleanText || attachedFileNames.length > 0) entries.push({
+				id: "fallback-last-user",
+				role: "user",
+				ownerLabel: userOwnerLabel,
+				text: cleanText,
+				ts: nowMs - 2e3,
+				formattedTime: formatVoiceTimelineTimestamp(nowMs - 2e3),
+				transcriptState: "finalized",
+				streamState: "complete",
+				imgs: [],
+				attachedFileNames
+			});
+		}
+		if (input.lastAiMessage || input.isGenerating) {
+			const cleanAi = sanitizeVoiceUtterance(input.lastAiMessage || "");
+			const streamState = input.isGenerating ? cleanAi.length > 0 ? "streaming" : "thinking" : "complete";
+			if (cleanAi || streamState !== "complete") entries.push({
+				id: "fallback-last-ai",
+				role: "ai",
+				ownerLabel: aiOwnerLabel,
+				text: cleanAi,
+				ts: nowMs - 500,
+				formattedTime: formatVoiceTimelineTimestamp(nowMs - 500),
+				transcriptState: "finalized",
+				streamState,
+				imgs: [],
+				attachedFileNames: []
+			});
+		}
+	}
+	if (input.pendingSharedTurn) {
+		const pt = input.pendingSharedTurn;
+		const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(pt.text);
+		if (!entries.some((e) => e.role === "user" && (cleanText && e.text === cleanText || pt.imgs.length > 0 && e.imgs.length === pt.imgs.length && Math.abs(e.ts - pt.ts) < 5e3)) && (cleanText || pt.imgs.length > 0)) entries.push({
+			id: pt.id,
+			role: "user",
+			ownerLabel: userOwnerLabel,
+			text: cleanText,
+			ts: pt.ts,
+			formattedTime: formatVoiceTimelineTimestamp(pt.ts),
+			transcriptState: "finalized",
+			streamState: "complete",
+			imgs: pt.imgs,
+			attachedFileNames
+		});
+	}
+	const confirmedPrefix = sanitizeVoiceUtterance(input.liveFinalText || "");
+	const partialInterim = sanitizeVoiceUtterance(input.liveInterimText || "");
+	const combinedLive = sanitizeVoiceUtterance(input.liveCaption || [confirmedPrefix, partialInterim].filter(Boolean).join(" "));
+	if (combinedLive || input.isTranscribingTurn) entries.push({
+		id: "live-partial-speech",
+		role: "user",
+		ownerLabel: userOwnerLabel,
+		text: combinedLive || (isBn ? "কথা টেক্সটে রূপান্তর করা হচ্ছে…" : "Transcribing speech…"),
+		confirmedPrefix: confirmedPrefix || void 0,
+		partialInterimText: partialInterim || (!confirmedPrefix && combinedLive ? combinedLive : void 0),
+		ts: nowMs,
+		formattedTime: formatVoiceTimelineTimestamp(nowMs),
+		transcriptState: "partial",
+		streamState: "streaming",
+		imgs: input.stagedImgs || [],
+		attachedFileNames: []
+	});
+	const lastEntry = entries[entries.length - 1];
+	const hasActiveAiStream = entries.some((e) => e.role === "ai" && (e.streamState === "thinking" || e.streamState === "streaming"));
+	if (input.isGenerating && !hasActiveAiStream && (!lastEntry || lastEntry.role === "user")) entries.push({
+		id: "live-ai-thinking",
+		role: "ai",
+		ownerLabel: aiOwnerLabel,
+		text: "",
+		ts: nowMs,
+		formattedTime: formatVoiceTimelineTimestamp(nowMs),
+		transcriptState: "finalized",
+		streamState: "thinking",
+		imgs: [],
+		attachedFileNames: []
+	});
+	return entries;
+}
 var VOICE_OPTIONS = [
 	{
 		id: "Kore",
@@ -7708,7 +7970,7 @@ var STATE_COPY = {
 		hint: "Tap reconnect to resume"
 	}
 };
-var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoice, realtimeMode = false, isGenerating, lastUserText, lastAiMessage, onChangePreferredVoice, onToggleRealtimeMode, onCancelMic, onAbortGeneration, onSendText, onEndCall }) => {
+var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoice, realtimeMode = false, isGenerating, messages = [], lastUserText, lastAiMessage, onChangePreferredVoice, onToggleRealtimeMode, onCancelMic, onAbortGeneration, onSendText, onEndCall }) => {
 	const [selectedVoice, setSelectedVoice] = (0, import_react.useState)(() => preferredVoice && preferredVoice !== "default" ? resolveTtsVoicePersona(preferredVoice) : loadSavedVoice());
 	const [voiceLang, setVoiceLang] = (0, import_react.useState)(() => loadSavedVoiceLang(preferredLang));
 	const [speechRate, setSpeechRate] = (0, import_react.useState)(loadSavedVoiceRate);
@@ -7727,6 +7989,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const [isUserVoicing, setIsUserVoicing] = (0, import_react.useState)(false);
 	const [hasRecordedAudio, setHasRecordedAudio] = (0, import_react.useState)(false);
 	const [liveCaption, setLiveCaption] = (0, import_react.useState)("");
+	const [liveFinalText, setLiveFinalText] = (0, import_react.useState)("");
+	const [liveInterimText, setLiveInterimText] = (0, import_react.useState)("");
 	const [greetingText, setGreetingText] = (0, import_react.useState)("");
 	const [sessionUserText, setSessionUserText] = (0, import_react.useState)("");
 	const [statusNotice, setStatusNotice] = (0, import_react.useState)(null);
@@ -7735,9 +7999,14 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const [draftText, setDraftText] = (0, import_react.useState)("");
 	const [attachedImgs, setAttachedImgs] = (0, import_react.useState)([]);
 	const [attachedFiles, setAttachedFiles] = (0, import_react.useState)([]);
+	const [sessionSharedImgs, setSessionSharedImgs] = (0, import_react.useState)([]);
+	const [pendingSharedTurn, setPendingSharedTurn] = (0, import_react.useState)(null);
+	const [fullscreenImage, setFullscreenImage] = (0, import_react.useState)(null);
 	const [seconds, setSeconds] = (0, import_react.useState)(0);
 	const imageInputRef = (0, import_react.useRef)(null);
 	const fileInputRef = (0, import_react.useRef)(null);
+	const timelineScrollRef = (0, import_react.useRef)(null);
+	const userScrolledUpRef = (0, import_react.useRef)(false);
 	const attachedImgsRef = (0, import_react.useRef)(attachedImgs);
 	attachedImgsRef.current = attachedImgs;
 	const attachedFilesRef = (0, import_react.useRef)(attachedFiles);
@@ -8052,8 +8321,10 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			r.continuous = true;
 			r.onresult = (e) => {
 				if (!stateRef.current.isSessionListening || stateRef.current.isMuted) return;
-				const { finalPrefix, liveTranscript } = accumulateSpeechResults(e?.results, recognitionFinalPrefixRef.current);
+				const { finalPrefix, interimText, liveTranscript } = accumulateSpeechResults(e?.results, recognitionFinalPrefixRef.current);
 				if (finalPrefix) recognitionFinalPrefixRef.current = finalPrefix;
+				setLiveFinalText(finalPrefix);
+				setLiveInterimText(interimText);
 				if (liveTranscript) {
 					recognitionLiveTextRef.current = liveTranscript;
 					turnHadRealSpeechRef.current = true;
@@ -8110,6 +8381,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		rollingSttCheckedBytesRef.current = 0;
 		vadStateRef.current = createVadTracker(vadStateRef.current.noiseFloor);
 		setLiveCaption("");
+		setLiveFinalText("");
+		setLiveInterimText("");
 		setIsUserVoicing(false);
 		setHasRecordedAudio(false);
 		setIsSessionListening(true);
@@ -8149,6 +8422,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						turnHadRealSpeechRef.current = true;
 						setIsUserVoicing(true);
 						setLiveCaption(clean);
+						setLiveInterimText(clean);
 						clearSpeechRecCommitTimer();
 						speechRecCommitTimerRef.current = window.setTimeout(() => {
 							speechRecCommitTimerRef.current = null;
@@ -8202,7 +8476,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		const hadSpeech = turnHadRealSpeechRef.current;
 		const webSpeechText = sanitizeVoiceUtterance(recognitionLiveTextRef.current);
 		const hasRecordedChunks = turnChunksRef.current.length >= 2;
-		if (!hadSpeech && !webSpeechText && !(forceManual && hasRecordedChunks)) {
+		const hasStagedAttachments = attachedImgsRef.current.length > 0 || attachedFilesRef.current.length > 0;
+		if (!hadSpeech && !webSpeechText && !(forceManual && (hasRecordedChunks || hasStagedAttachments))) {
 			if (forceManual) {
 				startSingleTurnRecognition();
 				setStatusNotice(stateRef.current.voiceLang === "bn-BD" ? "শুনছি — বাংলা বা ইংরেজিতে স্বাভাবিকভাবে কথা বলুন।" : "Listening — speak naturally in Bangla or English.");
@@ -8231,21 +8506,37 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				nowMs: Date.now()
 			});
 			if (!verdict.accept) return false;
+			const nowTs = Date.now();
 			lastSubmittedRef.current = {
 				text: verdict.cleanText,
-				at: Date.now()
+				at: nowTs
 			};
 			setSessionUserText(verdict.cleanText);
 			setLiveCaption("");
+			setLiveFinalText("");
+			setLiveInterimText("");
 			setStatusNotice(null);
+			userScrolledUpRef.current = false;
 			const attachmentPayload = hasPendingAttachments ? {
-				imgs: pendingImgsNow.length > 0 ? pendingImgsNow.map(({ mime, data, url }) => ({
+				imgs: pendingImgsNow.length > 0 ? pendingImgsNow.map(({ mime, data, url, name }) => ({
 					mime,
 					data,
-					url
+					url,
+					name
 				})) : void 0,
 				files: pendingFilesNow.length > 0 ? pendingFilesNow : void 0
 			} : void 0;
+			if (pendingImgsNow.length > 0) setSessionSharedImgs((prev) => [...pendingImgsNow.map((img, idx) => ({
+				...img,
+				id: `shared-${nowTs}-${idx}`,
+				ts: nowTs
+			})), ...prev]);
+			setPendingSharedTurn({
+				id: `turn-${nowTs}`,
+				text: verdict.cleanText,
+				ts: nowTs,
+				imgs: pendingImgsNow.map((img) => ({ ...img }))
+			});
 			if (hasPendingAttachments) {
 				setAttachedImgs([]);
 				setAttachedFiles([]);
@@ -8253,7 +8544,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			stateRef.current.onSendText(verdict.cleanText, attachmentPayload);
 			return true;
 		};
-		if (webSpeechText && submitCleanText(webSpeechText, true)) {
+		if ((webSpeechText || forceManual && hasStagedAttachments && !hasRecordedChunks) && submitCleanText(webSpeechText, true)) {
 			turnCommitInFlightRef.current = false;
 			return;
 		}
@@ -8269,6 +8560,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				});
 				if (!stateRef.current.isOpen) return;
 				if (stt.ok && stt.text && submitCleanText(stt.text, true)) return;
+				if (hasStagedAttachments && submitCleanText("", true)) return;
 				if (!stt.ok && stt.error && /network|fetch|offline/i.test(stt.error)) setStatusNotice("Network issue while transcribing — listening again.");
 				else if (forceManual) setStatusNotice(stateRef.current.voiceLang === "bn-BD" ? "কথা স্পষ্ট বোঝা যায়নি — মাইক্রোফোনের কাছে আবার বলুন।" : "Could not catch clearly — please speak again.");
 			} catch {
@@ -8282,6 +8574,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		}
 		turnCommitInFlightRef.current = false;
 		setLiveCaption("");
+		setLiveFinalText("");
+		setLiveInterimText("");
 		if (stateRef.current.isOpen && !stateRef.current.isGenerating) startListeningTurn();
 	}, [
 		clearRollingSttTimer,
@@ -9155,6 +9449,67 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		isOpen,
 		startSingleTurnRecognition
 	]);
+	const fullAiSourceText = lastAiMessage?.text && activeTurnMsgIdRef.current === lastAiMessage.id ? lastAiMessage.text : lastAiMessage?.text || greetingText;
+	const liveConversationImages = (0, import_react.useMemo)(() => collectLiveConversationImages({
+		stagedImgs: attachedImgs,
+		sessionSharedImgs,
+		messages
+	}), [
+		attachedImgs,
+		messages,
+		sessionSharedImgs
+	]);
+	const unifiedTimeline = (0, import_react.useMemo)(() => buildUnifiedVoiceTimeline({
+		messages,
+		lastUserText: sessionUserText || lastUserText,
+		lastAiMessage: fullAiSourceText,
+		greetingText,
+		liveCaption,
+		liveFinalText,
+		liveInterimText,
+		isTranscribingTurn,
+		isGenerating,
+		stagedImgs: attachedImgs,
+		pendingSharedTurn,
+		userName,
+		voiceName: selectedVoice,
+		voiceLang
+	}), [
+		attachedImgs,
+		fullAiSourceText,
+		greetingText,
+		isGenerating,
+		isTranscribingTurn,
+		lastUserText,
+		liveCaption,
+		liveFinalText,
+		liveInterimText,
+		messages,
+		pendingSharedTurn,
+		selectedVoice,
+		sessionUserText,
+		userName,
+		voiceLang
+	]);
+	const lastTimelineEntry = unifiedTimeline[unifiedTimeline.length - 1];
+	const timelineAutoScrollSignature = `${unifiedTimeline.length}::${lastTimelineEntry?.id || ""}::${lastTimelineEntry?.streamState || ""}::${lastTimelineEntry?.text?.length || 0}::${liveCaption.length}`;
+	(0, import_react.useEffect)(() => {
+		if (!isOpen) return;
+		const el = timelineScrollRef.current;
+		if (!el || userScrolledUpRef.current) return;
+		const raf = window.requestAnimationFrame(() => {
+			try {
+				if (typeof el.scrollTo === "function") el.scrollTo({
+					top: el.scrollHeight,
+					behavior: "smooth"
+				});
+				else el.scrollTop = el.scrollHeight;
+			} catch {
+				el.scrollTop = el.scrollHeight;
+			}
+		});
+		return () => window.cancelAnimationFrame(raf);
+	}, [isOpen, timelineAutoScrollSignature]);
 	if (!isOpen) return null;
 	const formattedTime = String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
 	const isBackupVoiceActive = activeVoiceModel === "neural-voice-hd" || activeVoiceModel === "browser";
@@ -9162,19 +9517,21 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const activeCopy = STATE_COPY[voiceState];
 	const effectiveHeadline = voiceState === "thinking" ? voiceLang === "bn-BD" ? "ভাবছি…" : "Thinking..." : voiceState === "disconnected" || voiceState === "listening" && micOffOrMissing ? voiceLang === "bn-BD" ? "মাইক চালু নেই" : isMuted ? "Microphone muted" : "Microphone off" : voiceState === "listening" && (isUserVoicing || Boolean(liveCaption.trim())) ? voiceLang === "bn-BD" ? "শুনছি…" : "Hearing you..." : voiceState === "listening" ? voiceLang === "bn-BD" ? "শুনছি…" : activeCopy.headline : voiceState === "speaking" ? voiceLang === "bn-BD" ? "কথা বলছি…" : activeCopy.headline : voiceState === "connecting" && voiceLang === "bn-BD" ? "ভয়েস সংযোগ হচ্ছে…" : activeCopy.headline;
 	const effectiveHint = voiceState === "thinking" ? voiceLang === "bn-BD" ? "আপনার উত্তর তৈরি হচ্ছে" : "Crafting your reply" : voiceState === "disconnected" || voiceState === "listening" && micOffOrMissing ? voiceLang === "bn-BD" ? "মাইক অনুমতি দিন বা নিচের মাইক বাটনে ট্যাপ করুন" : "Tap mic or reconnect below to talk" : voiceState === "listening" && (isUserVoicing || Boolean(liveCaption.trim())) ? voiceLang === "bn-BD" ? "কথা শেষ হলে একটু থামুন অথবা Send চাপুন" : "Pause briefly or tap send to reply" : voiceState === "speaking" && voiceLang === "bn-BD" ? "মাঝে কথা বলে বা ট্যাপ করে থামাতে পারেন" : voiceLang === "bn-BD" && voiceState === "listening" ? "বাংলা বা ইংরেজিতে স্বাভাবিকভাবে কথা বলুন" : activeCopy.hint;
-	const cleanUserTranscript = sanitizeVoiceUtterance(liveCaption || sessionUserText || lastUserText);
-	const fullAiSourceText = lastAiMessage?.text && activeTurnMsgIdRef.current === lastAiMessage.id ? lastAiMessage.text : greetingText;
-	const cleanAiTranscript = formatTextForNaturalSpeech(fullAiSourceText, 900);
-	const hasCapturedSpeechToSend = voiceState === "listening" && !isMuted && (isUserVoicing || Boolean(liveCaption.trim()) || hasRecordedAudio);
+	const hasCapturedSpeechToSend = voiceState === "listening" && !isMuted && (isUserVoicing || Boolean(liveCaption.trim()) || hasRecordedAudio || attachedImgs.length > 0 || attachedFiles.length > 0);
 	const quickStarters = voiceLang === "bn-BD" ? ["আজকের ফোকাস টিপস দাও", "মজার একটি বিজ্ঞানের তথ্য বলো"] : ["3 focus tips for today", "Tell me a short story"];
+	const handleTimelineScroll = (e) => {
+		const el = e.currentTarget;
+		const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+		userScrolledUpRef.current = distanceFromBottom > 56;
+	};
 	const handleCycleSpeechRate = () => {
 		ensureAudioContext();
 		setSpeechRate((prev) => {
 			return VOICE_RATE_STEPS[(VOICE_RATE_STEPS.indexOf(prev) + 1) % VOICE_RATE_STEPS.length];
 		});
 	};
-	const handleReplayAiSpeech = () => {
-		const source = fullAiSourceText.trim();
+	const handleReplayAiSpeech = (customText) => {
+		const source = (customText || fullAiSourceText).trim();
 		if (!source || isGenerating || isOffline) return;
 		ensureAudioContext();
 		stopListeningTurnOnly();
@@ -9194,14 +9551,22 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			nowMs: Date.now()
 		});
 		if (!verdict.accept) return;
+		const nowTs = Date.now();
 		ensureAudioContext();
 		stopListeningTurnOnly();
 		stopAiSpeechPlayback();
 		lastSubmittedRef.current = {
 			text: verdict.cleanText,
-			at: Date.now()
+			at: nowTs
 		};
 		setSessionUserText(verdict.cleanText);
+		userScrolledUpRef.current = false;
+		setPendingSharedTurn({
+			id: `turn-${nowTs}`,
+			text: verdict.cleanText,
+			ts: nowTs,
+			imgs: []
+		});
 		setStatusNotice(null);
 		onSendText(verdict.cleanText);
 	};
@@ -9257,7 +9622,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				handleToggleMute();
 				return;
 			}
-			if (turnHadRealSpeechRef.current || recognitionLiveTextRef.current.trim() || turnChunksRef.current.length >= 2) commitActiveUtterance(true);
+			if (turnHadRealSpeechRef.current || recognitionLiveTextRef.current.trim() || turnChunksRef.current.length >= 2 || attachedImgs.length > 0 || attachedFiles.length > 0) commitActiveUtterance(true);
 			else startSingleTurnRecognition();
 		}
 	};
@@ -9322,7 +9687,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						data: base64Data,
 						url: finalUrl
 					}]);
-					setStatusNotice(voiceLang === "bn-BD" ? `ছবি যুক্ত হয়েছে (${f.name}) — এখন মুখে বলুন বা লিখে পাঠান।` : `Attached image (${f.name}) — speak or type your question.`);
+					setStatusNotice(voiceLang === "bn-BD" ? `ছবি যুক্ত হয়েছে (${f.name}) — ভয়েস সেশন চালু আছে, মুখে বলুন বা বিশ্লেষণ করুন চাপুন।` : `Image shared (${f.name}) — voice session active, speak or tap Analyze.`);
+					if (stateRef.current.isOpen && !stateRef.current.isDisconnected && !stateRef.current.isOffline && !stateRef.current.isGenerating && !stateRef.current.isAiSpeaking && !stateRef.current.isSessionListening) startListeningTurn();
 				}
 			} catch {
 				setStatusNotice("ছবিটি পড়া যায়নি, অন্য ছবি চেষ্টা করুন।");
@@ -9359,28 +9725,46 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		}
 	};
 	const handleSubmitTyped = (e) => {
-		e.preventDefault();
+		e?.preventDefault();
 		const hasAttachments = attachedImgs.length > 0 || attachedFiles.length > 0;
 		const verdict = shouldSubmitVoiceUtterance({
-			rawText: draftText.trim() || (hasAttachments ? voiceLang === "bn-BD" ? "এই ছবি বা ফাইলটি বিশ্লেষণ করে বিস্তারিত বলো।" : "Please analyze the attached image or file." : ""),
+			rawText: draftText.trim() || liveCaption.trim() || recognitionLiveTextRef.current.trim() || (hasAttachments ? voiceLang === "bn-BD" ? "এই ছবি বা ফাইলটি বিশ্লেষণ করে বিস্তারিত বলো।" : "Please analyze the shared image in detail." : ""),
 			hadRealSpeechEnergy: true,
 			lastSubmitted: hasAttachments ? null : lastSubmittedRef.current,
 			nowMs: Date.now()
 		});
 		if (!verdict.accept) return;
+		const nowTs = Date.now();
 		ensureAudioContext();
 		stopListeningTurnOnly();
 		stopAiSpeechPlayback();
 		lastSubmittedRef.current = {
 			text: verdict.cleanText,
-			at: Date.now()
+			at: nowTs
 		};
 		setSessionUserText(verdict.cleanText);
+		setLiveCaption("");
+		setLiveFinalText("");
+		setLiveInterimText("");
+		userScrolledUpRef.current = false;
+		const currentImgs = attachedImgs.map((img) => ({ ...img }));
+		if (currentImgs.length > 0) setSessionSharedImgs((prev) => [...currentImgs.map((img, idx) => ({
+			...img,
+			id: `shared-${nowTs}-${idx}`,
+			ts: nowTs
+		})), ...prev]);
+		setPendingSharedTurn({
+			id: `turn-${nowTs}`,
+			text: verdict.cleanText,
+			ts: nowTs,
+			imgs: currentImgs
+		});
 		const attachmentPayload = hasAttachments ? {
-			imgs: attachedImgs.length > 0 ? attachedImgs.map(({ mime, data, url }) => ({
+			imgs: attachedImgs.length > 0 ? attachedImgs.map(({ mime, data, url, name }) => ({
 				mime,
 				data,
-				url
+				url,
+				name
 			})) : void 0,
 			files: attachedFiles.length > 0 ? attachedFiles : void 0
 		} : void 0;
@@ -9399,6 +9783,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		onEndCall();
 	};
 	const stateDotColor = voiceState === "listening" ? isMuted ? "bg-slate-400" : isUserVoicing ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]" : "bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" : voiceState === "speaking" ? "bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)]" : voiceState === "thinking" ? "bg-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.85)]" : voiceState === "reconnecting" ? "bg-amber-400" : voiceState === "disconnected" ? "bg-rose-400" : "bg-sky-400";
+	const hasVisualConversationContent = unifiedTimeline.length > 0 || liveConversationImages.length > 0;
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		"data-testid": "voice-call-overlay",
 		"data-voice-state": voiceState,
@@ -9413,7 +9798,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				"aria-hidden": "true"
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", {
-				className: "relative z-10 w-full max-w-4xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-7 pt-[max(1rem,env(safe-area-inset-top))] pb-2",
+				className: "relative z-10 w-full max-w-4xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-7 pt-[max(0.85rem,env(safe-area-inset-top))] pb-1.5 shrink-0",
 				children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 					className: "inline-flex items-center gap-2 min-w-0 shrink-0",
 					children: [
@@ -9450,7 +9835,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							"aria-pressed": realtimeMode,
 							onClick: () => onToggleRealtimeMode(!realtimeMode),
 							title: realtimeMode ? "Low-Latency Live Audio ON (gemini-3.8-live)" : "Standard Fast Voice Mode",
-							className: `live-voice-control h-10 sm:h-11 px-2.5 sm:px-3 rounded-full text-[11.5px] font-medium transition-colors cursor-pointer shrink-0 whitespace-nowrap border ${realtimeMode ? "bg-emerald-400/20 border-emerald-300/45 text-emerald-200" : "live-voice-ghost-btn border-transparent text-slate-300 hover:text-white"}`,
+							className: `live-voice-control h-9 sm:h-10 px-2.5 sm:px-3 rounded-full text-[11.5px] font-medium transition-colors cursor-pointer shrink-0 whitespace-nowrap border ${realtimeMode ? "bg-emerald-400/20 border-emerald-300/45 text-emerald-200" : "live-voice-ghost-btn border-transparent text-slate-300 hover:text-white"}`,
 							children: realtimeMode ? "Live 3.8 ⚡" : "Live"
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -9459,11 +9844,11 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							onClick: handleCycleSpeechRate,
 							"aria-label": `Speech playback speed ${speechRate}x`,
 							title: `Speed: ${speechRate}x`,
-							className: "live-voice-control live-voice-ghost-btn h-10 sm:h-11 px-2.5 sm:px-3 rounded-full text-[12px] font-mono tabular-nums font-medium text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 whitespace-nowrap",
+							className: "live-voice-control live-voice-ghost-btn h-9 sm:h-10 px-2.5 sm:px-3 rounded-full text-[12px] font-mono tabular-nums font-medium text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 whitespace-nowrap",
 							children: speechRate === 1 ? "1.0×" : `${speechRate}×`
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", {
-							className: "live-voice-select-wrap live-voice-ghost-btn relative inline-flex items-center h-10 sm:h-11 px-3 sm:px-3.5 rounded-full transition-colors cursor-pointer shrink-0",
+							className: "live-voice-select-wrap live-voice-ghost-btn relative inline-flex items-center h-9 sm:h-10 px-3 sm:px-3.5 rounded-full transition-colors cursor-pointer shrink-0",
 							children: [
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 									className: "text-[12.5px] font-medium text-white/90 pr-4 whitespace-nowrap pointer-events-none",
@@ -9497,107 +9882,309 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							onClick: handleSafeExit,
 							"aria-label": "Exit Voice Mode",
 							title: "Exit",
-							className: "live-voice-control live-voice-ghost-btn w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer shrink-0",
+							className: "live-voice-control live-voice-ghost-btn w-9 h-9 sm:w-10 sm:h-10 rounded-full inline-flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer shrink-0",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
 						})
 					]
 				})]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("main", {
-				className: "relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center text-center w-full max-w-xl mx-auto px-5 py-2",
+				className: "relative z-10 flex-1 min-h-0 flex flex-col items-center justify-between w-full max-w-2xl mx-auto px-4 sm:px-6 py-1.5 overflow-hidden",
 				children: [
-					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "relative flex items-center justify-center",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: `live-voice-orb-pedestal pointer-events-none ${isUserVoicing || voiceState === "speaking" ? "is-energized" : ""}`,
-							"aria-hidden": "true"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: handlePrimaryOrbAction,
-							"aria-label": voiceState === "speaking" ? "Interrupt AI and start listening" : voiceState === "disconnected" ? "Reconnect voice session" : hasCapturedSpeechToSend ? "Send spoken message now" : "Voice assistant orb",
-							className: "live-voice-orb-trigger relative flex items-center justify-center rounded-full cursor-pointer bg-transparent border-0 p-0 transition-transform active:scale-[0.97]",
-							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
-								ref: orbCanvasRef,
-								"data-testid": "live-voice-orb-canvas",
-								className: "w-[216px] h-[216px] sm:w-[268px] sm:h-[268px] block",
-								"aria-hidden": "true"
-							})
+					liveConversationImages.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("section", {
+						"data-testid": "live-voice-top-image-preview",
+						"aria-label": "Live shared images",
+						className: "w-full shrink-0 mb-2 rounded-2xl bg-slate-900/75 border border-white/14 backdrop-blur-xl px-3 py-2.5 shadow-[0_12px_36px_rgba(2,6,23,0.55)]",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-center justify-between gap-2 mb-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "inline-flex items-center gap-1.5",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-[11px] font-semibold uppercase tracking-wider text-emerald-200/90",
+									children: voiceLang === "bn-BD" ? `লাইভ ভিজ্যুয়াল প্রিভিউ (${liveConversationImages.length})` : `Live Visual Context (${liveConversationImages.length})`
+								})]
+							}), attachedImgs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+								type: "button",
+								"data-testid": "live-voice-analyze-image-btn",
+								onClick: () => handleSubmitTyped(),
+								disabled: isGenerating,
+								className: "live-voice-control h-7 px-2.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 disabled:opacity-45 text-slate-950 text-[11.5px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Sparkles, { className: "w-3 h-3" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: voiceLang === "bn-BD" ? "AI দিয়ে বিশ্লেষণ" : "Analyze with AI" })]
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "flex items-center gap-2.5 overflow-x-auto pb-0.5",
+							children: liveConversationImages.map((imgItem) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								"data-testid": "live-voice-image-preview-card",
+								"data-image-staged": imgItem.isStaged ? "true" : "false",
+								className: `group relative flex items-center gap-2.5 p-1.5 pr-2.5 rounded-2xl border transition-all shrink-0 ${imgItem.isStaged ? "bg-emerald-950/40 border-emerald-400/45 shadow-[0_0_20px_rgba(16,185,129,0.16)]" : "bg-white/[0.06] border-white/12 hover:border-white/25"}`,
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+										type: "button",
+										"data-testid": "live-voice-expand-image-btn",
+										onClick: () => setFullscreenImage({
+											url: imgItem.url,
+											name: imgItem.name
+										}),
+										"aria-label": `Expand ${imgItem.name} to fullscreen`,
+										title: voiceLang === "bn-BD" ? "পূর্ণ স্ক্রিনে দেখুন" : "Expand to fullscreen",
+										className: "relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden shrink-0 border border-white/15 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+											src: imgItem.url,
+											alt: imgItem.name,
+											className: "w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+											className: "absolute inset-0 bg-slate-950/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
+											children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ZoomIn, { className: "w-4 h-4 text-white" })
+										})]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "min-w-0 max-w-[128px] sm:max-w-[150px] text-left",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+											className: "text-[12px] font-medium text-white/95 truncate",
+											children: imgItem.name
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "flex items-center gap-1.5 mt-0.5",
+											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: `text-[10px] font-medium px-1.5 py-0.2 rounded-md ${imgItem.isStaged ? "bg-emerald-400/20 text-emerald-200" : "bg-white/10 text-slate-300"}`,
+												children: imgItem.isStaged ? voiceLang === "bn-BD" ? "প্রস্তুত" : "Ready" : voiceLang === "bn-BD" ? "শেয়ার্ড" : "Shared"
+											}), imgItem.formattedTime && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												className: "text-[10px] font-mono tabular-nums text-slate-400",
+												children: imgItem.formattedTime
+											})]
+										})]
+									}),
+									imgItem.isStaged && typeof imgItem.stagedIndex === "number" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										"data-testid": `live-voice-remove-img-${imgItem.stagedIndex}`,
+										onClick: () => setAttachedImgs((prev) => prev.filter((_, i) => i !== imgItem.stagedIndex)),
+										"aria-label": `Remove ${imgItem.name}`,
+										className: "w-6 h-6 rounded-full bg-white/10 hover:bg-rose-500/85 text-white/85 hover:text-white inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors",
+										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3.5 h-3.5" })
+									})
+								]
+							}, imgItem.id))
 						})]
 					}),
-					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-						className: "mt-1 mb-1.5 flex items-center justify-center h-9",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
-							ref: waveCanvasRef,
-							"data-testid": "live-voice-waveform-canvas",
-							className: "w-[240px] sm:w-[264px] h-[42px] block",
-							"aria-label": "Live audio waveform"
-						})
-					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "space-y-1 max-w-md px-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
-							"data-testid": "live-voice-headline",
-							className: "live-voice-headline-glow text-[24px] sm:text-[30px] font-medium tracking-tight text-white leading-tight [text-wrap:balance]",
-							children: effectiveHeadline
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-							className: "text-[13px] sm:text-[13.5px] font-normal text-slate-300/70 leading-snug",
-							children: effectiveHint
-						})]
-					}),
-					cleanUserTranscript || cleanAiTranscript ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						"data-testid": "live-voice-transcript-box",
-						className: `live-voice-transcript live-voice-dialogue-card mt-5 w-full px-4 py-3 rounded-2xl text-left space-y-2.5 overflow-y-auto transition-[max-height] duration-200 ${expandedTranscript ? "max-h-[210px]" : "max-h-[126px] sm:max-h-[144px]"}`,
+						className: "flex flex-col items-center justify-center text-center shrink-0 my-auto py-0.5",
 						children: [
-							cleanUserTranscript && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "space-y-0.5",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-									className: "text-[11px] font-medium text-emerald-300/85",
-									children: voiceLang === "bn-BD" ? "আপনি" : "You"
-								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-									className: `text-[13px] text-slate-200/90 leading-relaxed ${expandedTranscript ? "" : "line-clamp-2"}`,
-									children: cleanUserTranscript
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "relative flex items-center justify-center",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+									className: `live-voice-orb-pedestal pointer-events-none ${isUserVoicing || voiceState === "speaking" ? "is-energized" : ""}`,
+									"aria-hidden": "true"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: handlePrimaryOrbAction,
+									"aria-label": voiceState === "speaking" ? "Interrupt AI and start listening" : voiceState === "disconnected" ? "Reconnect voice session" : hasCapturedSpeechToSend ? "Send spoken message now" : "Voice assistant orb",
+									className: "live-voice-orb-trigger relative flex items-center justify-center rounded-full cursor-pointer bg-transparent border-0 p-0 transition-transform active:scale-[0.97]",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
+										ref: orbCanvasRef,
+										"data-testid": "live-voice-orb-canvas",
+										className: `${hasVisualConversationContent ? "w-[144px] h-[144px] sm:w-[184px] sm:h-[184px]" : "w-[208px] h-[208px] sm:w-[256px] sm:h-[256px]"} block transition-all duration-300`,
+										"aria-hidden": "true"
+									})
 								})]
 							}),
-							cleanUserTranscript && cleanAiTranscript && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-								className: "h-px bg-white/[0.06]",
-								"aria-hidden": "true"
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "mt-0.5 mb-0.5 flex items-center justify-center h-7",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("canvas", {
+									ref: waveCanvasRef,
+									"data-testid": "live-voice-waveform-canvas",
+									className: "w-[216px] sm:w-[248px] h-[32px] block",
+									"aria-label": "Live audio waveform"
+								})
 							}),
-							cleanAiTranscript && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "space-y-0.5",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-									className: "flex items-center justify-between gap-2",
-									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "text-[11px] font-medium text-violet-300/85",
-										children: selectedVoice
-									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex items-center gap-0.5 shrink-0",
-										children: [!isGenerating && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-											type: "button",
-											"data-testid": "live-voice-replay-btn",
-											onClick: handleReplayAiSpeech,
-											"aria-label": "Replay voice response",
-											title: "Replay",
-											className: "live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/70 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer",
-											children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RotateCcw, { className: "w-3.5 h-3.5" })
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-											type: "button",
-											"data-testid": "live-voice-expand-btn",
-											onClick: () => setExpandedTranscript((v) => !v),
-											"aria-label": expandedTranscript ? "Collapse transcript" : "Expand transcript",
-											title: expandedTranscript ? "Collapse" : "Expand",
-											className: "live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/70 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer",
-											children: expandedTranscript ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Minimize2, { className: "w-3.5 h-3.5" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Maximize2, { className: "w-3.5 h-3.5" })
-										})]
-									})]
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "space-y-0.5 max-w-md px-2",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h2", {
+									"data-testid": "live-voice-headline",
+									className: "live-voice-headline-glow text-[20px] sm:text-[24px] font-medium tracking-tight text-white leading-tight [text-wrap:balance]",
+									children: effectiveHeadline
 								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-									className: `text-[13.5px] sm:text-[14px] text-white/95 font-normal leading-relaxed ${expandedTranscript ? "" : "line-clamp-3"}`,
-									children: cleanAiTranscript
+									className: "text-[12px] sm:text-[12.5px] font-normal text-slate-300/70 leading-snug",
+									children: effectiveHint
 								})]
 							})
 						]
+					}),
+					unifiedTimeline.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						"data-testid": "live-voice-transcript-box",
+						className: "live-voice-transcript live-voice-dialogue-card mt-2 w-full px-3.5 sm:px-4 py-2.5 rounded-2xl text-left flex flex-col shrink-0",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "flex items-center justify-between gap-2 pb-1.5 mb-2 border-b border-white/[0.07] shrink-0",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "inline-flex items-center gap-2",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-[11px] font-semibold uppercase tracking-wider text-slate-300/80",
+									children: voiceLang === "bn-BD" ? "লাইভ কথোপকথন টাইমলাইন" : "Live Conversation Timeline"
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-[10.5px] font-mono tabular-nums px-1.5 py-0.2 rounded-full bg-white/[0.07] text-slate-300/85",
+									children: unifiedTimeline.length
+								})]
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "flex items-center gap-1 shrink-0",
+								children: [!isGenerating && fullAiSourceText.trim() && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									"data-testid": "live-voice-replay-btn",
+									onClick: () => handleReplayAiSpeech(),
+									"aria-label": "Replay voice response",
+									title: "Replay",
+									className: "live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/75 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RotateCcw, { className: "w-3.5 h-3.5" })
+								}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									"data-testid": "live-voice-expand-btn",
+									onClick: () => setExpandedTranscript((v) => !v),
+									"aria-label": expandedTranscript ? "Collapse transcript" : "Expand transcript",
+									title: expandedTranscript ? "Collapse" : "Expand",
+									className: "live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/75 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer",
+									children: expandedTranscript ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Minimize2, { className: "w-3.5 h-3.5" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Maximize2, { className: "w-3.5 h-3.5" })
+								})]
+							})]
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							ref: timelineScrollRef,
+							onScroll: handleTimelineScroll,
+							"data-testid": "live-voice-timeline",
+							className: `space-y-2 overflow-y-auto pr-0.5 transition-[max-height] duration-200 ${expandedTranscript ? "max-h-[250px] sm:max-h-[300px]" : "max-h-[152px] sm:max-h-[192px]"}`,
+							children: unifiedTimeline.map((entry) => {
+								const isPartial = entry.transcriptState === "partial";
+								if (entry.role === "user") return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+									"data-testid": isPartial ? "live-voice-partial-transcript" : "live-voice-message-user",
+									"data-transcript-state": entry.transcriptState,
+									className: `rounded-xl px-3 py-2 transition-all ${isPartial ? "border border-dashed border-cyan-400/50 bg-cyan-950/30 shadow-[0_0_20px_rgba(34,211,238,0.12)]" : "border border-emerald-400/20 bg-emerald-950/20"}`,
+									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "flex items-center justify-between gap-2 mb-1",
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "inline-flex items-center gap-1.5",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `w-1.5 h-1.5 rounded-full ${isPartial ? "bg-cyan-400 animate-ping" : "bg-emerald-400"}` }),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "text-[11px] font-semibold text-emerald-300/95",
+													children: entry.ownerLabel
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													"data-testid": isPartial ? "live-voice-partial-badge" : "live-voice-finalized-badge",
+													className: `text-[10px] font-medium px-1.5 py-0.2 rounded-md ${isPartial ? "bg-cyan-400/20 text-cyan-200 border border-cyan-400/30" : "bg-emerald-400/15 text-emerald-200/90"}`,
+													children: isPartial ? voiceLang === "bn-BD" ? "লাইভ কথা…" : "Live speaking…" : voiceLang === "bn-BD" ? "চূড়ান্ত" : "Finalized"
+												})
+											]
+										}), entry.formattedTime && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("time", {
+											className: "text-[10.5px] font-mono tabular-nums text-slate-400",
+											children: entry.formattedTime
+										})]
+									}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										className: "flex items-start gap-2.5",
+										children: [entry.imgs.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+											"data-testid": "live-voice-timeline-images",
+											className: "flex flex-wrap items-center gap-1.5 shrink-0",
+											children: entry.imgs.map((img, imgIdx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+												type: "button",
+												"data-testid": "live-voice-timeline-image-card",
+												onClick: () => setFullscreenImage({
+													url: img.url,
+													name: img.name || "Shared image"
+												}),
+												"aria-label": `View ${img.name || "shared image"} fullscreen`,
+												className: "group relative w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden border border-white/15 bg-slate-900 cursor-pointer shrink-0",
+												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+													src: img.url,
+													alt: img.name || "Shared image",
+													className: "w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+												}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "absolute inset-0 bg-slate-950/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
+													children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ZoomIn, { className: "w-3.5 h-3.5 text-white" })
+												})]
+											}, `${entry.id}-img-${imgIdx}`))
+										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "flex-1 min-w-0",
+											children: [entry.attachedFileNames.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+												className: "flex flex-wrap items-center gap-1.5 mb-1",
+												children: entry.attachedFileNames.map((fname) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+													className: "inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.08] border border-white/10 text-[11px] text-sky-200",
+													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FileText, { className: "w-3 h-3 text-sky-300" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: fname })]
+												}, `${entry.id}-file-${fname}`))
+											}), isPartial ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+												className: "text-[13px] sm:text-[13.5px] leading-relaxed",
+												children: [
+													entry.confirmedPrefix && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+														"data-testid": "live-voice-partial-confirmed",
+														className: "text-white font-normal",
+														children: [entry.confirmedPrefix, " "]
+													}),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+														"data-testid": "live-voice-partial-interim",
+														className: "text-cyan-200/95 italic underline decoration-cyan-400/50 decoration-dotted underline-offset-4",
+														children: entry.partialInterimText || entry.text
+													}),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+														className: "inline-block w-1.5 h-3.5 ml-1 align-middle bg-cyan-300 animate-pulse rounded-sm",
+														"aria-hidden": "true"
+													})
+												]
+											}) : entry.text && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+												className: "text-[13px] sm:text-[13.5px] text-slate-100/95 leading-relaxed",
+												children: entry.text
+											})]
+										})]
+									})]
+								}, entry.id);
+								return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("article", {
+									"data-testid": "live-voice-message-ai",
+									"data-stream-state": entry.streamState,
+									className: "rounded-xl px-3 py-2.5 border border-violet-400/20 bg-violet-950/20",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "flex items-center justify-between gap-2 mb-1",
+											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+												className: "inline-flex items-center gap-1.5",
+												children: [
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: `w-1.5 h-1.5 rounded-full ${entry.streamState !== "complete" ? "bg-violet-400 animate-pulse" : "bg-violet-400"}` }),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+														className: "text-[11px] font-semibold text-violet-300/95",
+														children: entry.ownerLabel
+													}),
+													entry.streamState === "streaming" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+														className: "text-[10px] font-medium px-1.5 py-0.2 rounded-md bg-violet-400/20 text-violet-200",
+														children: voiceLang === "bn-BD" ? "স্ট্রিমিং…" : "Streaming…"
+													})
+												]
+											}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+												className: "inline-flex items-center gap-1.5",
+												children: entry.formattedTime && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("time", {
+													className: "text-[10.5px] font-mono tabular-nums text-slate-400",
+													children: entry.formattedTime
+												})
+											})]
+										}),
+										(entry.streamState === "thinking" || entry.streamState === "streaming" && entry.thinkingText) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											"data-testid": "live-voice-thinking-indicator",
+											className: "inline-flex items-center gap-2 px-2.5 py-1 my-0.5 rounded-lg bg-indigo-500/15 border border-indigo-400/25 text-[11.5px] text-indigo-200/90",
+											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
+												className: "inline-flex items-center gap-1",
+												"aria-hidden": "true",
+												children: [
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:-0.25s]" }),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:-0.12s]" }),
+													/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" })
+												]
+											}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: entry.thinkingText || (voiceLang === "bn-BD" ? "উত্তর বিশ্লেষণ ও তৈরি হচ্ছে…" : "Thinking and analyzing…") })]
+										}),
+										entry.text && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
+											className: `text-[13.5px] sm:text-[14px] text-white/95 font-normal leading-relaxed ${expandedTranscript ? "" : "line-clamp-4"}`,
+											children: [formatTextForNaturalSpeech(entry.text, expandedTranscript ? 4e3 : 1200), entry.streamState === "streaming" && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+												"data-testid": "live-voice-stream-cursor",
+												className: "inline-block w-1.5 h-3.5 ml-1 align-middle bg-violet-300 animate-pulse rounded-sm",
+												"aria-hidden": "true"
+											})]
+										})
+									]
+								}, entry.id);
+							})
+						})]
 					}) : !isOffline && !isGenerating && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						"data-testid": "live-voice-quick-prompts",
-						className: "mt-5 flex flex-wrap items-center justify-center gap-2 max-w-md",
+						className: "mt-3 flex flex-wrap items-center justify-center gap-2 max-w-md",
 						children: quickStarters.map((promptText, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 							type: "button",
 							"data-testid": `live-voice-starter-${idx}`,
@@ -9617,19 +10204,19 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								startDecodedBufferPlayback(ctx, buf, ttsAbortRef.current);
 							});
 						},
-						className: "live-voice-control mt-3 inline-flex items-center gap-2 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-medium px-5 h-11 text-[13px] cursor-pointer transition-colors",
+						className: "live-voice-control mt-2 inline-flex items-center gap-2 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-medium px-5 h-10 text-[13px] cursor-pointer transition-colors shrink-0",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Volume2, { className: "w-4 h-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Tap to enable audio" })]
 					}),
 					statusNotice && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
 						"data-testid": "live-voice-status-notice",
 						role: "status",
-						className: "mt-3 max-w-sm text-[12px] text-slate-300/65 leading-snug",
+						className: "mt-1.5 max-w-md text-[12px] text-slate-300/75 leading-snug text-center shrink-0",
 						children: statusNotice
 					})
 				]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("footer", {
-				className: "relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2.5",
+				className: "relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 shrink-0",
 				children: [
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 						ref: imageInputRef,
@@ -9649,16 +10236,24 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 					}),
 					(attachedImgs.length > 0 || attachedFiles.length > 0) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						"data-testid": "live-voice-attachment-preview",
-						className: "w-full flex flex-wrap items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/90 border border-white/15 backdrop-blur-md",
+						className: "w-full flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-white/15 backdrop-blur-md",
 						children: [
 							attachedImgs.map((img, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 								"data-testid": `live-voice-img-card-${idx}`,
 								className: "flex items-center gap-2 pl-1.5 pr-2 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[200px]",
 								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-										src: img.url,
-										alt: img.name,
-										className: "w-8 h-8 rounded-lg object-cover shrink-0 border border-white/10"
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => setFullscreenImage({
+											url: img.url,
+											name: img.name
+										}),
+										className: "w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-white/10 cursor-pointer",
+										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+											src: img.url,
+											alt: img.name,
+											className: "w-full h-full object-cover"
+										})
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 										className: "text-[11.5px] text-white/90 truncate",
@@ -9676,7 +10271,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							}, `vimg-${idx}-${img.name}`)),
 							attachedFiles.map((file, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 								"data-testid": `live-voice-file-card-${idx}`,
-								className: "flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]",
+								className: "flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]",
 								children: [
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FileText, { className: "w-4 h-4 text-sky-300 shrink-0" }),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
@@ -9696,15 +10291,15 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							!keyboardOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 								type: "button",
 								"data-testid": "live-voice-send-attachments-btn",
-								onClick: (e) => handleSubmitTyped(e),
-								className: "ml-auto px-3 py-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0",
+								onClick: () => handleSubmitTyped(),
+								className: "ml-auto px-3 py-1 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0",
 								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-3.5 h-3.5 stroke-[2.4]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: voiceLang === "bn-BD" ? "পাঠান" : "Send" })]
 							})
 						]
 					}),
 					keyboardOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
 						onSubmit: handleSubmitTyped,
-						className: "live-voice-composer w-full flex items-center gap-2 pl-4 pr-1.5 h-12 rounded-full",
+						className: "live-voice-composer w-full flex items-center gap-2 pl-4 pr-1.5 h-11 rounded-full",
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 							ref: textInputRef,
 							type: "text",
@@ -9712,13 +10307,13 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							value: draftText,
 							onChange: (e) => setDraftText(e.target.value),
 							placeholder: attachedImgs.length > 0 || attachedFiles.length > 0 ? voiceLang === "bn-BD" ? "ছবি/ফাইল সম্পর্কে প্রশ্ন লিখুন..." : "Ask about the attachment..." : voiceLang === "bn-BD" ? "মেসেজ লিখুন..." : "Type a message...",
-							className: "live-voice-input flex-1 min-w-0 bg-transparent text-[14.5px] text-white placeholder:text-white/45"
+							className: "live-voice-input flex-1 min-w-0 bg-transparent text-[14px] text-white placeholder:text-white/45"
 						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 							type: "submit",
 							"data-testid": "live-voice-send-btn",
 							disabled: !draftText.trim() && attachedImgs.length === 0 && attachedFiles.length === 0,
 							"aria-label": "Send typed message",
-							className: "live-voice-control w-9 h-9 rounded-full bg-white text-slate-950 disabled:opacity-35 inline-flex items-center justify-center hover:bg-sky-50 transition-opacity cursor-pointer shrink-0",
+							className: "live-voice-control w-8 h-8 rounded-full bg-white text-slate-950 disabled:opacity-35 inline-flex items-center justify-center hover:bg-sky-50 transition-opacity cursor-pointer shrink-0",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-4 h-4 stroke-[2.4]" })
 						})]
 					}),
@@ -9815,6 +10410,39 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						]
 					})
 				]
+			}),
+			fullscreenImage && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+				"data-testid": "live-voice-fullscreen-image-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": fullscreenImage.name || "Fullscreen image preview",
+				onClick: () => setFullscreenImage(null),
+				className: "fixed inset-0 z-[90] bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center p-4 sm:p-8",
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					onClick: (e) => e.stopPropagation(),
+					className: "relative max-w-4xl w-full max-h-[86dvh] flex flex-col items-center rounded-3xl bg-slate-900/90 border border-white/15 p-3 sm:p-4 shadow-2xl",
+					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+						className: "w-full flex items-center justify-between gap-3 pb-2.5 mb-2 border-b border-white/10",
+						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+							className: "text-[13px] font-medium text-white/90 truncate",
+							children: fullscreenImage.name || "Shared Image"
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+							type: "button",
+							"data-testid": "live-voice-fullscreen-close-btn",
+							onClick: () => setFullscreenImage(null),
+							"aria-label": "Close fullscreen image",
+							className: "w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white inline-flex items-center justify-center cursor-pointer transition-colors",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-4 h-4" })
+						})]
+					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+						className: "w-full flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-2xl bg-slate-950/60",
+						children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
+							src: fullscreenImage.url,
+							alt: fullscreenImage.name || "Fullscreen preview",
+							className: "max-h-[72dvh] max-w-full object-contain rounded-xl"
+						})
+					})]
+				})
 			})
 		]
 	});
@@ -13429,8 +14057,8 @@ var DeploymentConnectionDiagnosticsCard = () => {
 	const [loadingHealth, setLoadingHealth] = (0, import_react.useState)(false);
 	const [liveCheck, setLiveCheck] = (0, import_react.useState)(null);
 	const [runningLiveCheck, setRunningLiveCheck] = (0, import_react.useState)(false);
-	const clientViteSupabaseUrl = Boolean(typeof import.meta !== "undefined" && "https://cykflyskyxvtnqpdfplm.supabase.co");
-	const clientViteSupabaseKey = Boolean(typeof import.meta !== "undefined" && "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy");
+	const clientViteSupabaseUrl = Boolean(typeof import.meta !== "undefined" && void 0);
+	const clientViteSupabaseKey = Boolean(typeof import.meta !== "undefined" && void 0);
 	const fetchEnvStatus = async () => {
 		setLoadingHealth(true);
 		try {
@@ -26546,10 +27174,7 @@ var viteEnv = {
 	"TSS_DISABLE_CSRF_MIDDLEWARE_WARNING": "false",
 	"TSS_INLINE_CSS_ENABLED": "false",
 	"TSS_ROUTER_BASEPATH": "",
-	"TSS_SERVER_FN_BASE": "/_serverFn/",
-	"VITE_SUPABASE_PROJECT_ID": "cykflyskyxvtnqpdfplm",
-	"VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy",
-	"VITE_SUPABASE_URL": "https://cykflyskyxvtnqpdfplm.supabase.co"
+	"TSS_SERVER_FN_BASE": "/_serverFn/"
 };
 var SUPABASE_URL = (viteEnv?.VITE_SUPABASE_URL || "").trim();
 var SUPABASE_ANON_KEY = (viteEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
@@ -33165,6 +33790,7 @@ function App() {
 				isTranscribing: isTranscribingVoice,
 				liveTranscript: voiceLiveText,
 				micStream: voiceAudioStream,
+				messages: activeChat.msgs,
 				lastUserText: lastUserMessage,
 				lastAiMessage: lastAiVoiceSnapshot,
 				onToggleMic: toggleMic,

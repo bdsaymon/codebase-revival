@@ -1,7 +1,7 @@
 import { o as __toESM } from "../_runtime.mjs";
 import { n as require_jsx_runtime, r as require_react } from "../_libs/react+tanstack__react-query.mjs";
 import { i as shouldAttemptChunkReload, n as isDynamicImportError, r as loadWithRetry, t as clearChunkReloadGuard } from "./dynamicImportRecovery-BoPXERDS.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-BtFPExG6.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-DOrHDn_L.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 function Index() {
@@ -15,7 +15,7 @@ function Index() {
 	(0, import_react.useEffect)(() => {
 		let cancelled = false;
 		setLoadError(null);
-		loadWithRetry(() => import("./AppEntry-B6sgy87w.mjs"), {
+		loadWithRetry(() => import("./AppEntry-C2uNihK4.mjs"), {
 			retries: 3,
 			delayMs: 300,
 			isCancelled: () => cancelled

@@ -411,6 +411,27 @@ export function buildSkillInstruction(skills: SelfSkill[]): string {
     .join('\n---\n');
 }
 
+/**
+ * Injects an active custom skill directive into the last user message in-place
+ * so image attachments (`imgs`) and other fields on that turn are preserved.
+ */
+export function applySkillDirectiveToMessages<
+  T extends { role: string; text: string; imgs?: Array<{ mime: string; data: string }> }
+>(messages: T[], activeSkillPrompt: string): T[] {
+  if (!activeSkillPrompt || messages.length === 0) return messages;
+  const lastIdx = messages.length - 1;
+  return messages.map((m, idx) =>
+    idx === lastIdx
+      ? {
+          ...m,
+          text: m.text
+            ? `${m.text}\n\n[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}`
+            : `[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}`,
+        }
+      : m
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Self check & auto repair
 // ─────────────────────────────────────────────────────────────────────────────

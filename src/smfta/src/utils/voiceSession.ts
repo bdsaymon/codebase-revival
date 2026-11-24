@@ -41,6 +41,57 @@ export function deriveVoiceSessionState(
   return 'listening';
 }
 
+export interface MicActivationGateInputs {
+  isOpen: boolean;
+  isDisconnected: boolean;
+  isOffline: boolean;
+  isConnecting: boolean;
+  isGenerating: boolean;
+  isTranscribingTurn: boolean;
+  isSynthesizingVoice: boolean;
+  isAiSpeaking: boolean;
+  isInitialGreetingPending: boolean;
+  pipelineBusy: boolean;
+  pendingChunkCount: number;
+  activeSourceCount: number;
+  hasPendingAudioBuffer?: boolean;
+}
+
+/**
+ * Prevents microphone turn activation while initial greeting synthesis or
+ * active AI speech/TTS pipelines are still pending or playing.
+ */
+export function shouldActivateMicForTurn(inputs: MicActivationGateInputs): boolean {
+  if (!inputs.isOpen) return false;
+  if (inputs.isDisconnected || inputs.isOffline || inputs.isConnecting) return false;
+  if (inputs.isGenerating || inputs.isTranscribingTurn) return false;
+  if (inputs.isInitialGreetingPending) return false;
+  if (inputs.isSynthesizingVoice || inputs.isAiSpeaking) return false;
+  if (inputs.hasPendingAudioBuffer) return false;
+  if (inputs.pipelineBusy || inputs.pendingChunkCount > 0 || inputs.activeSourceCount > 0) {
+    return false;
+  }
+  return true;
+}
+
+export interface BargeInGateInputs {
+  voiceState: VoiceConnectionState;
+  isAiSpeaking: boolean;
+  isMuted: boolean;
+  isInitialGreetingPending: boolean;
+  aiSpeakingStartedAt: number;
+}
+
+/**
+ * Only allows acoustic barge-in after AI playback has actually started,
+ * never during initial greeting synthesis before audio playback begins.
+ */
+export function shouldAllowBargeIn(inputs: BargeInGateInputs): boolean {
+  if (inputs.isMuted || inputs.isInitialGreetingPending) return false;
+  if (inputs.voiceState !== 'speaking' || !inputs.isAiSpeaking) return false;
+  return inputs.aiSpeakingStartedAt > 0;
+}
+
 export interface VadConfig {
   minSpeechThreshold: number;
   releaseRatio: number;
@@ -382,3 +433,459 @@ export function buildVoiceGreeting(
     ? `Hello ${firstName}, I'm SMFTA AI. How can I help you today?`
     : "Hello, I'm SMFTA AI. How can I help you today?";
 }
+
+// ============================================================================
+// Unified Live Visual Conversation Timeline & Live Image Preview Helpers
+// ============================================================================
+
+export interface VoiceTimelineAttachment {
+  mime: string;
+  data: string;
+  url: string;
+  name?: string;
+}
+
+export interface VoiceTimelineSourceMessage {
+  id: string;
+  role: 'user' | 'ai';
+  text: string;
+  ts: number;
+  status?: 'idle' | 'queued' | 'running' | 'streaming' | 'complete' | 'failed' | string;
+  imgs?: VoiceTimelineAttachment[];
+  thinking?: string;
+  statusSteps?: string[];
+  isError?: boolean;
+}
+
+export interface VoiceTimelineImageItem {
+  id: string;
+  url: string;
+  mime: string;
+  data: string;
+  name: string;
+  ts: number;
+  formattedTime: string;
+  isStaged: boolean;
+  stagedIndex?: number;
+  messageId?: string;
+}
+
+export interface VoiceTimelineEntry {
+  id: string;
+  role: 'user' | 'ai';
+  ownerLabel: string;
+  text: string;
+  confirmedPrefix?: string;
+  partialInterimText?: string;
+  ts: number;
+  formattedTime: string;
+  transcriptState: 'partial' | 'finalized';
+  streamState: 'thinking' | 'streaming' | 'complete';
+  imgs: VoiceTimelineAttachment[];
+  attachedFileNames: string[];
+  thinkingText?: string;
+  isError?: boolean;
+  isGreeting?: boolean;
+}
+
+/**
+ * Formats an epoch timestamp (ms) into a concise HH:MM string for the live timeline.
+ */
+export function formatVoiceTimelineTimestamp(ts: number): string {
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  try {
+    const d = new Date(ts);
+    const hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hour12 = hours % 12 || 12;
+    return `${hour12}:${minutes} ${period}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Strips inline ⟦FILE:name⟧...⟦/FILE⟧ blocks from voice timeline message text
+ * so attached code/text files show up as clean filename chips rather than raw dumps.
+ */
+export function stripInlineFileBlocksForVoiceTimeline(rawText: string): {
+  cleanText: string;
+  attachedFileNames: string[];
+} {
+  if (!rawText) return { cleanText: '', attachedFileNames: [] };
+  const attachedFileNames: string[] = [];
+  const withoutFiles = rawText.replace(
+    /⟦FILE:([^\n⟧]+)⟧[\s\S]*?⟦\/FILE⟧/g,
+    (_match, fileName: string) => {
+      const trimmed = (fileName || '').trim();
+      if (trimmed) attachedFileNames.push(trimmed);
+      return '';
+    }
+  );
+  return {
+    cleanText: sanitizeVoiceUtterance(withoutFiles),
+    attachedFileNames,
+  };
+}
+
+export interface CollectLiveImagesInput {
+  stagedImgs?: VoiceTimelineAttachment[];
+  sessionSharedImgs?: Array<VoiceTimelineAttachment & { id?: string; ts?: number }>;
+  messages?: VoiceTimelineSourceMessage[];
+  nowMs?: number;
+}
+
+/**
+ * Collects user-shared images for the top Live Image Preview bar:
+ *  - Staged images ready to send or currently being discussed (`isStaged: true`)
+ *  - Images shared in the active live conversation (`isStaged: false`), newest first
+ */
+export function collectLiveConversationImages(
+  input: CollectLiveImagesInput
+): VoiceTimelineImageItem[] {
+  const nowMs = input.nowMs ?? Date.now();
+  const items: VoiceTimelineImageItem[] = [];
+  const seenKeys = new Set<string>();
+
+  const makeKey = (img: VoiceTimelineAttachment) =>
+    `${img.mime || 'image'}::${(img.data || img.url || '').slice(0, 96)}`;
+
+  // 1. Staged images at the front so user sees instant preview at top (deduplicated)
+  const staged = input.stagedImgs || [];
+  staged.forEach((img, idx) => {
+    if (!img || (!img.url && !img.data)) return;
+    const key = makeKey(img);
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    const url =
+      img.url || (img.data.startsWith('data:') ? img.data : `data:${img.mime || 'image/png'};base64,${img.data}`);
+    items.push({
+      id: `staged-${idx}-${img.name || 'img'}`,
+      url,
+      mime: img.mime || 'image/png',
+      data: img.data || url,
+      name: img.name || `Image ${idx + 1}`,
+      ts: nowMs,
+      formattedTime: formatVoiceTimelineTimestamp(nowMs),
+      isStaged: true,
+      stagedIndex: idx,
+    });
+  });
+
+  // 2. Images from conversation messages & session-shared image buffer
+  const historyCandidates: Array<{
+    img: VoiceTimelineAttachment;
+    ts: number;
+    messageId?: string;
+    idx: number;
+  }> = [];
+
+  (input.messages || []).forEach((msg) => {
+    if (!msg.imgs || msg.imgs.length === 0) return;
+    msg.imgs.forEach((img, idx) => {
+      if (!img || (!img.url && !img.data)) return;
+      historyCandidates.push({
+        img,
+        ts: msg.ts || nowMs,
+        messageId: msg.id,
+        idx,
+      });
+    });
+  });
+
+  (input.sessionSharedImgs || []).forEach((img, idx) => {
+    if (!img || (!img.url && !img.data)) return;
+    historyCandidates.push({
+      img,
+      ts: img.ts || nowMs,
+      messageId: img.id,
+      idx,
+    });
+  });
+
+  // Sort shared images chronologically (newest shared images easily accessible)
+  historyCandidates
+    .sort((a, b) => b.ts - a.ts)
+    .forEach(({ img, ts, messageId, idx }) => {
+      const key = makeKey(img);
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      const url =
+        img.url ||
+        (img.data.startsWith('data:')
+          ? img.data
+          : `data:${img.mime || 'image/png'};base64,${img.data}`);
+      items.push({
+        id: `shared-${messageId || ts}-${idx}`,
+        url,
+        mime: img.mime || 'image/png',
+        data: img.data || url,
+        name: img.name || 'Shared image',
+        ts,
+        formattedTime: formatVoiceTimelineTimestamp(ts),
+        isStaged: false,
+        messageId,
+      });
+    });
+
+  return items;
+}
+
+export interface BuildUnifiedVoiceTimelineInput {
+  messages?: VoiceTimelineSourceMessage[];
+  lastUserText?: string;
+  lastAiMessage?: string;
+  greetingText?: string | null;
+  liveCaption?: string;
+  liveFinalText?: string;
+  liveInterimText?: string;
+  isTranscribingTurn?: boolean;
+  isGenerating?: boolean;
+  stagedImgs?: VoiceTimelineAttachment[];
+  pendingSharedTurn?: {
+    id: string;
+    text: string;
+    ts: number;
+    imgs: VoiceTimelineAttachment[];
+  } | null;
+  userName?: string;
+  voiceName?: string;
+  voiceLang?: 'bn-BD' | 'en-US';
+  nowMs?: number;
+}
+
+/**
+ * Builds the chronological Unified Live Conversation Timeline combining:
+ *  - Shared images, finalized user transcripts, and AI responses from `messages`
+ *  - Fallback to `lastUserText` / `lastAiMessage` when full `messages` array isn't provided
+ *  - Real-time partial speech transcription bubble (`transcriptState: 'partial'`)
+ *  - Streaming AI response with thinking indicator (`streamState: 'thinking' | 'streaming' | 'complete'`)
+ */
+export function buildUnifiedVoiceTimeline(
+  input: BuildUnifiedVoiceTimelineInput
+): VoiceTimelineEntry[] {
+  const nowMs = input.nowMs ?? Date.now();
+  const isBn = input.voiceLang === 'bn-BD';
+  const userOwnerLabel =
+    (input.userName || '').trim().split(/\s+/)[0] || (isBn ? 'আপনি' : 'You');
+  const aiOwnerLabel = input.voiceName ? `${input.voiceName} · AI` : 'SMFTA AI';
+
+  const entries: VoiceTimelineEntry[] = [];
+  const rawMessages = input.messages || [];
+
+  // 1. Optional initial greeting if conversation has no messages yet
+  if (input.greetingText && rawMessages.length === 0 && !input.lastAiMessage) {
+    const cleanGreeting = sanitizeVoiceUtterance(input.greetingText);
+    if (cleanGreeting) {
+      entries.push({
+        id: 'voice-greeting',
+        role: 'ai',
+        ownerLabel: aiOwnerLabel,
+        text: cleanGreeting,
+        ts: nowMs - 1000,
+        formattedTime: formatVoiceTimelineTimestamp(nowMs - 1000),
+        transcriptState: 'finalized',
+        streamState: 'complete',
+        imgs: [],
+        attachedFileNames: [],
+        isGreeting: true,
+      });
+    }
+  }
+
+  // 2. Map chronological conversation messages
+  if (rawMessages.length > 0) {
+    rawMessages.forEach((msg, index) => {
+      const isLastMsg = index === rawMessages.length - 1;
+      const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(
+        msg.text || ''
+      );
+      const imgs = (msg.imgs || []).map((img) => ({
+        mime: img.mime || 'image/png',
+        data: img.data || img.url || '',
+        url:
+          img.url ||
+          (img.data?.startsWith('data:')
+            ? img.data
+            : `data:${img.mime || 'image/png'};base64,${img.data || ''}`),
+        name: img.name,
+      }));
+
+      if (msg.role === 'user') {
+        if (!cleanText && imgs.length === 0 && attachedFileNames.length === 0) {
+          return;
+        }
+        entries.push({
+          id: msg.id || `user-${index}`,
+          role: 'user',
+          ownerLabel: userOwnerLabel,
+          text: cleanText,
+          ts: msg.ts || nowMs,
+          formattedTime: formatVoiceTimelineTimestamp(msg.ts || nowMs),
+          transcriptState: 'finalized',
+          streamState: 'complete',
+          imgs,
+          attachedFileNames,
+        });
+      } else {
+        const isActivelyGenerating =
+          msg.status === 'queued' ||
+          msg.status === 'running' ||
+          msg.status === 'streaming' ||
+          (isLastMsg && Boolean(input.isGenerating) && msg.status !== 'complete' && msg.status !== 'failed');
+
+        let streamState: VoiceTimelineEntry['streamState'] = 'complete';
+        if (isActivelyGenerating) {
+          streamState = cleanText.length > 0 ? 'streaming' : 'thinking';
+        }
+
+        const thinkingStep =
+          msg.thinking ||
+          (msg.statusSteps && msg.statusSteps.length > 0
+            ? msg.statusSteps[msg.statusSteps.length - 1]
+            : undefined);
+
+        if (!cleanText && streamState === 'complete' && !msg.isError && imgs.length === 0) {
+          return;
+        }
+
+        entries.push({
+          id: msg.id || `ai-${index}`,
+          role: 'ai',
+          ownerLabel: aiOwnerLabel,
+          text: cleanText,
+          ts: msg.ts || nowMs,
+          formattedTime: formatVoiceTimelineTimestamp(msg.ts || nowMs),
+          transcriptState: 'finalized',
+          streamState,
+          imgs,
+          attachedFileNames: [],
+          thinkingText: thinkingStep ? sanitizeVoiceUtterance(thinkingStep) : undefined,
+          isError: msg.isError,
+        });
+      }
+    });
+  } else {
+    // Fallback when `messages` prop is not passed or empty: use `lastUserText` / `lastAiMessage`
+    if (input.lastUserText) {
+      const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(
+        input.lastUserText
+      );
+      if (cleanText || attachedFileNames.length > 0) {
+        entries.push({
+          id: 'fallback-last-user',
+          role: 'user',
+          ownerLabel: userOwnerLabel,
+          text: cleanText,
+          ts: nowMs - 2000,
+          formattedTime: formatVoiceTimelineTimestamp(nowMs - 2000),
+          transcriptState: 'finalized',
+          streamState: 'complete',
+          imgs: [],
+          attachedFileNames,
+        });
+      }
+    }
+
+    if (input.lastAiMessage || input.isGenerating) {
+      const cleanAi = sanitizeVoiceUtterance(input.lastAiMessage || '');
+      const streamState: VoiceTimelineEntry['streamState'] = input.isGenerating
+        ? cleanAi.length > 0
+          ? 'streaming'
+          : 'thinking'
+        : 'complete';
+
+      if (cleanAi || streamState !== 'complete') {
+        entries.push({
+          id: 'fallback-last-ai',
+          role: 'ai',
+          ownerLabel: aiOwnerLabel,
+          text: cleanAi,
+          ts: nowMs - 500,
+          formattedTime: formatVoiceTimelineTimestamp(nowMs - 500),
+          transcriptState: 'finalized',
+          streamState,
+          imgs: [],
+          attachedFileNames: [],
+        });
+      }
+    }
+  }
+
+  // 3. Optimistic pending user turn (e.g., just-sent image+text before parent messages state flushes)
+  if (input.pendingSharedTurn) {
+    const pt = input.pendingSharedTurn;
+    const { cleanText, attachedFileNames } = stripInlineFileBlocksForVoiceTimeline(pt.text);
+    const alreadyInMessages = entries.some(
+      (e) =>
+        e.role === 'user' &&
+        ((cleanText && e.text === cleanText) ||
+          (pt.imgs.length > 0 && e.imgs.length === pt.imgs.length && Math.abs(e.ts - pt.ts) < 5000))
+    );
+    if (!alreadyInMessages && (cleanText || pt.imgs.length > 0)) {
+      entries.push({
+        id: pt.id,
+        role: 'user',
+        ownerLabel: userOwnerLabel,
+        text: cleanText,
+        ts: pt.ts,
+        formattedTime: formatVoiceTimelineTimestamp(pt.ts),
+        transcriptState: 'finalized',
+        streamState: 'complete',
+        imgs: pt.imgs,
+        attachedFileNames,
+      });
+    }
+  }
+
+  // 4. Real-time partial speech transcription bubble (`transcriptState: 'partial'`)
+  const confirmedPrefix = sanitizeVoiceUtterance(input.liveFinalText || '');
+  const partialInterim = sanitizeVoiceUtterance(input.liveInterimText || '');
+  const combinedLive = sanitizeVoiceUtterance(
+    input.liveCaption || [confirmedPrefix, partialInterim].filter(Boolean).join(' ')
+  );
+
+  if (combinedLive || input.isTranscribingTurn) {
+    entries.push({
+      id: 'live-partial-speech',
+      role: 'user',
+      ownerLabel: userOwnerLabel,
+      text:
+        combinedLive ||
+        (isBn ? 'কথা টেক্সটে রূপান্তর করা হচ্ছে…' : 'Transcribing speech…'),
+      confirmedPrefix: confirmedPrefix || undefined,
+      partialInterimText:
+        partialInterim || (!confirmedPrefix && combinedLive ? combinedLive : undefined),
+      ts: nowMs,
+      formattedTime: formatVoiceTimelineTimestamp(nowMs),
+      transcriptState: 'partial',
+      streamState: 'streaming',
+      imgs: [],
+      attachedFileNames: [],
+    });
+  }
+
+  // 5. If `isGenerating` is true and no AI entry at the tail is already thinking/streaming, append a thinking entry
+  const lastEntry = entries[entries.length - 1];
+  const hasActiveAiStream = entries.some(
+    (e) => e.role === 'ai' && (e.streamState === 'thinking' || e.streamState === 'streaming')
+  );
+  if (input.isGenerating && !hasActiveAiStream && (!lastEntry || lastEntry.role === 'user')) {
+    entries.push({
+      id: 'live-ai-thinking',
+      role: 'ai',
+      ownerLabel: aiOwnerLabel,
+      text: '',
+      ts: nowMs,
+      formattedTime: formatVoiceTimelineTimestamp(nowMs),
+      transcriptState: 'finalized',
+      streamState: 'thinking',
+      imgs: [],
+      attachedFileNames: [],
+    });
+  }
+
+  return entries;
+}
+

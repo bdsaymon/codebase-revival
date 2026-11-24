@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BilingualSpeechPlayer,
+  accumulateSpeechResults,
   extractReadySpeechChunks,
   formatTextForNaturalSpeech,
   requestGeminiFemaleSpeech,
@@ -53,6 +54,30 @@ test('splitTextForSpeech splits Bengali and English text along sentence boundari
   for (const piece of wrapped) {
     assert.ok(piece.length <= 100);
   }
+});
+
+test('accumulateSpeechResults deduplicates repeated/cumulative finals and overlapping interim segments', () => {
+  const androidContinuous = [
+    { isFinal: true, 0: { transcript: 'hello' } },
+    { isFinal: true, 0: { transcript: 'hello world' } },
+    { isFinal: true, 0: { transcript: 'world' } },
+    { isFinal: false, 0: { transcript: 'hello world how are you' } },
+  ];
+  const res1 = accumulateSpeechResults(androidContinuous, '');
+  assert.equal(res1.finalPrefix, 'hello world');
+  assert.equal(res1.interimText, 'how are you');
+  assert.equal(res1.liveTranscript, 'hello world how are you');
+
+  const res2 = accumulateSpeechResults(
+    [
+      { isFinal: true, 0: { transcript: 'hello world' } },
+      { isFinal: false, 0: { transcript: 'next sentence' } },
+    ],
+    'hello world'
+  );
+  assert.equal(res2.finalPrefix, 'hello world');
+  assert.equal(res2.interimText, 'next sentence');
+  assert.equal(res2.liveTranscript, 'hello world next sentence');
 });
 
 test('extractReadySpeechChunks emits short first sentence immediately while still streaming', () => {
@@ -290,4 +315,75 @@ test('BilingualSpeechPlayer retries same voice once before fallback and flags ba
 
   assert.ok(backupEvents.some((e) => e.isBackupVoice === true && e.modelUsed === 'neural-voice-hd'));
 });
+
+test('BilingualSpeechPlayer cancels stale multi-chunk sessions cleanly without overlapping onDone calls', async () => {
+  const firstLongText = `${'Sentence one fills a lot of characters. '.repeat(26)}Sentence two should never play after preemption.`;
+  let staleDoneCalled = 0;
+  let abortedSignals = 0;
+  let resolveFirstFetch: ((res: Response) => void) | null = null;
+
+  const raceFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    if (init?.signal) {
+      init.signal.addEventListener('abort', () => {
+        abortedSignals += 1;
+      });
+    }
+    if (!resolveFirstFetch) {
+      return new Promise<Response>((resolve) => {
+        resolveFirstFetch = resolve;
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        audioBase64: 'UklGRg==',
+        mimeType: 'audio/wav',
+        voiceName: 'Kore',
+        modelUsed: 'gemini-3.8-live',
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as unknown as typeof fetch;
+
+  const player = new BilingualSpeechPlayer();
+  player.speak({
+    text: firstLongText,
+    msgId: 'stale-msg',
+    voiceProfile: 'Kore',
+    fetchImpl: raceFetch,
+    onDone: () => {
+      staleDoneCalled += 1;
+    },
+  });
+
+  let activeDoneCalled = 0;
+  await new Promise<void>((resolve) => {
+    player.speak({
+      text: 'Active replacement turn.',
+      msgId: 'active-msg',
+      voiceProfile: 'Kore',
+      fetchImpl: raceFetch,
+      onDone: () => {
+        activeDoneCalled += 1;
+        resolve();
+      },
+    });
+  });
+
+  // Resolve the stalled first-session fetch afterwards — must be completely ignored
+  if (resolveFirstFetch) {
+    (resolveFirstFetch as (res: Response) => void)(
+      new Response(JSON.stringify({ ok: false, error: 'late failure' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  }
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.ok(abortedSignals >= 1, 'Expected preempted session AbortController to abort');
+  assert.equal(staleDoneCalled, 0, 'Stale preempted session must not invoke onDone');
+  assert.equal(activeDoneCalled, 1, 'Replacement session must invoke onDone once');
+});
+
 

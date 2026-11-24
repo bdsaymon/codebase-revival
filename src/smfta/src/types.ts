@@ -8,6 +8,7 @@ export interface ImageAttachment {
   mime: string;
   data: string;
   url: string;
+  name?: string;
 }
 
 export interface GeneratedImageMeta {

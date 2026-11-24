@@ -2540,5 +2540,40 @@ var Zap = createLucideIcon("zap", [["path", {
 	d: "M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z",
 	key: "1xq2db"
 }]]);
+/**
+* @license lucide-react v0.546.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var ZoomIn = createLucideIcon("zoom-in", [
+	["circle", {
+		cx: "11",
+		cy: "11",
+		r: "8",
+		key: "4ej97u"
+	}],
+	["line", {
+		x1: "21",
+		x2: "16.65",
+		y1: "21",
+		y2: "16.65",
+		key: "13gj7c"
+	}],
+	["line", {
+		x1: "11",
+		x2: "11",
+		y1: "8",
+		y2: "14",
+		key: "1vmskp"
+	}],
+	["line", {
+		x1: "8",
+		x2: "14",
+		y1: "11",
+		y2: "11",
+		key: "durymu"
+	}]
+]);
 //#endregion
-export { Lock as $, ChartColumn as $t, Search as A, FileArchive as At, Pencil as B, CodeXml as Bt, SlidersVertical as C, FolderKanban as Ct, Settings as D, FilePlus as Dt, ShieldAlert as E, FileSearch as Et, Plus as F, Download as Ft, Moon as G, CirclePause as Gt, Pause as H, Clock as Ht, Plug as I, Database as It, Mic as J, ChevronUp as Jt, Monitor as K, CircleCheck as Kt, Play as L, Cpu as Lt, RotateCw as M, EyeOff as Mt, RotateCcw as N, ExternalLink as Nt, Settings2 as O, FilePlus2 as Ot, RefreshCw as P, Ellipsis as Pt, Maximize2 as Q, Check as Qt, Pin as R, Copy as Rt, Smartphone as S, FolderOpen as St, ShieldCheck as T, FileSpreadsheet as Tt, Paperclip as U, CircleX as Ut, PenLine as V, CloudUpload as Vt, NotebookPen as W, CirclePlay as Wt, MessageSquare as X, ChevronLeft as Xt, MicOff as Y, ChevronRight as Yt, MessageSquarePlus as Z, ChevronDown as Zt, Table as _, GitCommitHorizontal as _t, Volume2 as a, ArrowLeft as an, Layers as at, Square as b, FolderTree as bt, Upload as c, KeyRound as ct, TriangleAlert as d, History as dt, Brain as en, LoaderCircle as et, Trash2 as f, HardDrive as ft, Tablet as g, GitBranch as gt, Terminal as h, GitPullRequest as ht, WandSparkles as i, ArrowRight as in, LayoutTemplate as it, Save as j, Eye as jt, Send as k, FileCode2 as kt, Unplug as l, Image as lt, ThumbsDown as m, Globe as mt, X as n, AudioLines as nn, Link2 as nt, Video as o, ArrowDown as on, Laptop as ot, ThumbsUp as p, Hand as pt, Minimize2 as q, CircleAlert as qt, Wrench as r, ArrowUp as rn, Lightbulb as rt, User as s, Activity as sn, Keyboard as st, Zap as t, BookOpen as tn, ListOrdered as tt, Trophy as u, ImagePlus as ut, Swords as v, Gauge as vt, Shield as w, FileText as wt, Sparkles as x, FolderPlus as xt, Sun as y, Folder as yt, PhoneOff as z, Code as zt };
+export { Maximize2 as $, Check as $t, Send as A, FileCode2 as At, PhoneOff as B, Code as Bt, Smartphone as C, FolderOpen as Ct, ShieldAlert as D, FileSearch as Dt, ShieldCheck as E, FileSpreadsheet as Et, RefreshCw as F, Ellipsis as Ft, NotebookPen as G, CirclePlay as Gt, PenLine as H, CloudUpload as Ht, Plus as I, Download as It, Minimize2 as J, CircleAlert as Jt, Moon as K, CirclePause as Kt, Plug as L, Database as Lt, Save as M, Eye as Mt, RotateCw as N, EyeOff as Nt, Settings as O, FilePlus as Ot, RotateCcw as P, ExternalLink as Pt, MessageSquarePlus as Q, ChevronDown as Qt, Play as R, Cpu as Rt, Sparkles as S, FolderPlus as St, Shield as T, FileText as Tt, Pause as U, Clock as Ut, Pencil as V, CodeXml as Vt, Paperclip as W, CircleX as Wt, MicOff as X, ChevronRight as Xt, Mic as Y, ChevronUp as Yt, MessageSquare as Z, ChevronLeft as Zt, Tablet as _, GitBranch as _t, WandSparkles as a, ArrowRight as an, LayoutTemplate as at, Sun as b, Folder as bt, User as c, Activity as cn, Keyboard as ct, Trophy as d, ImagePlus as dt, ChartColumn as en, Lock as et, TriangleAlert as f, History as ft, Terminal as g, GitPullRequest as gt, ThumbsDown as h, Globe as ht, Wrench as i, ArrowUp as in, Lightbulb as it, Search as j, FileArchive as jt, Settings2 as k, FilePlus2 as kt, Upload as l, KeyRound as lt, ThumbsUp as m, Hand as mt, Zap as n, BookOpen as nn, ListOrdered as nt, Volume2 as o, ArrowLeft as on, Layers as ot, Trash2 as p, HardDrive as pt, Monitor as q, CircleCheck as qt, X as r, AudioLines as rn, Link2 as rt, Video as s, ArrowDown as sn, Laptop as st, ZoomIn as t, Brain as tn, LoaderCircle as tt, Unplug as u, Image as ut, Table as v, GitCommitHorizontal as vt, SlidersVertical as w, FolderKanban as wt, Square as x, FolderTree as xt, Swords as y, Gauge as yt, Pin as z, Copy as zt };
