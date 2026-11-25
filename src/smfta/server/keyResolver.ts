@@ -165,7 +165,7 @@ export function resolveGeminiApiKey(req?: Pick<Request, 'headers' | 'body'> | nu
       if (!dec.ok || !dec.key) continue;
       if (requireGeminiPrefix) {
         if (isLikelyNonGeminiThirdPartyKey(dec.key)) continue;
-        if (!dec.key.startsWith('AIza')) continue;
+        if (!dec.key.startsWith('AIza') && !dec.key.startsWith('AQ.')) continue;
       } else if (isLikelyNonGeminiThirdPartyKey(dec.key)) {
         continue;
       }

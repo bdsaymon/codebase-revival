@@ -30,6 +30,7 @@ import {
   isKeylessProviderId,
   providerEntry,
   sortProvidersByPriority,
+  validateCustomJsonInputs,
 } from '../../utils/providers';
 import { PRIMARY_PROVIDER_OPTIONS } from '../../data/providerCatalog';
 import {
@@ -188,11 +189,11 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                     : 'border-[var(--border)] bg-[var(--bg)]'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => onActivateProfile(prof)}
-                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left cursor-pointer"
+                    className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto sm:flex-1 text-left cursor-pointer"
                   >
                     <span
                       className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 ${
@@ -230,11 +231,12 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                     </div>
                   </button>
 
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center justify-end gap-1 flex-wrap shrink-0">
                     {orderedProfiles.length > 1 && (
                       <>
                         <button
                           type="button"
+                          aria-label={`Move ${prof.name} up`}
                           disabled={idx === 0}
                           onClick={() => onMovePriority(prof.id, 'up')}
                           className="p-1.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] disabled:opacity-30 cursor-pointer"
@@ -243,6 +245,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                         </button>
                         <button
                           type="button"
+                          aria-label={`Move ${prof.name} down`}
                           disabled={idx === orderedProfiles.length - 1}
                           onClick={() => onMovePriority(prof.id, 'down')}
                           className="p-1.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] disabled:opacity-30 cursor-pointer"
@@ -279,6 +282,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                     {!isBuiltin && localProfiles.length > 1 && (
                       <button
                         type="button"
+                        aria-label={`Delete ${prof.name}`}
                         onClick={() => onDeleteProfile(prof.id)}
                         className="p-1.5 rounded text-[var(--text-3)] hover:text-[var(--settings-danger)] cursor-pointer"
                         title="Delete"
@@ -476,6 +480,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                             <div className="p-2.5 border-t border-[var(--border)] space-y-2">
                               <input
                                 type="text"
+                                aria-label="Profile Base URL"
                                 value={prof.externalBaseUrl}
                                 onChange={(e) =>
                                   onUpdateProfileField(prof.id, {
@@ -485,6 +490,47 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                                 placeholder="Base URL"
                                 className="cs-input w-full font-mono text-xs py-1.5"
                               />
+                              <input
+                                type="text"
+                                aria-label="Profile Custom Headers JSON"
+                                data-testid={`profile-custom-headers-${prof.id}`}
+                                value={prof.customHeaders || ''}
+                                onChange={(e) =>
+                                  onUpdateProfileField(prof.id, {
+                                    customHeaders: e.target.value,
+                                  })
+                                }
+                                placeholder='Custom Headers JSON: {"X-API-Key": "..."}'
+                                className="cs-input w-full font-mono text-xs py-1.5"
+                              />
+                              <textarea
+                                rows={3}
+                                aria-label="Profile Custom Params JSON"
+                                data-testid={`profile-custom-params-${prof.id}`}
+                                value={prof.customParams || ''}
+                                onChange={(e) =>
+                                  onUpdateProfileField(prof.id, {
+                                    customParams: e.target.value,
+                                  })
+                                }
+                                placeholder='Custom Params / JSON Gateway Spec: {"endpoint": "...", "responsePath": "choices[0].message.content"}'
+                                className="cs-input w-full font-mono text-xs py-1.5 min-h-[64px]"
+                              />
+                              {(() => {
+                                const check = validateCustomJsonInputs(
+                                  prof.customHeaders,
+                                  prof.customParams
+                                );
+                                if (check.valid) return null;
+                                return (
+                                  <div
+                                    role="alert"
+                                    className="px-2.5 py-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-[11px] text-rose-500 dark:text-rose-300"
+                                  >
+                                    {check.error}
+                                  </div>
+                                );
+                              })()}
                               <SettingsGrid>
                                 <SettingNumber
                                   label="Context tokens"
@@ -629,7 +675,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
 
           {newProviderId === 'gemini_custom' && (
             <div className="px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--ink-dim)]">
-              Uses server <code>GEMINI_API_KEY</code> automatically when blank, or paste a personal <code>AIza...</code> key below for direct browser fallback.
+              Uses server <code>GEMINI_API_KEY</code> automatically when blank, or paste a personal <code>AIza...</code> / <code>AQ....</code> key below for direct browser fallback.
             </div>
           )}
           {(!isKeylessProviderId(newProviderId) ||
@@ -643,7 +689,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                 onChange={(e) => onChangeNewApiKey(e.target.value)}
                 placeholder={
                   newProviderId === 'gemini_custom'
-                    ? 'Optional AIza... key (blank = server secret)'
+                    ? 'Optional AIza... / AQ.... key (blank = server secret)'
                     : providerEntry(newProviderId)?.keyHint || 'API Key'
                 }
                 className="cs-input flex-1 font-mono text-xs py-1.5"
@@ -749,7 +795,13 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                       type="button"
                       data-testid="provider-json-preset-btn"
                       onClick={() => {
+                        const presetModel =
+                          newProviderId === 'custom' && newModel.trim()
+                            ? newModel.trim()
+                            : 'gpt-4o-mini';
                         onChangeNewProviderId('custom');
+                        setNewBaseUrl('https://api.openai.com/v1/chat/completions');
+                        setNewModel(presetModel);
                         setNewCustomParams(
                           JSON.stringify(
                             {
@@ -757,7 +809,7 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                               requestFormat: 'openai',
                               responsePath: 'choices[0].message.content',
                               stream: true,
-                              models: [newModel || 'gpt-4o-mini'],
+                              models: [presetModel],
                             },
                             null,
                             2
@@ -779,33 +831,18 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                   />
                 </div>
                 {(() => {
-                  const errors: string[] = [];
-                  const checkJsonObj = (raw: string, label: string) => {
-                    const trimmed = raw.trim();
-                    if (!trimmed) return;
-                    try {
-                      const parsed = JSON.parse(trimmed);
-                      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                        errors.push(`${label} অবশ্যই একটি বৈধ JSON অবজেক্ট ({...}) হতে হবে।`);
-                      }
-                    } catch (e) {
-                      errors.push(
-                        `${label} JSON ফরম্যাট সঠিক নয়: ${e instanceof Error ? e.message : 'Syntax error'}`
-                      );
-                    }
-                  };
-                  checkJsonObj(newCustomHeaders, 'Headers');
-                  checkJsonObj(newCustomParams, 'JSON Provider / Params');
-                  if (errors.length === 0) return null;
+                  const check = validateCustomJsonInputs(
+                    newCustomHeaders,
+                    newCustomParams
+                  );
+                  if (check.valid) return null;
                   return (
                     <div
                       data-testid="provider-json-validation-error"
                       role="alert"
-                      className="px-2.5 py-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-[11.5px] text-rose-500 dark:text-rose-300 space-y-0.5"
+                      className="px-2.5 py-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-[11.5px] text-rose-500 dark:text-rose-300"
                     >
-                      {errors.map((errMsg, idx) => (
-                        <div key={idx}>{errMsg}</div>
-                      ))}
+                      {check.error}
                     </div>
                   );
                 })()}

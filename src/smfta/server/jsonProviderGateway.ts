@@ -370,11 +370,17 @@ export async function executeJsonProviderChat(params: {
   const resolvedModel = (params.modelId || spec.models[0] || 'gpt-4o-mini').trim();
   const useStream = Boolean(params.stream && spec.stream);
 
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    targetUrl = `https://${targetUrl.replace(/^\/+/, '')}`;
+  }
   if (spec.requestFormat === 'openai' && !/\/chat\/completions\/?$/i.test(targetUrl) && !spec.bodyTemplate) {
     targetUrl = `${targetUrl.replace(/\/+$/, '')}/chat/completions`;
   }
 
-  const safety = await verifyConnectionTargetSafe(targetUrl, { isCustomProvider: true });
+  const safety = await verifyConnectionTargetSafe(targetUrl, {
+    isCustomProvider: true,
+    allowInsecureLocalhost: process.env.ALLOW_INSECURE_LOCALHOST === 'true',
+  });
   if (!safety.safe) {
     return {
       ok: false,
@@ -569,7 +575,41 @@ export async function executeJsonProviderChat(params: {
       };
     }
 
-    const data = await resp.json().catch(() => null);
+    const rawBodyText = (await resp.text().catch(() => '')).trim();
+    if (/^\s*<(?:!doctype|html)\b/i.test(rawBodyText)) {
+      return {
+        ok: false,
+        text: '',
+        httpStatus: resp.status,
+        modelUsed: resolvedModel,
+        errorBn:
+          '⚠️ JSON প্রোভাইডার এন্ডপয়েন্ট JSON-এর বদলে HTML পেজ ফেরত দিয়েছে। সঠিক API Endpoint URL যাচাই করুন।',
+      };
+    }
+    let data: unknown = null;
+    try {
+      data = rawBodyText ? JSON.parse(rawBodyText) : null;
+    } catch {
+      // Some gateways ignore stream:false or omit SSE content-type; extract SSE lines or plain text cleanly
+      let sseCollected = '';
+      if (rawBodyText.includes('data:')) {
+        for (const rawLine of rawBodyText.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.slice(5).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+          try {
+            const parsedChunk = JSON.parse(jsonStr);
+            const piece = extractAnyReplyText(parsedChunk, spec.streamPath || spec.responsePath);
+            if (piece) sseCollected += piece;
+          } catch {
+            // ignore partial chunk
+          }
+        }
+      }
+      data = sseCollected.trim() ? { text: sseCollected.trim() } : rawBodyText ? { text: rawBodyText } : null;
+    }
+
     const extracted = sanitizeProprietaryOutput(
       extractAnyReplyText(data, spec.responsePath).trim()
     );

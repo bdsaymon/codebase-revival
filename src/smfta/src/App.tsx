@@ -4493,7 +4493,8 @@ export default function App() {
         !effectiveExternalKeys.startsWith('enc:') &&
         (activeProvider === 'gemini_custom' ||
           activeProvider === 'gemini_openai' ||
-          effectiveExternalKeys.startsWith('AIza'))
+          effectiveExternalKeys.startsWith('AIza') ||
+          effectiveExternalKeys.startsWith('AQ.'))
           ? { 'x-gemini-key': effectiveExternalKeys }
           : {}),
       };
@@ -4945,6 +4946,8 @@ export default function App() {
             externalKeys: effectiveExternalKeys,
             externalModel: effectiveExternalModel,
             externalBaseUrl: effectiveExternalBaseUrl,
+            customHeaders: profileSnapshot.customHeaders || settings.customHeaders || '',
+            customParams: profileSnapshot.customParams || settings.customParams || '',
             mode: settings.mode,
             messages: contextSlice,
             signal: abortCtrl.signal,

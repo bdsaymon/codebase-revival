@@ -14,6 +14,7 @@ import {
   buildAdHocProviderConfig,
   callXrahatKeylessJson,
   normalizeGeminiModelName,
+  parseCustomHeadersSafe,
   sanitizeErrorMsg,
 } from '../aiClient';
 import {
@@ -24,7 +25,10 @@ import {
   executeJsonProviderChat,
   parseJsonProviderSpec,
 } from '../jsonProviderGateway';
-import { verifyConnectionTargetSafe } from '../engine/config';
+import {
+  validateCustomHeaders,
+  verifyConnectionTargetSafe,
+} from '../engine/config';
 import { parseCustomParamsSafe } from '../engine/adapters';
 import {
   getSharedHardenedEngine,
@@ -124,18 +128,40 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
     provider = 'unorouter',
     externalKeys = '',
     externalBaseUrl = '',
+    customHeaders = '',
+    customParams = '',
     forceRefresh = false,
   } = req.body || {};
 
-  const keys = String(externalKeys || '')
-    .split(/[\n,;]+/)
-    .map((k: string) => k.trim())
+  const parsedCustomHeaders = validateCustomHeaders(
+    parseCustomHeadersSafe(customHeaders),
+    undefined,
+    { allowAnySafe: true }
+  ).sanitized;
+
+  const keys = extractApiKeyList(externalKeys)
+    .map((tok) => {
+      const dec = decryptKeyPayloadIfSupported(tok);
+      return dec.ok ? dec.key : '';
+    })
     .filter(Boolean);
   const firstKey = keys[0] || '';
+
+  const jsonSpecProbe = parseJsonProviderSpec({
+    customParams,
+    customHeaders,
+    fallbackBaseUrl: String(externalBaseUrl || '').trim(),
+  });
+  const effectiveBaseUrlForModels =
+    String(externalBaseUrl || '').trim() ||
+    (jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec
+      ? jsonSpecProbe.spec.endpoint
+      : '');
+
   const effectiveProvider = resolveEffectiveProvider(
     provider,
     keys,
-    externalBaseUrl
+    effectiveBaseUrlForModels
   );
 
   if (
@@ -154,7 +180,7 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
   const allowInsecureLocalhost =
     isLocal || process.env.ALLOW_INSECURE_LOCALHOST === 'true';
 
-  const rawExternalBase = String(externalBaseUrl || '').trim();
+  const rawExternalBase = effectiveBaseUrlForModels;
   if (rawExternalBase) {
     const normalizedForSsrf = /^https?:\/\//i.test(rawExternalBase)
       ? rawExternalBase
@@ -164,9 +190,13 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
       allowInsecureLocalhost,
     });
     if (!ssrf.safe) {
+      const jsonModels =
+        jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec?.models.length
+          ? jsonSpecProbe.spec.models
+          : getCuratedFallbackModels(effectiveProvider);
       return res.json({
         ok: true,
-        models: getCuratedFallbackModels(effectiveProvider),
+        models: jsonModels,
         source: 'fallback',
         warning: redactSecrets(ssrf.reason || 'Blocked unsafe URL'),
       });
@@ -175,7 +205,8 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
 
   const normalizedChatUrl = normalizeEndpointUrl(
     effectiveProvider,
-    externalBaseUrl
+    effectiveBaseUrlForModels,
+    { respectCustomBaseUrl: true }
   );
   const cacheKey = getModelCacheKey(
     effectiveProvider,
@@ -323,6 +354,10 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
   if (presetHeaders) {
     Object.assign(headers, presetHeaders);
   }
+  if (jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec?.headers) {
+    Object.assign(headers, jsonSpecProbe.spec.headers);
+  }
+  Object.assign(headers, parsedCustomHeaders);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
@@ -336,10 +371,14 @@ providerRouter.post('/provider-models', async (req: Request, res: Response) => {
     clearTimeout(timer);
 
     if (!response.ok) {
+      const jsonModels =
+        jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec?.models.length
+          ? jsonSpecProbe.spec.models
+          : getCuratedFallbackModels(effectiveProvider);
       return res.json({
         ok: true,
-        models: getCuratedFallbackModels(effectiveProvider),
-        source: 'fallback',
+        models: jsonModels,
+        source: jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec?.models.length ? 'json_spec' : 'fallback',
         warning: `Model discovery returned HTTP ${response.status}`,
       });
     }
@@ -406,6 +445,11 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
+  const parsedCustomHeaders = validateCustomHeaders(
+    parseCustomHeadersSafe(customHeaders),
+    undefined,
+    { allowAnySafe: true }
+  ).sanitized;
 
   const rawKeyTokens = extractApiKeyList(externalKeys);
   const keys: string[] = [];
@@ -582,7 +626,31 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     respectCustomBaseUrl: true,
   });
 
-  if (
+  if (effectiveProvider === 'gemini_custom' && keys[0]) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5_000);
+    try {
+      const gRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(keys[0])}`,
+        { method: 'GET', headers: { Accept: 'application/json' }, signal: ctrl.signal }
+      );
+      if (gRes.ok) {
+        const gData = (await gRes.json().catch(() => null)) as Record<string, unknown> | null;
+        const gList = Array.isArray(gData?.models) ? gData.models : [];
+        discoveredModels = gList
+          .map((item: unknown) =>
+            item && typeof item === 'object'
+              ? String((item as Record<string, unknown>).name || '').replace(/^models\//, '')
+              : ''
+          )
+          .filter((id) => /^gemini-/i.test(id));
+      }
+    } catch {
+      // ignore discovery error
+    } finally {
+      clearTimeout(t);
+    }
+  } else if (
     (effectiveProvider === 'codecraft' && keys[0]) ||
     effectiveProvider === 'custom' ||
     !requestedExplicitModel
@@ -593,8 +661,10 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
       const modelsUrl = normalizedEndpoint.replace(/\/chat\/completions$/i, '/models');
       const mHeaders: Record<string, string> = {
         Accept: 'application/json',
+        ...(PROVIDER_ENDPOINTS[effectiveProvider]?.headers || {}),
+        ...parsedCustomHeaders,
       };
-      if (keys[0] && keys[0] !== 'keyless') {
+      if (keys[0] && keys[0] !== 'keyless' && !mHeaders['Authorization']) {
         mHeaders['Authorization'] = `Bearer ${keys[0]}`;
       }
       const mRes = await fetch(modelsUrl, {
@@ -661,6 +731,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     externalKeys: keys,
     externalModel: effectiveProbeModel,
     externalBaseUrl: effectiveBaseUrl,
+    customHeaders: parsedCustomHeaders,
     maxOutputTokens: probeMaxTokens,
     contextWindow,
     discoveredModels,
@@ -689,7 +760,13 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     !probeRes.ok && probeRes.attempts?.length
       ? probeRes.attempts[probeRes.attempts.length - 1]?.class
       : null;
-  const isGenericPlaceholderModel = !requestedExplicitModel || requestedExplicitModel === 'gpt-4o-mini';
+  const isDefaultGeminiPlaceholder =
+    (effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai') &&
+    requestedExplicitModel === 'gemini-4-hydrogen';
+  const isGenericPlaceholderModel =
+    !requestedExplicitModel ||
+    requestedExplicitModel === 'gpt-4o-mini' ||
+    isDefaultGeminiPlaceholder;
   if (
     !probeRes.ok &&
     isGenericPlaceholderModel &&
@@ -699,16 +776,26 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
       firstFailClass === 'SERVER_ERROR')
   ) {
     const candidateModelsToTry = Array.from(
-      new Set([
-        inferredFromUrl,
-        ...discoveredModels,
-        'deepseek-chat',
-        'gpt-4o-mini',
-        'llama-3.3-70b-versatile',
-        'gemini-3.8-flash',
-        'claude-3-haiku',
-        'default',
-      ])
+      new Set(
+        isDefaultGeminiPlaceholder
+          ? [
+              'gemini-2.5-flash',
+              'gemini-2.5-flash-lite',
+              'gemini-3-flash-preview',
+              'gemini-3.1-flash-lite',
+              ...discoveredModels,
+            ]
+          : [
+              inferredFromUrl,
+              ...discoveredModels,
+              'deepseek-chat',
+              'gpt-4o-mini',
+              'llama-3.3-70b-versatile',
+              'gemini-3.8-flash',
+              'claude-3-haiku',
+              'default',
+            ]
+      )
     ).filter((m): m is string => Boolean(m) && m !== effectiveProbeModel);
 
     for (const fallbackModel of candidateModelsToTry.slice(0, 4)) {
@@ -718,6 +805,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
         externalKeys: keys,
         externalModel: fallbackModel,
         externalBaseUrl: effectiveBaseUrl,
+        customHeaders: parsedCustomHeaders,
         maxOutputTokens: 8,
         discoveredModels,
         exactModelOnly: false,
@@ -730,6 +818,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
         preferredModelId: fallbackModel || undefined,
         maxOutputTokens: 8,
         temperature: 0.7,
+        customParams: parsedCustomParams,
         adHocProviders: fallbackBuilt.adHocProviders,
         skipServerRegistry: true,
         overallDeadlineMs: 15_000,
@@ -788,6 +877,7 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
         preferredModelId: effectiveProbeModel,
         maxOutputTokens: probeMaxTokens,
         temperature: 0.7,
+        customParams: parsedCustomParams,
         adHocProviders: built.adHocProviders,
         skipServerRegistry: true,
         overallDeadlineMs: 15_000,

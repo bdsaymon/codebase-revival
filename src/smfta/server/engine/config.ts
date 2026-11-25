@@ -400,7 +400,8 @@ export async function verifyConnectionTargetSafe(
  */
 export function validateCustomHeaders(
   customHeaders?: Record<string, string>,
-  configAllowlist: ReadonlySet<string> = DEFAULT_HEADER_ALLOWLIST
+  configAllowlist: ReadonlySet<string> = DEFAULT_HEADER_ALLOWLIST,
+  options?: { allowAnySafe?: boolean }
 ): { valid: boolean; sanitized: Record<string, string>; errors: string[] } {
   const sanitized: Record<string, string> = {};
   const errors: string[] = [];
@@ -409,17 +410,31 @@ export function validateCustomHeaders(
   }
 
   for (const [rawName, rawValue] of Object.entries(customHeaders)) {
-    const lowerName = rawName.trim().toLowerCase();
+    const trimmedName = rawName.trim();
+    const lowerName = trimmedName.toLowerCase();
     if (!lowerName) continue;
-    if (FORBIDDEN_CUSTOM_HEADERS.has(lowerName)) {
+    if (!/^[!#$%&'*+\-.^_`|~0-9a-zA-Z]+$/.test(trimmedName)) {
+      errors.push(`Header "${rawName}" contains invalid characters`);
+      continue;
+    }
+    if (
+      FORBIDDEN_CUSTOM_HEADERS.has(lowerName) ||
+      lowerName === 'cookie' ||
+      lowerName === 'set-cookie'
+    ) {
       errors.push(`Header "${rawName}" is a forbidden hop-by-hop/system header (CP4)`);
       continue;
     }
-    if (!configAllowlist.has(lowerName)) {
+    if (!options?.allowAnySafe && !configAllowlist.has(lowerName)) {
       errors.push(`Header "${rawName}" is not in the custom header allowlist (CP4)`);
       continue;
     }
-    sanitized[rawName.trim()] = String(rawValue);
+    const cleanVal = String(rawValue ?? '');
+    if (/[\r\n]/.test(cleanVal)) {
+      errors.push(`Header "${rawName}" contains invalid newline characters`);
+      continue;
+    }
+    sanitized[trimmedName] = cleanVal;
   }
 
   return {

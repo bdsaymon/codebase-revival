@@ -29,6 +29,7 @@ const RAW_SECRET_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi,
   /\bsk-(?:proj-|ant-|or-|live-|test-|svcacct-)?[A-Za-z0-9_-]{8,}\b/g,
   /\bAIza[0-9A-Za-z_-]{8,}\b/g,
+  /\bAQ\.[0-9A-Za-z._-]{12,}\b/g,
   /\bgsk_[A-Za-z0-9_-]{8,}\b/g,
   /\bnvapi-[A-Za-z0-9_-]{8,}\b/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{8,}\b/g,

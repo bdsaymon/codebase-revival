@@ -300,7 +300,7 @@ export function isKeylessProvider(provider: string): boolean {
 export function detectProviderFromKey(apiKey: string): string | null {
   const key = (apiKey || '').trim();
   if (!key) return null;
-  if (key.startsWith('AIza')) return 'gemini_custom';
+  if (key.startsWith('AIza') || key.startsWith('AQ.')) return 'gemini_custom';
   if (key.startsWith('sk-ant-')) return 'anthropic';
   if (key.startsWith('gsk_')) return 'groq';
   if (key.startsWith('sk-or-')) return 'openrouter';
@@ -366,18 +366,23 @@ export function resolveEffectiveProvider(
   }
 
   // Unambiguous key-prefix routing when keys clearly belong to Groq or Google Gemini
+  // Preserve explicit 'custom' provider when user supplied a non-Groq / non-Google custom proxy Base URL.
   if (
     firstKey.startsWith('gsk_') &&
     cleanProvider !== 'ollama' &&
-    cleanProvider !== 'lmstudio'
+    cleanProvider !== 'lmstudio' &&
+    (cleanProvider !== 'custom' || !cleanBase || cleanBase.includes('api.groq.com'))
   ) {
     return 'groq';
   }
 
   if (
-    firstKey.startsWith('AIza') &&
+    (firstKey.startsWith('AIza') || firstKey.startsWith('AQ.')) &&
     cleanProvider !== 'ollama' &&
-    cleanProvider !== 'lmstudio'
+    cleanProvider !== 'lmstudio' &&
+    (cleanProvider !== 'custom' ||
+      !cleanBase ||
+      cleanBase.includes('generativelanguage.googleapis.com'))
   ) {
     if (cleanProvider === 'gemini_openai' || cleanBase.includes('/openai')) {
       return 'gemini_openai';
@@ -631,6 +636,7 @@ const PROPRIETARY_LEAK_REPLACEMENTS: Array<[RegExp, string]> = [
     `I am the core AI assistant of **SMFTA AI Pro**, developed by **${CREATOR_NAME}**`,
   ],
   [/\bAIza[0-9A-Za-z_-]{8,}\b/g, '[REDACTED_KEY]'],
+  [/\bAQ\.[0-9A-Za-z._-]{12,}\b/g, '[REDACTED_KEY]'],
   [/\bsk-(?:proj-|or-|ant-)?[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_KEY]'],
   [/\bgsk_[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_KEY]'],
 ];

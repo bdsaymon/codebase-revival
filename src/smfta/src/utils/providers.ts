@@ -640,10 +640,15 @@ export function countKeys(keys?: string): number {
     .filter(Boolean).length;
 }
 
+export function isGoogleGeminiApiKey(apiKey: string): boolean {
+  const key = (apiKey || '').trim();
+  return key.startsWith('AIza') || key.startsWith('AQ.');
+}
+
 export function detectProviderFromKey(apiKey: string): ExternalProviderId | null {
   const key = (apiKey || '').trim();
   if (!key) return null;
-  if (key.startsWith('AIza')) return 'gemini_custom';
+  if (isGoogleGeminiApiKey(key)) return 'gemini_custom';
   if (key.startsWith('sk-ant-')) return 'anthropic';
   if (key.startsWith('gsk_')) return 'groq';
   if (key.startsWith('sk-or-')) return 'openrouter';
@@ -1148,8 +1153,123 @@ export async function hydrateSavedProfiles(): Promise<SavedProviderProfile[]> {
   );
 }
 
+const FORBIDDEN_HEADER_NAMES = new Set([
+  'host',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'te',
+  'trailer',
+  'upgrade',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+]);
+
+export function extractCustomEndpointFromParams(raw?: string): string {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return '';
+    }
+    const rec = parsed as Record<string, unknown>;
+    return String(
+      rec.endpoint || rec.url || rec.baseUrl || rec.base_url || ''
+    ).trim();
+  } catch {
+    return '';
+  }
+}
+
+export function validateCustomJsonInputs(
+  customHeaders?: string,
+  customParams?: string
+): {
+  valid: boolean;
+  error?: string;
+  parsedHeaders?: Record<string, string>;
+  parsedParams?: Record<string, unknown>;
+} {
+  let parsedHeaders: Record<string, string> | undefined;
+  let parsedParams: Record<string, unknown> | undefined;
+
+  const trimmedHeaders = String(customHeaders || '').trim();
+  if (trimmedHeaders) {
+    try {
+      const obj = JSON.parse(trimmedHeaders);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return {
+          valid: false,
+          error: 'Custom Headers অবশ্যই একটি বৈধ JSON অবজেক্ট ({...}) হতে হবে।',
+        };
+      }
+      const cleanHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        const key = k.trim();
+        if (!key || !/^[!#$%&'*+\-.^_`|~0-9a-zA-Z]+$/.test(key)) {
+          return {
+            valid: false,
+            error: `অবৈধ HTTP হেডার নাম: "${k}"`,
+          };
+        }
+        if (FORBIDDEN_HEADER_NAMES.has(key.toLowerCase())) {
+          return {
+            valid: false,
+            error: `"${key}" হেডারটি নিরাপত্তার কারণে অনুমোদিত নয়।`,
+          };
+        }
+        if (v !== undefined && v !== null) {
+          const val = String(v);
+          if (/[\r\n]/.test(val)) {
+            return {
+              valid: false,
+              error: `"${key}" হেডার মানের মধ্যে নতুন লাইন (newline) থাকা যাবে না।`,
+            };
+          }
+          cleanHeaders[key] = val;
+        }
+      }
+      parsedHeaders = cleanHeaders;
+    } catch (err) {
+      return {
+        valid: false,
+        error: `Custom Headers JSON ফরম্যাট সঠিক নয়: ${
+          err instanceof Error ? err.message : 'Syntax error'
+        }`,
+      };
+    }
+  }
+
+  const trimmedParams = String(customParams || '').trim();
+  if (trimmedParams) {
+    try {
+      const obj = JSON.parse(trimmedParams);
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return {
+          valid: false,
+          error: 'JSON Provider / Custom Params অবশ্যই একটি বৈধ JSON অবজেক্ট ({...}) হতে হবে।',
+        };
+      }
+      parsedParams = obj as Record<string, unknown>;
+    } catch (err) {
+      return {
+        valid: false,
+        error: `Custom Params JSON ফরম্যাট সঠিক নয়: ${
+          err instanceof Error ? err.message : 'Syntax error'
+        }`,
+      };
+    }
+  }
+
+  return { valid: true, parsedHeaders, parsedParams };
+}
+
 /**
- * Validates non-empty custom Gemini API keys supplied by the user (AIza... prefix).
+ * Validates non-empty custom Gemini API keys supplied by the user (AIza... or AQ... prefix).
  * Empty string is allowed when using the built-in server GEMINI_API_KEY on `gemini_custom`.
  */
 export function validateGeminiApiKeyFormat(rawKeys: string): {
@@ -1164,13 +1284,13 @@ export function validateGeminiApiKeyFormat(rawKeys: string): {
     return { valid: true };
   }
   const invalid = keys.find(
-    (k) => !k.startsWith('AIza') || k.length < 20 || /\s/.test(k)
+    (k) => !isGoogleGeminiApiKey(k) || k.length < 20 || /\s/.test(k)
   );
   if (invalid) {
     return {
       valid: false,
       error:
-        'ভুল Gemini API কী ফরম্যাট: কাস্টম Gemini কী অবশ্যই "AIza" দিয়ে শুরু হতে হবে (কমপক্ষে ২০ অক্ষর, কোনো স্পেস ছাড়া)। Settings → Custom Providers থেকে সঠিক কী দিন।',
+        'ভুল Gemini API কী ফরম্যাট: কাস্টম Gemini কী অবশ্যই "AIza" বা "AQ." দিয়ে শুরু হতে হবে (কমপক্ষে ২০ অক্ষর, কোনো স্পেস ছাড়া)। Settings → Custom Providers থেকে সঠিক কী দিন।',
     };
   }
   return { valid: true };
@@ -1242,15 +1362,17 @@ export function providerReadiness(settings: AppSettings): {
   if (id === 'custom') {
     const firstKey = (settings.externalKeys || '').split(/[\n,;]+/)[0]?.trim() || '';
     const detected = detectProviderFromKey(firstKey);
+    const paramEndpoint = extractCustomEndpointFromParams(settings.customParams);
     const inferredBase =
       base ||
+      paramEndpoint ||
       (detected ? DEFAULT_PROVIDER_BASE_URLS[detected] : '') ||
       (firstKey.startsWith('sk-') ? DEFAULT_PROVIDER_BASE_URLS.openai : '');
     if (!inferredBase) {
       return {
         ready: false,
         title: 'Base URL Required',
-        detail: 'Please provide a Base URL for the custom provider.',
+        detail: 'Please provide a Base URL or JSON Gateway endpoint for the custom provider.',
       };
     }
     return {

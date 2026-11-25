@@ -70,7 +70,9 @@ function normalizeAdHocProvider(
   }
   const adhoc = input as AdHocProviderInput;
   const p = adhoc.provider;
-  const hdrCheck = validateCustomHeaders(p.custom_headers);
+  const hdrCheck = validateCustomHeaders(p.custom_headers, undefined, {
+    allowAnySafe: !adhoc.isServerHeldKey,
+  });
   const resolvedKeys =
     adhoc.rawKeys.length > 0
       ? adhoc.rawKeys.map((rawKey, idx) => {
@@ -868,7 +870,11 @@ export class HardenedAIEngine {
       return { enabled: false, reason: 'Key secret could not be resolved for probe' };
     }
 
-    const hdrCheck = validateCustomHeaders(provider.allowed_custom_headers);
+    const hdrCheck = validateCustomHeaders(
+      provider.allowed_custom_headers,
+      undefined,
+      { allowAnySafe: Boolean(provider.is_client_supplied) }
+    );
     if (!hdrCheck.valid) {
       return { enabled: false, reason: hdrCheck.errors.join('; ') };
     }
@@ -1467,7 +1473,9 @@ export class HardenedAIEngine {
         );
 
         const hdrValidation = validateCustomHeaders(
-          provider.allowed_custom_headers
+          provider.allowed_custom_headers,
+          undefined,
+          { allowAnySafe: Boolean(provider.is_client_supplied) }
         );
 
         const protocolReq = buildProtocolRequest({
@@ -2599,7 +2607,9 @@ export class HardenedAIEngine {
       req.abortSignal?.addEventListener('abort', onClientAbort, { once: true });
 
       const hdrValidation = validateCustomHeaders(
-        provider.allowed_custom_headers
+        provider.allowed_custom_headers,
+        undefined,
+        { allowAnySafe: Boolean(provider.is_client_supplied) }
       );
 
       const protocolReq = buildProtocolRequest({

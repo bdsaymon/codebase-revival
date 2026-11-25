@@ -38,6 +38,7 @@ import {
   DEFAULT_PROVIDER_MODELS,
   QUICK_PROVIDER_CHIPS,
   detectProviderFromKey,
+  extractCustomEndpointFromParams,
   formatProviderErrorBn,
   getInitialProviderProfiles,
   isKeylessProviderId,
@@ -45,6 +46,7 @@ import {
   persistSavedProfiles,
   providerEntry,
   sortProvidersByPriority,
+  validateCustomJsonInputs,
   validateGeminiApiKeyFormat,
 } from '../utils/providers';
 import {
@@ -628,10 +630,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const resolveInferredBaseUrl = (
     provId: ExternalProviderId,
     rawBase: string,
-    rawKey: string
+    rawKey: string,
+    rawCustomParams = ''
   ): string => {
     const cleanBase = rawBase.trim();
     if (cleanBase) return cleanBase;
+    if (provId === 'custom') {
+      const specEndpoint = extractCustomEndpointFromParams(rawCustomParams);
+      if (specEndpoint) return specEndpoint;
+    }
     if (DEFAULT_PROVIDER_BASE_URLS[provId]) {
       return DEFAULT_PROVIDER_BASE_URLS[provId];
     }
@@ -683,17 +690,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         'deepseek/deepseek-chat',
       ];
     }
-    return ['mercury-3', 'gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-3.8-flash'];
+    return ['gpt-4o-mini', 'gpt-4o', 'deepseek-chat', 'gemini-3.8-flash', 'mercury-3'];
   };
 
   const handleFetchNewModels = async (
     prov: ExternalProviderId = newProviderId,
     keys: string = newApiKey,
-    base: string = newBaseUrl
+    base: string = newBaseUrl,
+    headersRaw: string = newCustomHeaders,
+    paramsRaw: string = newCustomParams
   ) => {
     setIsLoadingModels(true);
     setDiscoveryWarning(null);
     try {
+      const effectiveBase = resolveInferredBaseUrl(prov, base, keys, paramsRaw);
       let models: string[] = [];
       let warningMsg: string | null = null;
       if (!isStandaloneApkEnv()) {
@@ -703,7 +713,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           body: JSON.stringify({
             provider: prov,
             externalKeys: keys,
-            externalBaseUrl: base,
+            externalBaseUrl: effectiveBase,
+            customHeaders: headersRaw,
+            customParams: paramsRaw,
           }),
         }).catch(() => null);
         const ct = (resp?.headers.get('content-type') || '').toLowerCase();
@@ -719,7 +731,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         models = await fetchProviderModelsClientSide({
           provider: prov,
           externalKeys: keys,
-          externalBaseUrl: base,
+          externalBaseUrl: effectiveBase,
+          customHeaders: headersRaw,
+          customParams: paramsRaw,
         });
       }
       if (models.length > 0) {
@@ -748,6 +762,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             provider: prof.provider,
             externalKeys: prof.externalKeys,
             externalBaseUrl: prof.externalBaseUrl,
+            customHeaders: prof.customHeaders,
+            customParams: prof.customParams,
             forceRefresh: true,
           }),
         }).catch(() => null);
@@ -762,6 +778,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           provider: prof.provider,
           externalKeys: prof.externalKeys,
           externalBaseUrl: prof.externalBaseUrl,
+          customHeaders: prof.customHeaders,
+          customParams: prof.customParams,
         });
       }
       if (models.length > 0) {
@@ -828,6 +846,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           externalKeys: prof.externalKeys,
           externalModel: prof.externalModel,
           externalBaseUrl: prof.externalBaseUrl,
+          customHeaders: prof.customHeaders,
+          customParams: prof.customParams,
         });
       }
       const elapsedMs = Date.now() - startMs;
@@ -899,10 +919,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleSaveWithoutVerification = () => {
+    const jsonCheck = validateCustomJsonInputs(newCustomHeaders, newCustomParams);
+    if (!jsonCheck.valid) {
+      setNewVerifyResult({
+        ok: false,
+        message: jsonCheck.error || 'Custom Headers বা JSON Provider ফরম্যাট সঠিক নয়।',
+      });
+      return;
+    }
     const effectiveBaseUrl = resolveInferredBaseUrl(
       newProviderId,
       newBaseUrl,
-      newApiKey
+      newApiKey,
+      newCustomParams
     );
     const isKeyRequired =
       !isKeylessProviderId(newProviderId) && newProviderId !== 'custom';
@@ -921,7 +950,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (!keyCheck.valid) {
         setNewVerifyResult({
           ok: false,
-          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza...)।',
+          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza... / AQ....)।',
         });
         return;
       }
@@ -930,7 +959,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewVerifyResult({
         ok: false,
         message:
-          'Custom API requires a valid Base URL (e.g. https://api.openai.com/v1) or API Key.',
+          'Custom API requires a valid Base URL, JSON Gateway endpoint, or API Key.',
       });
       return;
     }
@@ -1012,13 +1041,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleVerifyAndAddProvider = async () => {
+    const jsonCheck = validateCustomJsonInputs(newCustomHeaders, newCustomParams);
+    if (!jsonCheck.valid) {
+      setNewVerifyResult({
+        ok: false,
+        message: jsonCheck.error || 'Custom Headers বা JSON Provider ফরম্যাট সঠিক নয়।',
+      });
+      return;
+    }
     const cleanName =
       newPropName.trim() ||
       `${providerEntry(newProviderId)?.short || newProviderId} AI`;
     const effectiveBaseUrl = resolveInferredBaseUrl(
       newProviderId,
       newBaseUrl,
-      newApiKey
+      newApiKey,
+      newCustomParams
     );
     const isKeyRequired =
       !isKeylessProviderId(newProviderId) && newProviderId !== 'custom';
@@ -1037,7 +1075,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (!keyCheck.valid) {
         setNewVerifyResult({
           ok: false,
-          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza...)।',
+          message: keyCheck.error || 'ভুল Gemini API কী ফরম্যাট (AIza... / AQ....)।',
         });
         return;
       }
@@ -1046,7 +1084,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewVerifyResult({
         ok: false,
         message:
-          'Base URL is required for Custom API (e.g. https://api.openai.com/v1 or https://openrouter.ai/api/v1).',
+          'Base URL or JSON Gateway endpoint is required for Custom API (e.g. https://api.openai.com/v1 or {"endpoint": "..."}).',
       });
       return;
     }
@@ -1103,11 +1141,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalKeys: newApiKey.trim(),
             externalModel: newModel.trim(),
             externalBaseUrl: effectiveBaseUrl,
+            customHeaders: newCustomHeaders,
+            customParams: newCustomParams,
           }),
           fetchProviderModelsClientSide({
             provider: newProviderId,
             externalKeys: newApiKey.trim(),
             externalBaseUrl: effectiveBaseUrl,
+            customHeaders: newCustomHeaders,
+            customParams: newCustomParams,
           }),
         ]);
         testData = clientTest;
@@ -1372,9 +1414,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             onChangeNewApiKey={(val) => {
               setNewApiKey(val);
               const detected = detectProviderFromKey(val);
+              const hasCustomEndpoint = Boolean(
+                newBaseUrl.trim() || extractCustomEndpointFromParams(newCustomParams)
+              );
               if (
                 detected &&
                 detected !== newProviderId &&
+                !(newProviderId === 'custom' && hasCustomEndpoint) &&
                 (newProviderId === 'xrahat' ||
                   newProviderId === 'smfta_cloud' ||
                   newProviderId === 'custom' ||

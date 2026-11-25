@@ -1833,6 +1833,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     externalKeys: parsedKeys,
     externalModel: activeCustomModelName,
     externalBaseUrl,
+    customHeaders: jsonGatewaySpec.isJsonGateway
+      ? jsonGatewaySpec.spec?.headers
+      : typeof customHeaders === 'string' ||
+        (customHeaders && typeof customHeaders === 'object' && !Array.isArray(customHeaders))
+      ? (customHeaders as string | Record<string, string>)
+      : undefined,
     maxOutputTokens: effectiveMaxOutputTokens,
     discoveredModels: parsedDiscoveredModels,
     exactModelOnly: Boolean(activeCustomModelName),
@@ -1954,7 +1960,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
 
   if (liveVoiceMode && !isCustomNonGeminiProvider && !clientClosed) {
     const fastGeminiKey = (
-      parsedKeys.find((k) => k.startsWith('AIza')) ||
+      parsedKeys.find((k) => k.startsWith('AIza') || k.startsWith('AQ.')) ||
       resolvedGeminiKey.apiKey ||
       getV2GeminiApiKey() ||
       ''

@@ -30,6 +30,7 @@ export function sanitizeErrorMsg(err: unknown, additionalKeys?: string[]): strin
     err instanceof Error ? err.message : typeof err === 'string' ? err : 'Unknown error';
   let legacyCleaned = raw
     .replace(/AIza[0-9A-Za-z_-]{8,}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/AQ\.[0-9A-Za-z._-]{12,}/g, '[REDACTED_GEMINI_KEY]')
     .replace(/sk-(?:proj-|or-|ant-|svcacct-)?[A-Za-z0-9_-]{8,}/g, '[REDACTED_API_KEY]')
     .replace(/gsk_[A-Za-z0-9_-]{8,}/g, '[REDACTED_GROQ_KEY]')
     .replace(/nvapi-[A-Za-z0-9_-]{8,}/g, '[REDACTED_NVIDIA_KEY]')
@@ -129,11 +130,48 @@ export function mapKeylessModelAlias(requestedModel?: string): string[] {
   return candidates;
 }
 
+export function parseCustomHeadersSafe(
+  raw?: string | Record<string, string>
+): Record<string, string> {
+  if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const cleanKey = k.trim();
+      if (cleanKey && v !== undefined && v !== null) {
+        out[cleanKey] = String(v);
+      }
+    }
+    return out;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+          const cleanKey = k.trim();
+          if (cleanKey && v !== undefined && v !== null) {
+            out[cleanKey] = String(v);
+          }
+        }
+        return out;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 export function buildAdHocProviderConfig(params: {
   provider: string;
   externalKeys?: string | string[];
   externalModel?: string;
   externalBaseUrl?: string;
+  customHeaders?: string | Record<string, string>;
   maxOutputTokens?: number;
   discoveredModels?: string[];
   exactModelOnly?: boolean;
@@ -219,7 +257,10 @@ export function buildAdHocProviderConfig(params: {
           { respectCustomBaseUrl: params.respectCustomBaseUrl ?? true }
         );
 
-    let customHeaders = preset?.headers;
+    const userCustomHeaders = parseCustomHeadersSafe(params.customHeaders);
+    let customHeaders: Record<string, string> | undefined = preset?.headers
+      ? { ...preset.headers }
+      : undefined;
     if (effectiveProvider === 'custom') {
       if (/openrouter\.ai/i.test(baseUrl)) {
         customHeaders = {
@@ -233,6 +274,12 @@ export function buildAdHocProviderConfig(params: {
           ...(customHeaders || {}),
         };
       }
+    }
+    if (Object.keys(userCustomHeaders).length > 0) {
+      customHeaders = {
+        ...(customHeaders || {}),
+        ...userCustomHeaders,
+      };
     }
 
     const defaultModel =

@@ -232,3 +232,227 @@ describe('custom provider routing', () => {
     expect(sys).toContain('DESIGN, CODE & LONG-FORM OUTPUT RULE');
   });
 });
+
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, vi } from 'vitest';
+import { validateCustomHeaders } from '../smfta/server/engine/config';
+import { sanitizeErrorMsg } from '../smfta/server/aiClient';
+import {
+  detectProviderFromKey,
+  extractCustomEndpointFromParams,
+  providerReadiness,
+  validateCustomJsonInputs,
+  validateGeminiApiKeyFormat,
+} from '../smfta/src/utils/providers';
+import { DEFAULT_SETTINGS } from '../smfta/src/utils/settings';
+import {
+  runStandaloneClientSideAI,
+  testProviderClientSide,
+} from '../smfta/src/utils/apkClientFallback';
+import { SettingsModal } from '../smfta/src/components/SettingsHub';
+
+describe('custom provider & JSON gateway error fixes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it('preserves explicit custom proxy URL even when key has a gsk_ prefix, and redacts AQ. keys', () => {
+    expect(
+      resolveEffectiveProvider('custom', ['gsk_proxy_fixture_123456'], 'https://proxy.example.com/v1')
+    ).toBe('custom');
+    expect(resolveEffectiveProvider('custom', ['gsk_proxy_fixture_123456'], '')).toBe('groq');
+
+    expect(detectProviderFromKey('AQ.Ab8RN6L_testFixtureKey123456')).toBe('gemini_custom');
+    expect(validateGeminiApiKeyFormat('AQ.Ab8RN6L_testFixtureKey123456').valid).toBe(true);
+    expect(
+      sanitizeErrorMsg('Failed for key AQ.Ab8RN6L_secretValue1234567890')
+    ).not.toContain('AQ.Ab8RN6L_secretValue1234567890');
+  });
+
+  it('forwards safe client customHeaders into HardenedAIEngine while blocking hop-by-hop/cookie headers', () => {
+    const built = buildAdHocProviderConfig({
+      provider: 'custom',
+      externalBaseUrl: 'https://custom.gateway.example.com/v1',
+      externalModel: 'custom-model-v1',
+      externalKeys: ['custom-key-1'],
+      customHeaders: JSON.stringify({ 'X-Custom-Tenant': 'acme', 'x-api-key': 'secret-hdr' }),
+      exactModelOnly: true,
+    });
+    expect(built.adHocProviders[0]?.provider.custom_headers).toMatchObject({
+      'X-Custom-Tenant': 'acme',
+      'x-api-key': 'secret-hdr',
+    });
+
+    const validatedSafe = validateCustomHeaders(
+      { 'x-api-key': 'secret', 'X-Tenant': 'acme', Cookie: 'bad=1', Host: 'evil.com' },
+      undefined,
+      { allowAnySafe: true }
+    );
+    expect(validatedSafe.valid).toBe(false);
+    expect(validatedSafe.sanitized).toEqual({ 'x-api-key': 'secret', 'X-Tenant': 'acme' });
+    expect(validatedSafe.errors).toHaveLength(2);
+
+    expect(() =>
+      validateCustomJsonInputs('{"X-Bad":"line1\\nline2"}', '')
+    ).not.toThrow();
+    expect(validateCustomJsonInputs('{"X-Bad":"line1\\nline2"}', '').valid).toBe(false);
+    expect(
+      extractCustomEndpointFromParams('{"endpoint":"https://gw.example.com/chat"}')
+    ).toBe('https://gw.example.com/chat');
+    expect(
+      providerReadiness({
+        ...DEFAULT_SETTINGS,
+        provider: 'custom',
+        externalBaseUrl: '',
+        customParams: '{"endpoint":"https://gw.example.com/chat"}',
+      }).ready
+    ).toBe(true);
+  });
+
+  it('executes V1 JSON Gateway specs with customHeaders, bodyTemplate, and responsePath directly in browser fallback', async () => {
+    let capturedUrl = '';
+    let capturedHeaders: Record<string, string> = {};
+    let capturedBody: Record<string, unknown> = {};
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      capturedUrl = String(url);
+      capturedHeaders = (init?.headers || {}) as Record<string, string>;
+      capturedBody = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ data: { answer: 'JSON Gateway Answer OK' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
+
+    const reply = await runStandaloneClientSideAI({
+      provider: 'custom',
+      externalKeys: 'custom-secret-key',
+      externalModel: 'my-model-1',
+      externalBaseUrl: '',
+      customHeaders: '{"X-Tenant-Id":"tenant-99"}',
+      customParams: JSON.stringify({
+        endpoint: 'https://gateway.example.com/generate',
+        requestFormat: 'custom_template',
+        apiKeyHeader: 'X-Api-Key',
+        apiKeyPrefix: '',
+        bodyTemplate: {
+          modelName: '{{model}}',
+          query: '{{prompt}}',
+        },
+        responsePath: 'data.answer',
+        stream: false,
+      }),
+      messages: [{ role: 'user', text: 'Hello Gateway' }],
+    });
+
+    expect(capturedUrl).toBe('https://gateway.example.com/generate');
+    expect(capturedHeaders['X-Tenant-Id']).toBe('tenant-99');
+    expect(capturedHeaders['X-Api-Key']).toBe('custom-secret-key');
+    expect(capturedBody).toEqual({
+      modelName: 'my-model-1',
+      query: 'Hello Gateway',
+    });
+    expect(reply).toBe('JSON Gateway Answer OK');
+
+    const testRes = await testProviderClientSide({
+      provider: 'custom',
+      externalKeys: 'custom-secret-key',
+      externalModel: 'my-model-1',
+      customHeaders: '{"X-Tenant-Id":"tenant-99"}',
+      customParams: JSON.stringify({
+        endpoint: 'https://gateway.example.com/generate',
+        responsePath: 'data.answer',
+        models: ['my-model-1', 'my-model-2'],
+        stream: false,
+      }),
+    });
+    expect(testRes.ok).toBe(true);
+    expect(testRes.normalizedEndpoint).toBe('https://gateway.example.com/generate');
+    expect(testRes.discoveredModels).toEqual(['my-model-1', 'my-model-2']);
+  });
+
+  it('loads JSON Gateway preset cleanly in SettingsModal without leaking mercury-3 and saves custom provider with endpoint in customParams', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onSave = vi.fn();
+    const onUpdateProfiles = vi.fn();
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
+    try {
+      await act(async () => {
+        root.render(
+          React.createElement(SettingsModal, {
+            isOpen: true,
+            onClose: vi.fn(),
+            initialTab: 'providers',
+            profile: { name: 'Tester' },
+            settings: { ...DEFAULT_SETTINGS, provider: 'mercury', externalModel: 'mercury-3' },
+            memory: [],
+            onSave,
+            onUpdateProfiles,
+            onClearMemory: vi.fn(),
+            onExportBackup: vi.fn(),
+            onImportBackup: vi.fn(),
+            onClearAllData: vi.fn(),
+            onOpenWhatsNew: vi.fn(),
+          })
+        );
+      });
+
+      const advToggle = container.querySelector(
+        '[data-testid="provider-advanced-toggle"]'
+      ) as HTMLButtonElement;
+      expect(advToggle).not.toBeNull();
+      await act(async () => {
+        advToggle.click();
+      });
+
+      const presetBtn = container.querySelector(
+        '[data-testid="provider-json-preset-btn"]'
+      ) as HTMLButtonElement;
+      expect(presetBtn).not.toBeNull();
+      await act(async () => {
+        presetBtn.click();
+      });
+
+      const modelInput = container.querySelector(
+        '[data-testid="provider-model-input"]'
+      ) as HTMLInputElement;
+      const baseUrlInput = container.querySelector(
+        '[data-testid="provider-base-url-input"]'
+      ) as HTMLInputElement;
+      const paramsTextarea = container.querySelector(
+        '[data-testid="provider-custom-params-input"]'
+      ) as HTMLTextAreaElement;
+
+      expect(modelInput.value).toBe('gpt-4o-mini');
+      expect(baseUrlInput.value).toBe('https://api.openai.com/v1/chat/completions');
+      expect(paramsTextarea.value).toContain('"gpt-4o-mini"');
+      expect(paramsTextarea.value).not.toContain('mercury-3');
+
+      const saveButtons = Array.from(container.querySelectorAll('button')).filter(
+        (b) => b.textContent?.trim() === 'Save'
+      );
+      const saveBtn = saveButtons[saveButtons.length - 1] as HTMLButtonElement;
+      expect(saveBtn).toBeDefined();
+      await act(async () => {
+        saveBtn.click();
+      });
+
+      expect(onUpdateProfiles).toHaveBeenCalled();
+      const savedProfiles = onUpdateProfiles.mock.calls[onUpdateProfiles.mock.calls.length - 1]?.[0];
+      const latest = savedProfiles[savedProfiles.length - 1];
+      expect(latest.provider).toBe('custom');
+      expect(latest.externalModel).toBe('gpt-4o-mini');
+      expect(latest.customParams).toContain('"endpoint"');
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+});
