@@ -269,14 +269,15 @@ var MultilineRegExpCursor = class {
 			}
 			if (match) {
 				let from = this.flat.from + match.index, to = from + match[0].length;
-				if ((this.flat.to >= this.to || match.index + match[0].length <= this.flat.text.length - 10) && (!this.test || this.test(from, to, match))) {
+				if (this.flat.to >= this.to || match.index + match[0].length <= this.flat.text.length - 10) {
+					this.matchPos = toCharEnd(this.text, to + (from == to ? 1 : 0));
+					if (this.test && !this.test(from, to, match)) continue;
 					this.value = {
 						from,
 						to,
 						precise: true,
 						match
 					};
-					this.matchPos = toCharEnd(this.text, to + (from == to ? 1 : 0));
 					return this;
 				}
 			}
@@ -561,7 +562,7 @@ function stringCursor(spec, state, from, to) {
 }
 function stringWordTest(doc, categorizer) {
 	return (from, to, buf, bufPos) => {
-		if (bufPos > from || bufPos + buf.length < to) {
+		if (bufPos >= from || bufPos + buf.length <= to) {
 			bufPos = Math.max(0, from - 2);
 			buf = doc.sliceString(bufPos, Math.min(doc.length, to + 2));
 		}

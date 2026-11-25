@@ -6,6 +6,7 @@ import {
   extractXrahatReply,
   parseXrahatDelta,
   parseXrahatSseEvent,
+  POLLINATIONS_OPENAI_URL,
   resolveEffectiveProvider,
   sanitizeProprietaryOutput,
 } from '../providers';
@@ -201,14 +202,22 @@ async function streamFromXrahat(
   emitChunked?: (fullText: string) => Promise<void>
 ): Promise<boolean> {
   const promptText = buildXrahatPrompt(systemInstruction, history);
-  if (!promptText) return false;
+  const cleanMessages = history
+    .filter((m) => (m.content || '').trim())
+    .slice(-8)
+    .map((m) => ({
+      role: m.role === 'ai' || m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content.trim(),
+    }));
+  if (!promptText && cleanMessages.length === 0) return false;
 
   const deliverChunked = async (text: string) => {
-    if (!text) return;
+    const clean = sanitizeProprietaryOutput(text || '');
+    if (!clean) return;
     if (emitChunked) {
-      await emitChunked(text);
+      await emitChunked(clean);
     } else {
-      emitDelta(text);
+      emitDelta(clean);
     }
   };
 
@@ -218,19 +227,34 @@ async function streamFromXrahat(
   signal.addEventListener('abort', onParentAbort, { once: true });
   const watchdog = createIdleWatchdog(() => {
     if (!localAbort.signal.aborted) {
-      localAbort.abort(new Error('Xrahat stream timed out'));
+      localAbort.abort(new Error('Public keyless stream timed out'));
     }
   }, XRAHAT_IDLE_TIMEOUT_MS);
 
-  const streamUrl = buildXrahatUrl(promptText, uid, true);
   let emitted = false;
   let fallbackResetText = '';
 
+  // 1. Primary Public Keyless OpenAI-Compatible Stream (Pollinations)
   try {
     watchdog.arm();
-    const res = await fetch(streamUrl, {
-      method: 'GET',
-      headers: { Accept: 'text/event-stream, application/json' },
+    const res = await fetch(POLLINATIONS_OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream, application/json',
+      },
+      body: JSON.stringify({
+        model: 'openai',
+        messages: [
+          ...(systemInstruction?.trim()
+            ? [{ role: 'system', content: systemInstruction.trim().slice(0, 1400) }]
+            : []),
+          ...(cleanMessages.length > 0
+            ? cleanMessages
+            : [{ role: 'user', content: promptText }]),
+        ],
+        stream: true,
+      }),
       signal: localAbort.signal,
     });
 
@@ -242,12 +266,49 @@ async function streamFromXrahat(
         const reply = extractXrahatReply(json);
         if (reply) {
           await deliverChunked(reply);
+          signal.removeEventListener('abort', onParentAbort);
           return true;
         }
+      } else if (contentType.includes('text/html')) {
+        watchdog.disarm();
       } else {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+
+        const processLine = async (rawLine: string) => {
+          const trimmed = rawLine.trim();
+          if (!trimmed.startsWith('data:')) return;
+          const dataStr = trimmed.slice(5).trim();
+          if (!dataStr || dataStr === '[DONE]') return;
+          try {
+            const parsed = JSON.parse(dataStr);
+            const openAiDelta =
+              parsed?.choices?.[0]?.delta?.content ??
+              parsed?.choices?.[0]?.message?.content;
+            if (typeof openAiDelta === 'string' && openAiDelta) {
+              const cleanDelta = sanitizeProprietaryOutput(openAiDelta);
+              if (cleanDelta) {
+                emitDelta(cleanDelta);
+                emitted = true;
+              }
+              return;
+            }
+          } catch {
+            // Fall through to legacy SSE event parser
+          }
+          const evt = parseXrahatSseEvent(dataStr);
+          if (evt.delta) {
+            if (evt.delta.length > 90 && emitChunked) {
+              await emitChunked(evt.delta);
+            } else {
+              emitDelta(evt.delta);
+            }
+            emitted = true;
+          } else if (evt.reset) {
+            fallbackResetText = evt.reset;
+          }
+        };
 
         while (true) {
           watchdog.arm();
@@ -260,50 +321,24 @@ async function streamFromXrahat(
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split(/\r?\n/);
           buffer = lines.pop() || '';
-
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr === '[DONE]') break;
-            const evt = parseXrahatSseEvent(dataStr);
-            if (evt.delta) {
-              if (evt.delta.length > 90 && emitChunked) {
-                await emitChunked(evt.delta);
-              } else {
-                emitDelta(evt.delta);
-              }
-              emitted = true;
-            } else if (evt.reset) {
-              fallbackResetText = evt.reset;
-            }
+            await processLine(line);
           }
         }
         watchdog.disarm();
         if (buffer.trim()) {
           for (const line of buffer.split(/\r?\n/)) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const dataStr = trimmed.slice(5).trim();
-            if (dataStr === '[DONE]') break;
-            const evt = parseXrahatSseEvent(dataStr);
-            if (evt.delta) {
-              if (evt.delta.length > 90 && emitChunked) {
-                await emitChunked(evt.delta);
-              } else {
-                emitDelta(evt.delta);
-              }
-              emitted = true;
-            } else if (evt.reset) {
-              fallbackResetText = evt.reset;
-            }
+            await processLine(line);
           }
         }
         if (!emitted && fallbackResetText) {
           await deliverChunked(fallbackResetText);
           emitted = true;
         }
-        if (emitted) return true;
+        if (emitted) {
+          signal.removeEventListener('abort', onParentAbort);
+          return true;
+        }
       }
     }
   } catch {
@@ -316,7 +351,8 @@ async function streamFromXrahat(
     watchdog.disarm();
   }
 
-  if (!emitted && !signal.aborted) {
+  // 2. Plaintext/JSON GET fallback via Pollinations
+  if (!emitted && !signal.aborted && promptText) {
     const jsonCtrl = new AbortController();
     const onJsonParentAbort = () => jsonCtrl.abort(signal.reason);
     signal.addEventListener('abort', onJsonParentAbort, { once: true });
@@ -325,15 +361,24 @@ async function streamFromXrahat(
       const jsonUrl = buildXrahatUrl(promptText, uid, false);
       const res = await fetch(jsonUrl, {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'text/plain, application/json' },
         signal: jsonCtrl.signal,
       });
       if (res.ok) {
-        const data = await res.json().catch(() => null);
-        const reply = extractXrahatReply(data);
-        if (reply) {
-          await deliverChunked(reply);
-          return true;
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          const reply = extractXrahatReply(data);
+          if (reply) {
+            await deliverChunked(reply);
+            return true;
+          }
+        } else {
+          const textReply = await res.text().catch(() => '');
+          if (textReply.trim() && !/^\s*<(?:!doctype|html)/i.test(textReply)) {
+            await deliverChunked(textReply.trim());
+            return true;
+          }
         }
       }
     } catch {

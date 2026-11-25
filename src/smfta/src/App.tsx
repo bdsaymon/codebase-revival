@@ -303,6 +303,7 @@ import { DEFAULT_SETTINGS, sanitizeSettings } from './utils/settings';
 import { isToolEnabled } from './utils/capabilityRegistry';
 import { notifyUser } from './utils/notify';
 import {
+  clientDirectCall,
   isStandaloneApkEnv,
   runStandaloneClientSideAI,
 } from './utils/apkClientFallback';
@@ -3947,11 +3948,9 @@ export default function App() {
       'smfta_cloud';
     const isDefaultUnlimitedProfile =
       activeProvider === 'xrahat' || activeProvider === 'smfta_cloud';
-    const rawEffectiveKeys = isDefaultUnlimitedProfile
-      ? ''
-      : profileSnapshot.externalKeys?.trim() ||
-        settings.externalKeys?.trim() ||
-        '';
+    const rawEffectiveKeys =
+      profileSnapshot.externalKeys?.trim() ||
+      (!isDefaultUnlimitedProfile ? settings.externalKeys?.trim() || '' : '');
     let effectiveExternalKeys = rawEffectiveKeys;
     if (!isDefaultUnlimitedProfile && profileSnapshot?.decryptionFailed) {
       window.clearTimeout(phaseFallback);
@@ -4514,6 +4513,12 @@ export default function App() {
               body: requestBody,
               signal: abortCtrl.signal,
             });
+            const resContentType = (res.headers.get('content-type') || '').toLowerCase();
+            if (resContentType.includes('text/html')) {
+              // Static host SPA fallback served index.html instead of API route
+              response = null;
+              break;
+            }
             if (
               !isV2Request &&
               (res.status === 502 || res.status === 503 || res.status === 504) &&
@@ -4522,7 +4527,12 @@ export default function App() {
               await new Promise((r) => setTimeout(r, 120));
               continue;
             }
-            if (res.status === 404) {
+            if (
+              res.status === 404 ||
+              res.status === 405 ||
+              res.status === 501 ||
+              (!isV2Request && (res.status === 502 || res.status === 503 || res.status === 504))
+            ) {
               response = null;
               break;
             }
@@ -4927,36 +4937,15 @@ export default function App() {
       // Architecture decision: V2 – Special uses ONLY the server /api/chat/stream route
       // (streamV2FirebaseModel); client-side tryStreamViaFirebaseAiLogic chat is disabled
       // so presets, models, thinking, RAG, and quota rules are always identical.
-      if (response && response.ok && response.body) {
-        setGenPhase((cur) => nextGenPhase(cur, { type: 'response' }));
-        await pipeSSE(response);
-      } else if (response && !response.ok) {
-        const errPayload = await response.json().catch(() => null);
-        const extractedError =
-          typeof errPayload?.error === 'string'
-            ? errPayload.error
-            : typeof errPayload?.error?.message === 'string'
-            ? errPayload.error.message
-            : typeof errPayload?.message === 'string'
-            ? errPayload.message
-            : `HTTP ${response.status}`;
-        const httpErr = new Error(extractedError) as Error & { code?: string };
-        httpErr.code = errPayload?.errorCode || errPayload?.error?.code;
-        throw httpErr;
-      } else if (isV2Request) {
-        const v2Spec = getV2ModelSpec(effectiveExternalModel);
-        throw new Error(
-          `${v2Spec.label} requires the server /api/chat/stream route, which could not be reached.`
-        );
-      } else {
-        // Standalone APK or direct client-side fallback (V1 untouched)
+      const executeClientDirectFallback = async () => {
         try {
           let streamedViaCallback = false;
-          const directReply = await runStandaloneClientSideAI({
+          const directReply = await clientDirectCall({
             provider: activeProvider,
             externalKeys: effectiveExternalKeys,
             externalModel: effectiveExternalModel,
             externalBaseUrl: effectiveExternalBaseUrl,
+            mode: settings.mode,
             messages: contextSlice,
             signal: abortCtrl.signal,
             onDelta: (deltaTxt) => {
@@ -4965,7 +4954,7 @@ export default function App() {
                 firstTokenPerf =
                   typeof performance !== 'undefined'
                     ? performance.now()
-                  : Date.now();
+                    : Date.now();
                 firstTokenIso = new Date().toISOString();
                 setGenPhase((cur) =>
                   nextGenPhase(cur, { type: 'first-token' })
@@ -5011,6 +5000,65 @@ export default function App() {
             )
           );
         }
+      };
+
+      let usedClientFallback = false;
+      if (response && response.ok && response.body) {
+        setGenPhase((cur) => nextGenPhase(cur, { type: 'response' }));
+        try {
+          await pipeSSE(response);
+        } catch (sseErr: unknown) {
+          if (
+            sseErr instanceof Error &&
+            (sseErr.name === 'AbortError' ||
+              (sseErr as { code?: string }).code === 'AUTH_INVALID' ||
+              (sseErr as { code?: string }).code === 'QUOTA_EXHAUSTED')
+          ) {
+            throw sseErr;
+          }
+          if (!accumulated.trim() && !isV2Request && !abortCtrl.signal.aborted) {
+            usedClientFallback = true;
+            await executeClientDirectFallback();
+          } else {
+            throw sseErr;
+          }
+        }
+        if (!accumulated.trim() && !usedClientFallback && !isV2Request && !abortCtrl.signal.aborted) {
+          usedClientFallback = true;
+          await executeClientDirectFallback();
+        }
+      } else if (response && !response.ok) {
+        const canDirectFallbackOnHttpErr =
+          !isV2Request &&
+          response.status !== 401 &&
+          response.status !== 402 &&
+          response.status !== 403 &&
+          !abortCtrl.signal.aborted;
+        if (canDirectFallbackOnHttpErr) {
+          usedClientFallback = true;
+          await executeClientDirectFallback();
+        } else {
+          const errPayload = await response.json().catch(() => null);
+          const extractedError =
+            typeof errPayload?.error === 'string'
+              ? errPayload.error
+              : typeof errPayload?.error?.message === 'string'
+              ? errPayload.error.message
+              : typeof errPayload?.message === 'string'
+              ? errPayload.message
+              : `HTTP ${response.status}`;
+          const httpErr = new Error(extractedError) as Error & { code?: string };
+          httpErr.code = errPayload?.errorCode || errPayload?.error?.code;
+          throw httpErr;
+        }
+      } else if (isV2Request) {
+        const v2Spec = getV2ModelSpec(effectiveExternalModel);
+        throw new Error(
+          `${v2Spec.label} requires the server /api/chat/stream route, which could not be reached.`
+        );
+      } else {
+        usedClientFallback = true;
+        await executeClientDirectFallback();
       }
 
       let continuationRounds = 0;

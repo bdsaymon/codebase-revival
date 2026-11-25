@@ -557,6 +557,7 @@ var SetextHeadingParser = class {
 		let next = line.next;
 		if (underline < 0) return false;
 		let underlineMark = elt(Type.HeaderMark, cx.lineStart + line.pos, cx.lineStart + underline);
+		for (let m of line.markers) leaf.marks.push(m);
 		cx.nextLine();
 		cx.addLeafElement(leaf, elt(next == 61 ? Type.SetextHeading1 : Type.SetextHeading2, leaf.start, cx.prevLineEnd(), [...cx.parser.parseInline(leaf.content, leaf.start), underlineMark]));
 		return true;
@@ -1308,7 +1309,7 @@ function parseLinkTitle(text, start, offset) {
 	return null;
 }
 function parseLinkLabel(text, start, offset, requireNonWS) {
-	for (let escaped = false, pos = start + 1, end = Math.min(text.length, pos + 999); pos < end; pos++) {
+	for (let escaped = false, pos = start + 1, end = Math.min(text.length, pos + 1e3); pos < end; pos++) {
 		let ch = text.charCodeAt(pos);
 		if (escaped) escaped = false;
 		else if (ch == 93) return requireNonWS ? false : elt(Type.LinkLabel, start + offset, pos + 1 + offset);
@@ -1511,6 +1512,21 @@ function injectMarks(elements, marks) {
 	}
 	return elts;
 }
+function findBlankLine(from, to, input) {
+	for (let pos = to, inBlank = false; pos > from;) {
+		let start = Math.max(from, pos - 256);
+		let chunk = input.read(start, pos);
+		for (let i = chunk.length - 1; i >= 0; i--) {
+			let ch = chunk.charCodeAt(i);
+			if (ch == 10) {
+				if (inBlank) return start + i;
+				inBlank = true;
+			} else if (!space(ch) && ch != 62) inBlank = false;
+		}
+		pos = start;
+	}
+	return from;
+}
 var NotLast = [
 	Type.CodeBlock,
 	Type.ListItem,
@@ -1535,11 +1551,7 @@ var FragmentCursor = class {
 	moveTo(pos, lineStart) {
 		while (this.fragment && this.fragment.to <= pos) this.nextFragment();
 		if (!this.fragment || this.fragment.from > (pos ? pos - 1 : 0)) return false;
-		if (this.fragmentEnd < 0) {
-			let end = this.fragment.to;
-			while (end > 0 && this.input.read(end - 1, end) != "\n") end--;
-			this.fragmentEnd = end ? end - 1 : 0;
-		}
+		if (this.fragmentEnd < 0) this.fragmentEnd = this.fragment.openEnd ? findBlankLine(this.fragment.from, this.fragment.to, this.input) : this.fragment.to;
 		let c = this.cursor;
 		if (!c) {
 			c = this.cursor = this.fragment.tree.cursor(IterMode.IncludeAnonymous | IterMode.IgnoreMounts);
@@ -1574,16 +1586,16 @@ var FragmentCursor = class {
 				cx.reusePlaceholders.set(dummy, cur.tree);
 				cx.addNode(dummy, pos);
 			}
-			if (cur.type.isAnonymous || cur.type.is("Block")) {
-				if (cur.type.isAnonymous || NotLast.indexOf(cur.type.id) < 0) {
-					end = cur.to - off;
-					blockI = cx.block.children.length;
-				} else {
-					end = prevEnd;
-					blockI = prevI;
+			if (cur.type.isAnonymous || cur.type.is("Block")) if (cur.type.isAnonymous || NotLast.indexOf(cur.type.id) < 0) {
+				end = prevEnd = cur.to - off;
+				blockI = prevI = cx.block.children.length;
+			} else {
+				end = prevEnd;
+				blockI = prevI;
+				if (cur.type.id == Type.ListItem) {
+					prevEnd = cur.to - off;
+					prevI = cx.block.children.length;
 				}
-				prevEnd = cur.to - off;
-				prevI = cx.block.children.length;
 			}
 			for (;;) {
 				if (cur.nextSibling()) continue scan;

@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
 import { InteractiveMessageContent } from './InteractiveMessageContent';
+import { clientDirectCall } from '../utils/apkClientFallback';
+import { loadSettings } from '../utils/settings';
+import { loadSavedProfiles, resolveActiveProfile } from '../utils/providers';
 
 interface CoWriterDrawerProps {
   isOpen: boolean;
@@ -105,10 +108,11 @@ export const CoWriterDrawer: React.FC<CoWriterDrawerProps> = ({
         }),
       });
 
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
       let acc = '';
-      if (reader) {
+      if (res.ok && res.body && !ct.includes('text/html')) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
         let buffer = '';
         while (true) {
           const { done, value } = await reader.read();
@@ -135,6 +139,28 @@ export const CoWriterDrawer: React.FC<CoWriterDrawerProps> = ({
             }
           }
         }
+      }
+      if (!acc.trim()) {
+        const storedSettings = loadSettings();
+        const activeProf = resolveActiveProfile(storedSettings, loadSavedProfiles());
+        acc = await clientDirectCall({
+          provider: activeProf.provider || storedSettings.provider || 'xrahat',
+          externalKeys: activeProf.externalKeys || storedSettings.externalKeys,
+          externalModel: activeProf.externalModel || storedSettings.externalModel,
+          externalBaseUrl: activeProf.externalBaseUrl || storedSettings.externalBaseUrl,
+          mode: storedSettings.mode,
+          messages: [
+            {
+              role: 'user',
+              text: `Write a well-structured article, post, or draft for the Co-Writer canvas based on this topic: ${newDraftPrompt}. Use clear paragraphs so the user can give inline feedback on any section.`,
+            },
+          ],
+          onDelta: (delta) => {
+            acc += delta;
+            onChangeContent(acc);
+          },
+        });
+        if (acc.trim()) onChangeContent(acc);
       }
       setNewDraftPrompt('');
       if (acc.trim().length > 40) {

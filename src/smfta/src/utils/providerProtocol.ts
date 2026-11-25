@@ -31,8 +31,8 @@ export interface CanonicalEndpointResult {
 const PRESET_CHAT_URLS: Record<string, string> = {
   mercury: 'https://api.inceptionlabs.ai/v1/chat/completions',
   inceptionlabs: 'https://api.inceptionlabs.ai/v1/chat/completions',
-  xrahat: 'https://xrahat-worm-ai.vercel.app/api/chat',
-  smfta_cloud: 'https://xrahat-worm-ai.vercel.app/api/chat',
+  xrahat: 'https://text.pollinations.ai/openai',
+  smfta_cloud: 'https://text.pollinations.ai/openai',
   unorouter: 'https://api.unorouter.com/v1/chat/completions',
   codecraft: 'https://codecraftapi.com/v1/chat/completions',
   gemini_custom:

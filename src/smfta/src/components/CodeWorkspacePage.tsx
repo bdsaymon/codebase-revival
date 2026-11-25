@@ -69,6 +69,9 @@ import {
   saveWebsiteProjects,
   setActiveWebsiteProjectId,
 } from '../utils/websiteProjectEngine';
+import { clientDirectCall } from '../utils/apkClientFallback';
+import { loadSettings } from '../utils/settings';
+import { loadSavedProfiles, resolveActiveProfile } from '../utils/providers';
 
 export interface ConsoleLogEntry {
   id: string;
@@ -926,10 +929,11 @@ export const CodeWorkspacePage: React.FC<CodeWorkspacePageProps> = ({
             }),
           });
 
-          if (res && res.ok && res.body) {
+          let rawStream = '';
+          const ct = (res?.headers.get('content-type') || '').toLowerCase();
+          if (res && res.ok && res.body && !ct.includes('text/html')) {
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
-            let rawStream = '';
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;
@@ -948,7 +952,34 @@ export const CodeWorkspacePage: React.FC<CodeWorkspacePageProps> = ({
                 }
               }
             }
+          }
+          if (!rawStream.trim()) {
+            const storedSettings = loadSettings();
+            const activeProf = resolveActiveProfile(storedSettings, loadSavedProfiles());
+            rawStream = await clientDirectCall({
+              provider: activeProf.provider || storedSettings.provider || 'xrahat',
+              externalKeys: activeProf.externalKeys || storedSettings.externalKeys,
+              externalModel: activeProf.externalModel || storedSettings.externalModel,
+              externalBaseUrl: activeProf.externalBaseUrl || storedSettings.externalBaseUrl,
+              mode: storedSettings.mode,
+              messages: [
+                {
+                  role: 'user',
+                  text:
+                    `You are updating a live multi-file website project ("${currentProjectFromBlocks.title}").\n` +
+                    `CRITICAL RULES:\n` +
+                    `1. Modify ONLY the relevant files needed for the user's request.\n` +
+                    `2. Preserve existing files and project structure — never replace the entire project unnecessarily.\n` +
+                    `3. Output each updated or created file using exact blocks: ⟦FILE:path/to/file.ext⟧ ...complete file content... ⟦/FILE⟧.\n` +
+                    `4. Do NOT output raw code outside ⟦FILE:...⟧ blocks. Give only a 1-2 sentence summary for the user.\n\n` +
+                    `CURRENT PROJECT FILES:\n${fileContextManifest}\n\n` +
+                    `USER REQUEST: ${text}`,
+                },
+              ],
+            });
+          }
 
+          if (rawStream.trim()) {
             const extracted = extractAiWebsiteFileEdits(rawStream, currentProjectFromBlocks);
             if (extracted.edits.length > 0) {
               const updated = applyProjectFileEdits(

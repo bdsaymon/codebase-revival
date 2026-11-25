@@ -706,14 +706,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             externalBaseUrl: base,
           }),
         }).catch(() => null);
-        const data = resp ? await resp.json().catch(() => null) : null;
+        const ct = (resp?.headers.get('content-type') || '').toLowerCase();
+        const data = resp && ct.includes('json') ? await resp.json().catch(() => null) : null;
         if (data?.ok && Array.isArray(data.models) && data.models.length > 0) {
           models = data.models;
           if (data.source === 'fallback' && data.warning) {
             warningMsg = `Live model list unavailable (${data.warning}); manual model entry is enabled.`;
           }
         }
-      } else {
+      }
+      if (models.length === 0) {
         models = await fetchProviderModelsClientSide({
           provider: prov,
           externalKeys: keys,
@@ -749,11 +751,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             forceRefresh: true,
           }),
         }).catch(() => null);
-        const data = resp ? await resp.json().catch(() => null) : null;
+        const ct = (resp?.headers.get('content-type') || '').toLowerCase();
+        const data = resp && ct.includes('json') ? await resp.json().catch(() => null) : null;
         if (data?.ok && Array.isArray(data.models) && data.models.length > 0) {
           models = data.models;
         }
-      } else {
+      }
+      if (models.length === 0) {
         models = await fetchProviderModelsClientSide({
           provider: prof.provider,
           externalKeys: prof.externalKeys,
@@ -807,7 +811,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             contextWindow: prof.contextWindow,
           }),
         }).catch(() => null);
-        if (resp && resp.status !== 404) {
+        const ct = (resp?.headers.get('content-type') || '').toLowerCase();
+        if (
+          resp &&
+          resp.status !== 404 &&
+          resp.status !== 405 &&
+          resp.status !== 501 &&
+          ct.includes('json')
+        ) {
           data = await resp.json().catch(() => null);
         }
       }
@@ -1069,7 +1080,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             testStreaming: true,
           }),
         }).catch(() => null);
-        if (testResp && testResp.status !== 404) {
+        const ct = (testResp?.headers.get('content-type') || '').toLowerCase();
+        if (
+          testResp &&
+          testResp.status !== 404 &&
+          testResp.status !== 405 &&
+          testResp.status !== 501 &&
+          ct.includes('json')
+        ) {
           testData = await testResp.json().catch(() => null);
           if (Array.isArray(testData?.discoveredModels)) {
             fetchedModels = testData.discoveredModels;
@@ -1357,11 +1375,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               if (
                 detected &&
                 detected !== newProviderId &&
-                (newProviderId === 'xrahat' || newProviderId === 'smfta_cloud')
+                (newProviderId === 'xrahat' ||
+                  newProviderId === 'smfta_cloud' ||
+                  newProviderId === 'custom' ||
+                  detected === 'groq' ||
+                  (detected === 'gemini_custom' && newProviderId !== 'gemini_openai'))
               ) {
-                setNewProviderId(detected);
-                setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[detected] || '');
-                setNewModel(DEFAULT_PROVIDER_MODELS[detected] || '');
+                const targetProvider =
+                  detected === 'gemini_custom' ? 'gemini_openai' : detected;
+                setNewProviderId(targetProvider);
+                setNewBaseUrl(DEFAULT_PROVIDER_BASE_URLS[targetProvider] || '');
+                setNewModel(DEFAULT_PROVIDER_MODELS[targetProvider] || '');
               }
             }}
             showNewKey={showNewKey}

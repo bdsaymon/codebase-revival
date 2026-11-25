@@ -409,10 +409,42 @@ export function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+export function resolveClientGeminiKeyForVoice(): string {
+  try {
+    if (typeof localStorage === 'undefined') return '';
+    const rawSettings = localStorage.getItem('smfta_settings');
+    if (rawSettings) {
+      const parsed = JSON.parse(rawSettings) as { externalKeys?: string };
+      const k = String(parsed?.externalKeys || '')
+        .split(/[\n,;]+/)
+        .map((s) => s.trim())
+        .find((s) => /^AIza[0-9A-Za-z_-]{8,}$/.test(s));
+      if (k) return k;
+    }
+    const rawProfiles = localStorage.getItem('smfta_provider_profiles');
+    if (rawProfiles) {
+      const list = JSON.parse(rawProfiles) as Array<{ externalKeys?: string }>;
+      if (Array.isArray(list)) {
+        for (const prof of list) {
+          const k = String(prof?.externalKeys || '')
+            .split(/[\n,;]+/)
+            .map((s) => s.trim())
+            .find((s) => /^AIza[0-9A-Za-z_-]{8,}$/.test(s));
+          if (k) return k;
+        }
+      }
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return '';
+}
+
 export async function requestGeminiFemaleSpeech(params: {
   text: string;
   voiceName?: GeminiFemaleVoiceName;
   style?: string;
+  geminiApiKey?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<{
@@ -423,17 +455,22 @@ export async function requestGeminiFemaleSpeech(params: {
   modelUsed?: string;
   isBackupVoice?: boolean;
   integrationRequired?: boolean;
+  fallbackToBrowser?: boolean;
   error?: string;
 }> {
   const cleanText = formatTextForNaturalSpeech(params.text);
   if (!cleanText) {
     return { ok: false, error: 'Empty speech text.' };
   }
+  const clientGemKey = (params.geminiApiKey || resolveClientGeminiKeyForVoice()).trim();
   const fetcher = params.fetchImpl || fetch;
   try {
     const res = await fetcher('/api/voice/tts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(clientGemKey ? { 'x-gemini-key': clientGemKey } : {}),
+      },
       signal: params.signal,
       body: JSON.stringify({
         text: cleanText,
@@ -441,6 +478,15 @@ export async function requestGeminiFemaleSpeech(params: {
         style: params.style,
       }),
     });
+    const contentType = (res.headers?.get?.('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html') || res.status === 404 || res.status === 405) {
+      return {
+        ok: false,
+        integrationRequired: true,
+        fallbackToBrowser: true,
+        error: `HTTP ${res.status}`,
+      };
+    }
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
       audioBase64?: string;
@@ -449,6 +495,7 @@ export async function requestGeminiFemaleSpeech(params: {
       modelUsed?: string;
       isBackupVoice?: boolean;
       integrationRequired?: boolean;
+      fallbackToBrowser?: boolean;
       error?: string;
     };
     if (!res.ok || !data.ok || !data.audioBase64) {
@@ -457,6 +504,7 @@ export async function requestGeminiFemaleSpeech(params: {
         modelUsed: data.modelUsed,
         isBackupVoice: Boolean(data.isBackupVoice || data.modelUsed === 'neural-voice-hd'),
         integrationRequired: Boolean(data.integrationRequired || res.status === 503),
+        fallbackToBrowser: Boolean(data.fallbackToBrowser),
         error: data.error || `HTTP ${res.status}`,
       };
     }
@@ -470,9 +518,11 @@ export async function requestGeminiFemaleSpeech(params: {
       isBackupVoice: isBackup,
     };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : 'TTS request failed';
     return {
       ok: false,
-      error: err instanceof Error ? err.message : 'TTS request failed',
+      fallbackToBrowser: !/abort/i.test(msg),
+      error: msg,
     };
   }
 }
@@ -599,6 +649,7 @@ export async function streamGeminiPcmSpeech(params: {
   text: string;
   voiceName?: GeminiFemaleVoiceName;
   style?: string;
+  geminiApiKey?: string;
   signal?: AbortSignal;
   onPcmChunk?: (samples: Float32Array, sampleRate: number) => void;
   onPcmSamples?: (samples: Float32Array, sampleRate: number) => void;
@@ -619,12 +670,16 @@ export async function streamGeminiPcmSpeech(params: {
   if (typeof onChunk !== 'function') {
     return { ok: false, receivedAudio: false, error: 'Missing onPcmChunk callback.' };
   }
+  const clientGemKey = (params.geminiApiKey || resolveClientGeminiKeyForVoice()).trim();
   const fetcher = params.fetchImpl || fetch;
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
     const res = await fetcher('/api/voice/tts-stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(clientGemKey ? { 'x-gemini-key': clientGemKey } : {}),
+      },
       signal: params.signal,
       body: JSON.stringify({
         text: cleanText,
@@ -633,7 +688,16 @@ export async function streamGeminiPcmSpeech(params: {
       }),
     });
 
-    const contentType = res.headers.get('Content-Type') || '';
+    const contentType = (res.headers.get('Content-Type') || '').toLowerCase();
+    if (contentType.includes('text/html') || res.status === 404 || res.status === 405) {
+      return {
+        ok: false,
+        receivedAudio: false,
+        integrationRequired: true,
+        fallbackToBrowser: true,
+        error: `HTTP ${res.status}`,
+      };
+    }
     if (!res.ok || !res.body || contentType.includes('application/json')) {
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;

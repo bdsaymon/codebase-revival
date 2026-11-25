@@ -402,16 +402,42 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                           <input
                             type={isKeyRevealed ? 'text' : 'password'}
                             value={prof.externalKeys}
-                            onChange={(e) =>
-                              onUpdateProfileField(prof.id, {
-                                externalKeys: e.target.value,
-                              })
-                            }
-                            placeholder="API Key (sk-... / AIza...)"
+                            onChange={(e) => {
+                              const nextKey = e.target.value;
+                              const trimmed = nextKey.trim();
+                              if (
+                                trimmed.startsWith('gsk_') &&
+                                prof.provider !== 'groq' &&
+                                prof.provider !== 'ollama' &&
+                                prof.provider !== 'lmstudio'
+                              ) {
+                                onUpdateProfileField(prof.id, {
+                                  provider: 'groq',
+                                  externalKeys: nextKey,
+                                  externalBaseUrl:
+                                    DEFAULT_PROVIDER_BASE_URLS.groq ||
+                                    'https://api.groq.com/openai/v1',
+                                  externalModel:
+                                    prof.externalModel &&
+                                    /^(llama-|mixtral-|gemma|qwen|deepseek-r1-distill|openai\/gpt-oss-)/i.test(
+                                      prof.externalModel
+                                    )
+                                      ? prof.externalModel
+                                      : DEFAULT_PROVIDER_MODELS.groq ||
+                                        'llama-3.3-70b-versatile',
+                                });
+                              } else {
+                                onUpdateProfileField(prof.id, {
+                                  externalKeys: nextKey,
+                                });
+                              }
+                            }}
+                            placeholder="API Key (sk-... / gsk_... / AIza...)"
                             className="cs-input font-mono flex-1 text-xs py-1.5"
                           />
                           <button
                             type="button"
+                            aria-label={isKeyRevealed ? 'Hide API key' : 'Show API key'}
                             onClick={() =>
                               setRevealedKeyIds((prev) => ({
                                 ...prev,
@@ -601,34 +627,45 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
             <div className="text-[11px] text-[var(--accent-amber)]">{discoveryWarning}</div>
           )}
 
-          {newProviderId === 'gemini_custom' ? (
+          {newProviderId === 'gemini_custom' && (
             <div className="px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--ink-dim)]">
-              Gemini uses the server environment secret (<code>GEMINI_API_KEY</code>). Integration status can be checked in AI & Thinking settings.
+              Uses server <code>GEMINI_API_KEY</code> automatically when blank, or paste a personal <code>AIza...</code> key below for direct browser fallback.
             </div>
-          ) : (
-            (!isKeylessProviderId(newProviderId) || newProviderId === 'custom') && (
-              <div className="flex items-center gap-2">
-                <input
-                  type={showNewKey ? 'text' : 'password'}
-                  data-testid="provider-api-key-input"
-                  value={newApiKey}
-                  onChange={(e) => onChangeNewApiKey(e.target.value)}
-                  placeholder={providerEntry(newProviderId)?.keyHint || 'API Key'}
-                  className="cs-input flex-1 font-mono text-xs py-1.5"
-                />
-                <button
-                  type="button"
-                  data-testid="provider-api-key-toggle"
-                  onClick={() => setShowNewKey((v) => !v)}
-                  className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] inline-flex items-center gap-1 cursor-pointer shrink-0"
-                >
-                  {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            )
+          )}
+          {(!isKeylessProviderId(newProviderId) ||
+            newProviderId === 'custom' ||
+            newProviderId === 'gemini_custom') && (
+            <div className="flex items-center gap-2">
+              <input
+                type={showNewKey ? 'text' : 'password'}
+                data-testid="provider-api-key-input"
+                value={newApiKey}
+                onChange={(e) => onChangeNewApiKey(e.target.value)}
+                placeholder={
+                  newProviderId === 'gemini_custom'
+                    ? 'Optional AIza... key (blank = server secret)'
+                    : providerEntry(newProviderId)?.keyHint || 'API Key'
+                }
+                className="cs-input flex-1 font-mono text-xs py-1.5"
+              />
+              <button
+                type="button"
+                data-testid="provider-api-key-toggle"
+                aria-label={showNewKey ? 'Hide API key' : 'Show API key'}
+                onClick={() => setShowNewKey((v) => !v)}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-xs font-semibold text-[var(--text-2)] inline-flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                {showNewKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           )}
 
-          {detectedProviderFromNewKey && detectedProviderFromNewKey !== newProviderId && (
+          {detectedProviderFromNewKey &&
+            detectedProviderFromNewKey !== newProviderId &&
+            !(
+              newProviderId === 'gemini_openai' &&
+              detectedProviderFromNewKey === 'gemini_custom'
+            ) && (
             <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--text-2)]">
               <span>
                 Detected:{' '}

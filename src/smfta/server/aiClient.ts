@@ -3,11 +3,14 @@ import {
   buildXrahatPrompt,
   buildXrahatUrl,
   detectProviderFromKey,
+  extractTextFromOpenAIJson,
   extractXrahatReply,
   inferModelForCustomBaseUrl,
   normalizeEndpointUrl,
+  POLLINATIONS_OPENAI_URL,
   PROVIDER_ENDPOINTS,
   resolveEffectiveProvider,
+  resolveGroqModel,
   sanitizeProprietaryOutput,
 } from './providers';
 import {
@@ -242,6 +245,11 @@ export function buildAdHocProviderConfig(params: {
         ? inferModelForCustomBaseUrl(rawUrl || baseUrl)
         : 'gpt-4o-mini');
 
+    const requestedExternalModel =
+      effectiveProvider === 'groq'
+        ? resolveGroqModel(params.externalModel)
+        : params.externalModel;
+
     const modelList =
       protocol === 'gemini_native'
         ? params.exactModelOnly && (params.externalModel || '').trim()
@@ -258,7 +266,7 @@ export function buildAdHocProviderConfig(params: {
             )
         : buildProviderModelCandidates(
             fallbackProviderForUrl,
-            params.externalModel,
+            requestedExternalModel,
             defaultModel,
             params.discoveredModels || [],
             { exactOnly: params.exactModelOnly }
@@ -408,33 +416,82 @@ export async function callXrahatKeylessJson(params: {
   uid?: string;
   timeoutMs?: number;
 }): Promise<string> {
-  const prompt = buildXrahatPrompt(params.systemInstruction, params.history);
-  if (!prompt) return '';
-  const url = buildXrahatUrl(
-    prompt,
-    params.uid || `smfta-aux-${Date.now().toString(36)}`,
-    false
-  );
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
     params.timeoutMs ?? 15_000
   );
   try {
+    const cleanMessages = params.history
+      .filter((m) => (m.content || '').trim())
+      .slice(-8)
+      .map((m) => ({
+        role: m.role === 'ai' || m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content.trim(),
+      }));
+    if (cleanMessages.length > 0) {
+      const postRes = await fetch(POLLINATIONS_OPENAI_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'openai',
+          messages: [
+            ...(params.systemInstruction?.trim()
+              ? [{ role: 'system', content: params.systemInstruction.trim().slice(0, 1200) }]
+              : []),
+            ...cleanMessages,
+          ],
+          stream: false,
+        }),
+        signal: controller.signal,
+      }).catch(() => null);
+      if (postRes && postRes.ok) {
+        const ct = (postRes.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('json')) {
+          const data = await postRes.json().catch(() => null);
+          const extracted = extractTextFromOpenAIJson(data) || extractXrahatReply(data);
+          if (extracted.trim()) return sanitizeProprietaryOutput(extracted.trim());
+        } else {
+          const txt = await postRes.text().catch(() => '');
+          if (txt.trim() && !/^\s*</.test(txt)) {
+            return sanitizeProprietaryOutput(txt.trim());
+          }
+        }
+      }
+    }
+
+    const prompt = buildXrahatPrompt(params.systemInstruction, params.history);
+    if (!prompt) return '';
+    const url = buildXrahatUrl(
+      prompt,
+      params.uid || `smfta-aux-${Date.now().toString(36)}`,
+      false
+    );
     const res = await fetch(url, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'text/plain, application/json' },
       signal: controller.signal,
     });
     if (!res.ok) return '';
-    const data = await res.json().catch(() => null);
-    return extractXrahatReply(data).trim();
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.includes('json')) {
+      const data = await res.json().catch(() => null);
+      return sanitizeProprietaryOutput(extractXrahatReply(data).trim());
+    }
+    const rawText = await res.text().catch(() => '');
+    if (!rawText.trim() || /^\s*<(?:!doctype|html)/i.test(rawText)) return '';
+    return sanitizeProprietaryOutput(rawText.trim());
   } catch {
     return '';
   } finally {
     clearTimeout(timer);
   }
 }
+
+export const callPublicKeylessJson = callXrahatKeylessJson;
 
 export async function callBackendEngine(
   prompt: string,

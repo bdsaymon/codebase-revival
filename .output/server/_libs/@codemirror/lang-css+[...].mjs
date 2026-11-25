@@ -172,7 +172,7 @@ var Stack = class Stack {
 		let end = this.reducePos = this.pos = start + value.length;
 		this.pushState(next, start);
 		this.buffer.push(index, start, end, -1);
-		if (this.curContext) this.updateContext(this.curContext.tracker.reuse(this.curContext.context, value, this, this.p.stream.reset(this.pos - value.length)));
+		if (this.curContext) this.updateContext(this.curContext.tracker.reuse(this.curContext.context, value, this, this.p.stream, this.pos - value.length));
 	}
 	/**
 	@internal
@@ -339,10 +339,10 @@ var Stack = class Stack {
 		return this.p.parser.dialect.flags[dialectID];
 	}
 	shiftContext(term, start) {
-		if (this.curContext) this.updateContext(this.curContext.tracker.shift(this.curContext.context, term, this, this.p.stream.reset(start)));
+		if (this.curContext) this.updateContext(this.curContext.tracker.shift(this.curContext.context, term, this, this.p.stream, start));
 	}
 	reduceContext(term, start) {
-		if (this.curContext) this.updateContext(this.curContext.tracker.reduce(this.curContext.context, term, this, this.p.stream.reset(start)));
+		if (this.curContext) this.updateContext(this.curContext.tracker.reduce(this.curContext.context, term, this, this.p.stream, start));
 	}
 	/**
 	@internal
@@ -1210,6 +1210,11 @@ var Dialect = class {
 	}
 };
 var id = (x) => x;
+function wrapContextOp(op) {
+	if (!op) return id;
+	if (op.length < 3) return op;
+	return (context, arg, stack, input, pos) => op(context, arg, stack, input.reset(pos));
+}
 /**
 Context trackers are used to track stateful context (such as
 indentation in the Python grammar, or parent elements in the XML
@@ -1228,9 +1233,9 @@ var ContextTracker = class {
 	*/
 	constructor(spec) {
 		this.start = spec.start;
-		this.shift = spec.shift || id;
-		this.reduce = spec.reduce || id;
-		this.reuse = spec.reuse || id;
+		this.shift = wrapContextOp(spec.shift);
+		this.reduce = wrapContextOp(spec.reduce);
+		this.reuse = wrapContextOp(spec.reuse);
 		this.hash = spec.hash || (() => 0);
 		this.strict = spec.strict !== false;
 	}

@@ -657,3 +657,16 @@ export function migrateSettings(input: unknown): AppSettings {
   return sanitizeSettings(input);
 }
 
+/**
+ * Loads and sanitizes persisted settings from localStorage safely.
+ */
+export function loadSettings(): AppSettings {
+  try {
+    if (typeof localStorage === 'undefined') return { ...DEFAULT_SETTINGS };
+    const raw = localStorage.getItem('smfta_settings');
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    return sanitizeSettings(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}

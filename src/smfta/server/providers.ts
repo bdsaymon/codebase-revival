@@ -20,7 +20,9 @@ export interface ProviderEndpoint {
   headers?: Record<string, string>;
 }
 
-export const XRAHAT_BASE_URL = 'https://xrahat-worm-ai.vercel.app/api/chat';
+export const POLLINATIONS_OPENAI_URL = 'https://text.pollinations.ai/openai';
+export const POLLINATIONS_TEXT_BASE_URL = 'https://text.pollinations.ai/';
+export const XRAHAT_BASE_URL = POLLINATIONS_OPENAI_URL;
 export const CODECRAFT_BASE_URL = 'https://codecraftapi.com/v1';
 export const CODECRAFT_CHAT_URL = `${CODECRAFT_BASE_URL}/chat/completions`;
 export const CODECRAFT_MODELS_URL = `${CODECRAFT_BASE_URL}/models`;
@@ -31,12 +33,48 @@ export const CODECRAFT_FALLBACK_MODELS = [
   'claude-opus-4.8',
 ] as const;
 
+export const GROQ_VALID_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'llama-3.3-70b-specdec',
+  'mixtral-8x7b-32768',
+  'gemma2-9b-it',
+  'deepseek-r1-distill-llama-70b',
+] as const;
+
+export function resolveGroqModel(requestedModel?: string): string {
+  const clean = (requestedModel || '').trim();
+  if (!clean) return 'llama-3.3-70b-versatile';
+  const lower = clean.toLowerCase();
+  if (
+    lower.startsWith('llama-') ||
+    lower.startsWith('llama3') ||
+    lower.startsWith('mixtral-') ||
+    lower.startsWith('gemma') ||
+    lower.startsWith('qwen') ||
+    lower.startsWith('deepseek-r1-distill') ||
+    lower.startsWith('whisper-') ||
+    lower.startsWith('openai/gpt-oss-') ||
+    lower.startsWith('meta-llama/') ||
+    lower.startsWith('moonshotai/')
+  ) {
+    return clean;
+  }
+  if (
+    /\b(flash|fast|lite|mini|nano|instant)\b/i.test(lower) ||
+    lower === 'smfta-v5'
+  ) {
+    return 'llama-3.1-8b-instant';
+  }
+  return 'llama-3.3-70b-versatile';
+}
+
 export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
   xrahat: {
     id: 'xrahat',
     name: 'SMFTA Core Engine (Built-in Keyless)',
-    url: XRAHAT_BASE_URL,
-    defaultModel: 'smfta-core',
+    url: POLLINATIONS_OPENAI_URL,
+    defaultModel: 'openai',
     keyless: true,
   },
   unorouter: {
@@ -69,7 +107,11 @@ export const PROVIDER_ENDPOINTS: Record<string, ProviderEndpoint> = {
     name: 'Groq Cloud',
     url: 'https://api.groq.com/openai/v1/chat/completions',
     defaultModel: 'llama-3.3-70b-versatile',
-    fallbackModels: ['llama-3.1-8b-instant'],
+    fallbackModels: [
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+      'llama-3.3-70b-specdec',
+    ],
   },
   deepseek: {
     id: 'deepseek',
@@ -323,6 +365,28 @@ export function resolveEffectiveProvider(
     return 'codecraft';
   }
 
+  // Unambiguous key-prefix routing when keys clearly belong to Groq or Google Gemini
+  if (
+    firstKey.startsWith('gsk_') &&
+    cleanProvider !== 'ollama' &&
+    cleanProvider !== 'lmstudio'
+  ) {
+    return 'groq';
+  }
+
+  if (
+    firstKey.startsWith('AIza') &&
+    cleanProvider !== 'ollama' &&
+    cleanProvider !== 'lmstudio'
+  ) {
+    if (cleanProvider === 'gemini_openai' || cleanBase.includes('/openai')) {
+      return 'gemini_openai';
+    }
+    if (!cleanBase || cleanBase.includes('generativelanguage.googleapis.com')) {
+      return 'gemini_custom';
+    }
+  }
+
   if (
     cleanProvider === 'custom' ||
     cleanProvider === 'ollama' ||
@@ -351,15 +415,11 @@ export function resolveEffectiveProvider(
 
 export function buildXrahatUrl(
   promptText: string,
-  uid: string,
-  stream: boolean
+  _uid: string,
+  _stream: boolean
 ): string {
-  const cleanUid = (uid || 'smfta-anon').slice(0, 64);
-  const url = new URL(XRAHAT_BASE_URL);
-  url.searchParams.set('text', promptText);
-  url.searchParams.set('uid', cleanUid);
-  url.searchParams.set('stream', stream ? '1' : '0');
-  return url.toString();
+  const clipped = (promptText || '').trim().slice(0, 1800);
+  return `${POLLINATIONS_TEXT_BASE_URL}${encodeURIComponent(clipped)}?model=openai`;
 }
 
 function compactXrahatSystemHeader(
@@ -641,6 +701,9 @@ export function parseXrahatSseEvent(dataStr: string): {
 }
 
 export function extractXrahatReply(payload: unknown): string {
+  if (typeof payload === 'string' && payload.trim()) {
+    return sanitizeProprietaryOutput(payload);
+  }
   if (!payload || typeof payload !== 'object') return '';
   const data = payload as Record<string, unknown>;
   if (typeof data.reply === 'string' && data.reply.trim()) {
@@ -652,7 +715,7 @@ export function extractXrahatReply(payload: unknown): string {
   if (typeof data.text === 'string' && data.text.trim()) {
     return sanitizeProprietaryOutput(data.text);
   }
-  return '';
+  return extractTextFromOpenAIJson(payload);
 }
 
 export const ROUTER_FALLBACK_MODELS = [
@@ -666,8 +729,8 @@ export function normalizeEndpointUrl(
   customBaseUrl?: string,
   options?: { respectCustomBaseUrl?: boolean }
 ): string {
-  if (provider === 'xrahat') {
-    return XRAHAT_BASE_URL;
+  if (provider === 'xrahat' || provider === 'smfta_cloud') {
+    return POLLINATIONS_OPENAI_URL;
   }
 
   if (provider === 'cloudflare') {
@@ -843,6 +906,15 @@ export function expandModelCandidates(
       else if (lower.startsWith('qwen')) add(`qwen/${clean}`);
     }
   };
+
+  if (provider === 'groq') {
+    add(resolveGroqModel(requestedModel));
+    add(defaultModel || 'llama-3.3-70b-versatile');
+    for (const fb of PROVIDER_ENDPOINTS.groq.fallbackModels || []) {
+      add(fb);
+    }
+    return candidates;
+  }
 
   addWithVariants(requestedModel);
   addWithVariants(defaultModel);

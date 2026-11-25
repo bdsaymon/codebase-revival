@@ -1544,9 +1544,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           }
 
           if (!res.ok || !res.audioBase64) {
-            // Only fall back to device synthesis if device is strictly offline
+            // Fall back to device synthesis when offline, on static host (404/HTML), or when TTS key is unconfigured (503)
             if (
-              stateRef.current.isOffline &&
+              (stateRef.current.isOffline ||
+                Boolean(res.fallbackToBrowser) ||
+                Boolean(res.integrationRequired)) &&
               !/abort/i.test(res.error || '') &&
               activeSourcesRef.current.size === 0 &&
               isSpeechSynthesisSupported()

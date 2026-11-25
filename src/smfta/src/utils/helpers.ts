@@ -383,7 +383,7 @@ export function sanitizeProprietaryOutput(text: string): string {
     .replace(/https?:\/\/[^\s)"']*xrahat[^\s)"']*/gi, '')
     .replace(/https?:\/\/[^\s)"']*pollinations\.ai[^\s)"']*/gi, '')
     .replace(/xrahat-worm-ai\.vercel\.app(?:\/[^\s)"']*)?/gi, '')
-    .replace(/pollinations\.ai(?:\/[^\s)"']*)?/gi, 'SMFTA Pro')
+    .replace(/\bpollinations(?:\.ai)?\b(?:\/[^\s)"']*)?/gi, 'SMFTA Pro')
     .replace(/Xrahat\s*[-_]*\s*Worm\s*[-_]*\s*AI/gi, 'SMFTA Pro')
     .replace(/Xrahat\s*[-_]*\s*Dev/gi, 'SMFTA Pro')
     .replace(/Xrahat\s*[-_]*\s*AI/gi, 'SMFTA Pro')

@@ -664,6 +664,33 @@ export function detectProviderFromKey(apiKey: string): ExternalProviderId | null
  * recognised. Unknown keys keep the current provider (an older build forced
  * them onto UnoRouter, which made freshly added keys fail silently).
  */
+export function resolveGroqModel(requestedModel?: string): string {
+  const clean = (requestedModel || '').trim();
+  if (!clean) return 'llama-3.3-70b-versatile';
+  const lower = clean.toLowerCase();
+  if (
+    lower.startsWith('llama-') ||
+    lower.startsWith('llama3') ||
+    lower.startsWith('mixtral-') ||
+    lower.startsWith('gemma') ||
+    lower.startsWith('qwen') ||
+    lower.startsWith('deepseek-r1-distill') ||
+    lower.startsWith('whisper-') ||
+    lower.startsWith('openai/gpt-oss-') ||
+    lower.startsWith('meta-llama/') ||
+    lower.startsWith('moonshotai/')
+  ) {
+    return clean;
+  }
+  if (
+    /\b(flash|fast|lite|mini|nano|instant)\b/i.test(lower) ||
+    lower === 'smfta-v5'
+  ) {
+    return 'llama-3.1-8b-instant';
+  }
+  return 'llama-3.3-70b-versatile';
+}
+
 export function applyKeyToDraft(
   draft: AppSettings,
   value: string
@@ -673,6 +700,17 @@ export function applyKeyToDraft(
   if (trimmed.length < 6) return { ...draft, externalKeys: value };
 
   const detected = detectProviderFromKey(trimmed);
+
+  // Unambiguous Groq key should switch even from generic custom/default providers
+  if (detected === 'groq' && provider !== 'ollama' && provider !== 'lmstudio') {
+    return {
+      ...draft,
+      provider: 'groq',
+      externalKeys: value,
+      externalModel: resolveGroqModel(draft.externalModel),
+      externalBaseUrl: DEFAULT_PROVIDER_BASE_URLS.groq || 'https://api.groq.com/openai/v1',
+    };
+  }
 
   const endpointOwned =
     provider === 'custom' ||
