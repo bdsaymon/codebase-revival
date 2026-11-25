@@ -1302,11 +1302,17 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
             },
           ];
 
+    const v2WantsDetailedVoice =
+      liveVoiceMode &&
+      /\b(detail|details|detailed|explain\s+(?:deeply|in\s+detail|everything|fully)|elaborate|step\s+by\s+step|step-by-step)\b|(?:বিস্তারিত|ডিটেইল|পুরোপুরি|সম্পূর্ণ|খুলে\s+বলো|ধাপে\s+ধাপে)/i.test(
+        lastUserText
+      );
     const effectiveV2SysInstruction = liveVoiceMode
       ? `${v2SystemInstruction}\n\n${buildNaturalHumanLanguageRules({
           replyLang,
           liveVoiceMode: true,
           userName: String(nickname || userName || '').trim(),
+          wantsDetailedVoiceReply: v2WantsDetailedVoice,
         })}`
       : v2SystemInstruction;
 
@@ -1320,6 +1326,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       thinkingEnabled: !liveVoiceMode && requestedThinkingMode !== 'off',
       thinkingEffort:
         liveVoiceMode || requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
+      liveVoiceMode,
+      maxOutputTokensOverride: liveVoiceMode
+        ? v2WantsDetailedVoice
+          ? 480
+          : 200
+        : undefined,
     });
 
     if (!v2StreamRes.ok && !clientClosed) {
@@ -1341,17 +1353,19 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       return;
     }
 
-    // Section 8A: Auto-continuation for V2 (strictly stays on the V2 model chain)
-    const isLongV2Task = isLongCodeOrWritingRequest(lastUserText);
+    // Section 8A: Auto-continuation for V2 (strictly stays on the V2 model chain, disabled in Live Voice)
+    const isLongV2Task = !liveVoiceMode && isLongCodeOrWritingRequest(lastUserText);
     const v2NeedsContinuation = (acc: string) =>
-      hasUnclosedCodeFence(acc) ||
-      hasUnclosedArtifactTag(acc) ||
-      hasUnclosedHtmlDocument(acc) ||
-      (isLongV2Task && acc.length > 400 && looksTruncated(acc));
+      !liveVoiceMode &&
+      (hasUnclosedCodeFence(acc) ||
+        hasUnclosedArtifactTag(acc) ||
+        hasUnclosedHtmlDocument(acc) ||
+        (isLongV2Task && acc.length > 400 && looksTruncated(acc)));
 
-    let v2LastTruncated = Boolean(v2StreamRes.truncated);
+    let v2LastTruncated = !liveVoiceMode && Boolean(v2StreamRes.truncated);
     for (
       let v2ContRound = 0;
+      !liveVoiceMode &&
       v2ContRound < MAX_AUTO_CONTINUATIONS &&
       v2StreamRes.ok &&
       !clientClosed &&
@@ -1831,8 +1845,8 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
               config: {
                 systemInstruction: liveVoiceSysInstruction,
                 maxOutputTokens: wantsDetailedVoiceReply
-                  ? Math.min(effectiveMaxOutputTokens, 1400)
-                  : Math.min(effectiveMaxOutputTokens, 360),
+                  ? Math.min(effectiveMaxOutputTokens, 480)
+                  : Math.min(effectiveMaxOutputTokens, 200),
                 ...(cand.level !== undefined
                   ? { thinkingConfig: { thinkingLevel: cand.level } }
                   : {}),

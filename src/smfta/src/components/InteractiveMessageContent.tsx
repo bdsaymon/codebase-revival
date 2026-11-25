@@ -1,16 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Sparkles,
   Brain,
   Check,
   X,
   Copy,
-  Wand2,
-  Edit3,
   RotateCcw,
   Lightbulb,
   ArrowRight,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Eye,
   Code2,
   FileText,
@@ -18,7 +17,7 @@ import {
   FileArchive,
 } from 'lucide-react';
 import { ProactiveSuggestion, InlineRevision } from '../types';
-import { INLINE_QUICK_ACTIONS } from '../utils/helpers';
+import { getCodeBlockDisplayMeta } from '../utils/chatDisplay';
 import {
   deriveInitialThinkingTopic,
   formatThinkingParagraphs,
@@ -357,7 +356,7 @@ function CreatorContactButtons({
   );
 }
 
-// Rich multi-color inline markdown formatter for bold, inline code, quoted phrases, and links
+// Clean Claude-style editorial inline markdown formatter
 function renderInlineFormatting(line: string): React.ReactNode {
   const cleanLine = stripBrokenGlyphs(line);
   const parts = cleanLine.split(
@@ -375,7 +374,7 @@ function renderInlineFormatting(line: string): React.ReactNode {
       return (
         <code
           key={i}
-          className="px-1.5 py-0.5 rounded-md bg-[var(--inline-code-bg)] border border-[var(--inline-code-border)] font-mono-num text-[0.9em] text-[var(--inline-code-text)] font-semibold break-words"
+          className="px-1.5 py-0.5 rounded-md bg-[var(--inline-code-bg)] border border-[var(--inline-code-border)] font-mono-num text-[0.86em] text-[var(--inline-code-text)] font-medium break-words"
         >
           {part.slice(1, -1)}
         </code>
@@ -383,10 +382,7 @@ function renderInlineFormatting(line: string): React.ReactNode {
     }
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       return (
-        <strong
-          key={i}
-          className="font-bold text-[var(--primary)]"
-        >
+        <strong key={i} className="font-semibold text-[var(--ink)]">
           {part.slice(2, -2)}
         </strong>
       );
@@ -397,10 +393,7 @@ function renderInlineFormatting(line: string): React.ReactNode {
       part.length > 2
     ) {
       return (
-        <span
-          key={i}
-          className="font-semibold text-[var(--accent-emerald)]"
-        >
+        <span key={i} className="font-medium text-[var(--ink)]">
           {part}
         </span>
       );
@@ -413,7 +406,7 @@ function renderInlineFormatting(line: string): React.ReactNode {
           href={linkMatch[2]}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[var(--accent-sky)] font-semibold underline underline-offset-2 hover:opacity-80"
+          className="text-[var(--primary)] font-medium underline underline-offset-2 decoration-[var(--primary)]/50 hover:decoration-[var(--primary)]"
         >
           {linkMatch[1]}
         </a>
@@ -427,13 +420,13 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
   const l = stripBrokenGlyphs(rawLine).trim();
   if (!l) return null;
   if (/^(-{3,}|\*{3,}|_{3,})$/.test(l)) {
-    return <hr key={key} className="my-3.5 border-t border-[var(--border)]" />;
+    return <hr key={key} className="my-4 border-t border-[var(--border)]" />;
   }
   if (l.startsWith('#### ')) {
     return (
       <h4
         key={key}
-        className="text-[0.95em] font-bold text-[var(--accent-amber)] mt-3 mb-1"
+        className="text-[1em] font-semibold text-[var(--ink)] mt-3.5 mb-1 tracking-tight"
       >
         {renderInlineFormatting(l.slice(5))}
       </h4>
@@ -443,7 +436,7 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <h3
         key={key}
-        className="text-[13.8px] font-bold text-[var(--accent-violet)] mt-3.5 mb-1 pb-1 border-b border-[var(--border)]/60"
+        className="text-[1.08em] font-semibold text-[var(--ink)] mt-4 mb-1.5 tracking-tight"
       >
         {renderInlineFormatting(l.slice(4))}
       </h3>
@@ -453,7 +446,7 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <h2
         key={key}
-        className="text-[15px] font-bold text-[var(--accent-emerald)] mt-3.5 mb-1.5 pb-1 border-b border-[var(--border)]"
+        className="text-[1.22em] font-semibold text-[var(--ink)] mt-5 mb-2 pb-1 border-b border-[var(--border)] tracking-tight"
       >
         {renderInlineFormatting(l.slice(3))}
       </h2>
@@ -463,7 +456,7 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <h1
         key={key}
-        className="text-[17px] font-bold text-[var(--primary)] mt-3.5 mb-2 pb-1 border-b border-[var(--border)]"
+        className="text-[1.38em] font-semibold text-[var(--ink)] mt-5 mb-2.5 pb-1.5 border-b border-[var(--border)] tracking-tight"
       >
         {renderInlineFormatting(l.slice(2))}
       </h1>
@@ -473,7 +466,7 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <blockquote
         key={key}
-        className="px-4 py-2.5 my-2.5 bg-[var(--primary-soft)] rounded-xl border border-[var(--primary-border)] text-[var(--text)] font-medium leading-relaxed"
+        className="pl-3.5 pr-3 py-1.5 my-2.5 border-l-2 border-[var(--primary)] bg-[var(--surface-2)]/40 rounded-r-lg text-[var(--ink-muted)] italic leading-relaxed"
       >
         {renderInlineFormatting(l.slice(2))}
       </blockquote>
@@ -485,12 +478,12 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <div
         key={key}
-        className="flex items-start gap-2.5 py-1 leading-relaxed"
+        className="flex items-start gap-2.5 py-0.5 leading-relaxed"
       >
-        <span className="inline-flex items-center justify-center min-w-[1.5rem] px-1.5 py-0.5 rounded-md bg-[var(--primary-soft)] font-mono-num text-xs font-bold text-[var(--primary)] shrink-0 select-none mt-0.5">
-          {numMatch[1].replace(/[.)]$/, '')}
+        <span className="font-mono-num text-[0.9em] font-semibold text-[var(--ink-dim)] shrink-0 select-none min-w-[1.25rem]">
+          {numMatch[1].replace(/[.)]$/, '')}.
         </span>
-        <div className="min-w-0 flex-1 text-[var(--text)] font-normal">
+        <div className="min-w-0 flex-1 text-[var(--ink)]">
           {renderInlineFormatting(numMatch[2])}
         </div>
       </div>
@@ -502,12 +495,12 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
     return (
       <div
         key={key}
-        className="flex items-start gap-2.5 py-1 leading-relaxed"
+        className="flex items-start gap-2.5 py-0.5 leading-relaxed"
       >
-        <span className="text-[var(--accent-emerald)] font-bold shrink-0 select-none mt-0.5">
-          ▸
+        <span className="text-[var(--ink-dim)] shrink-0 select-none leading-[1.6]">
+          •
         </span>
-        <div className="min-w-0 flex-1 text-[var(--text)] font-normal">
+        <div className="min-w-0 flex-1 text-[var(--ink)]">
           {renderInlineFormatting(bulletMatch[2])}
         </div>
       </div>
@@ -517,19 +510,19 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
   // Clean inline rendering for emoji-prefixed lines without heavy box enclosures
   if (/^(?:📌|💡|✅|⚠️|🔍)\s+/.test(l)) {
     return (
-      <p key={key} className="m-0 py-0.5 leading-relaxed text-[var(--text)]">
+      <p key={key} className="m-0 py-0.5 leading-relaxed text-[var(--ink)]">
         {renderInlineFormatting(l)}
       </p>
     );
   }
 
-  // Highlight leading label before ':' or '—' if line has no explicit markdown bold
+  // Highlight leading label before ':' or '—' subtly like Claude prose
   if (!rawLine.includes('**') && !rawLine.includes('`')) {
     const labelMatch = rawLine.match(/^([^:：—]{2,38}[:：—])\s+([\s\S]+)$/);
     if (labelMatch && !/^https?:/i.test(labelMatch[1])) {
       return (
-        <p key={key} className="m-0 leading-relaxed text-[var(--text)]">
-          <span className="font-bold text-[var(--primary)]">
+        <p key={key} className="m-0 leading-relaxed text-[var(--ink)]">
+          <span className="font-semibold text-[var(--ink)]">
             {labelMatch[1]}
           </span>{' '}
           {renderInlineFormatting(labelMatch[2])}
@@ -539,7 +532,7 @@ function renderSingleLineElement(rawLine: string, key: number): React.ReactNode 
   }
 
   return (
-    <p key={key} className="m-0 leading-relaxed text-[var(--text)]">
+    <p key={key} className="m-0 leading-relaxed text-[var(--ink)]">
       {renderInlineFormatting(rawLine)}
     </p>
   );
@@ -563,14 +556,14 @@ function renderParagraphContent(blockText: string): React.ReactNode {
     const headers = parseRow(lines[0]);
     const bodyRows = lines.slice(2).filter((r) => r.includes('|')).map(parseRow);
     return (
-      <div className="my-3.5 overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xs">
-        <table className="w-full text-left border-collapse text-xs sm:text-sm">
+      <div className="my-3.5 overflow-x-auto rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+        <table className="w-full text-left border-collapse text-xs sm:text-[13.5px]">
           <thead>
-            <tr className="bg-[var(--primary-soft)] border-b border-[var(--border)] divide-x divide-[var(--border)]/60">
+            <tr className="bg-[var(--surface-2)]/70 border-b border-[var(--border)]">
               {headers.map((h, i) => (
                 <th
                   key={i}
-                  className="px-3.5 py-2.5 font-bold text-[var(--primary)] whitespace-nowrap"
+                  className="px-3.5 py-2 font-semibold text-[var(--ink)] whitespace-nowrap"
                 >
                   {renderInlineFormatting(h)}
                 </th>
@@ -581,15 +574,15 @@ function renderParagraphContent(blockText: string): React.ReactNode {
             {bodyRows.map((row, rIdx) => (
               <tr
                 key={rIdx}
-                className="even:bg-[var(--surface-2)]/35 hover:bg-[var(--surface-2)]/60 transition-colors divide-x divide-[var(--border)]/50"
+                className="hover:bg-[var(--surface-2)]/40 transition-colors"
               >
                 {row.map((cell, cIdx) => (
                   <td
                     key={cIdx}
-                    className={`px-3.5 py-2.5 leading-relaxed align-top ${
+                    className={`px-3.5 py-2 leading-relaxed align-top ${
                       cIdx === 0
-                        ? 'font-bold text-[var(--primary)] whitespace-nowrap'
-                        : 'text-[var(--text)] font-medium'
+                        ? 'font-semibold text-[var(--ink)] whitespace-nowrap'
+                        : 'text-[var(--ink-muted)]'
                     }`}
                   >
                     {renderInlineFormatting(cell)}
@@ -604,7 +597,7 @@ function renderParagraphContent(blockText: string): React.ReactNode {
   }
 
   return (
-    <div className="space-y-1 leading-relaxed">
+    <div className="space-y-1.5 leading-relaxed">
       {lines.map((l, idx) => renderSingleLineElement(l, idx))}
     </div>
   );
@@ -839,6 +832,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
   const [directEditIdx, setDirectEditIdx] = useState<number | null>(null);
   const [directEditValue, setDirectEditValue] = useState<string>('');
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
+  const [expandedCodeIdxMap, setExpandedCodeIdxMap] = useState<Record<number, boolean>>({});
   const [showRevisions, setShowRevisions] = useState<boolean>(false);
 
   const { thinkingText, cleanResponse, isThinkingActive } = React.useMemo(
@@ -1179,18 +1173,48 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
             );
           }
 
-          return (
-            <div key={idx} className="my-3 space-y-2">
+          const codeMeta = getCodeBlockDisplayMeta(block.content, lang);
+          const isCollapsedBox =
+            codeMeta.collapseByDefault && !expandedCodeIdxMap[idx];
+
+          if (isCollapsedBox) {
+            return (
               <div
-                className="chat-code-block rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-slate-100"
+                key={idx}
+                className="my-2.5 w-full max-w-[540px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--primary-border)] transition-colors overflow-hidden"
                 data-testid="chat-code-block"
                 data-code-lang={lang}
+                data-collapsed="true"
               >
-                <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs">
-                  <span className="font-mono-num text-slate-300 font-medium truncate">
-                    {lang}
-                  </span>
-                  <div className="flex items-center gap-1.5">
+                <div className="px-3.5 py-3 flex items-center justify-between gap-2.5">
+                  <button
+                    type="button"
+                    data-testid="claude-artifact-card"
+                    onClick={() =>
+                      onOpenCodeLab(
+                        block.content,
+                        lang,
+                        undefined,
+                        codeMeta.inferredTitle,
+                        allMessageCodeBundles
+                      )
+                    }
+                    className="flex-1 min-w-0 flex items-center gap-3 text-left cursor-pointer"
+                  >
+                    <span className="w-9 h-9 rounded-xl bg-[var(--primary-soft)] border border-[var(--primary-border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
+                      <Code2 className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0 block">
+                      <span className="block text-[13.5px] font-semibold text-[var(--ink)] truncate font-sans">
+                        {codeMeta.inferredTitle}
+                      </span>
+                      <span className="block text-[11.5px] text-[var(--ink-dim)] truncate font-mono mt-0.5">
+                        {lang.toUpperCase()} · {codeMeta.lineCount} lines · {codeMeta.sizeLabel}
+                      </span>
+                    </span>
+                  </button>
+
+                  <div className="flex items-center gap-1 shrink-0 font-sans">
                     <button
                       type="button"
                       data-testid="preview-code-btn"
@@ -1199,21 +1223,98 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
                           block.content,
                           lang,
                           undefined,
-                          undefined,
+                          codeMeta.inferredTitle,
                           allMessageCodeBundles
                         )
                       }
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
-                      title="Open in side-by-side preview"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[11.5px] font-medium text-[var(--ink)] transition-colors cursor-pointer"
+                      title="Open in Artifact Viewer"
                     >
-                      <Eye className="w-3 h-3" />
-                      <span>Preview</span>
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Open</span>
                     </button>
                     <button
                       type="button"
                       data-testid="copy-code-btn"
                       onClick={() => handleCopyCode(block.content, idx)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-slate-200 transition-colors cursor-pointer whitespace-nowrap"
+                      className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                      title="Copy code"
+                    >
+                      {copiedCodeIdx === idx ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="toggle-code-collapse-btn"
+                      onClick={() =>
+                        setExpandedCodeIdxMap((prev) => ({ ...prev, [idx]: true }))
+                      }
+                      className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+                      title="Expand inline code"
+                      aria-label="Expand inline code"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div key={idx} className="my-3 space-y-2">
+              <div
+                className="chat-code-block rounded-xl overflow-hidden border border-[var(--code-border)] bg-[var(--code-bg)] text-[#f4f1ea]"
+                data-testid="chat-code-block"
+                data-code-lang={lang}
+                data-collapsed="false"
+              >
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2 bg-[var(--code-top)] border-b border-[var(--code-border)] text-xs font-sans">
+                  <span className="font-mono-num text-[#c8c3b9] font-medium truncate">
+                    {codeMeta.collapseByDefault ? `${codeMeta.inferredTitle} · ` : ''}
+                    {lang}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {codeMeta.collapseByDefault && (
+                      <button
+                        type="button"
+                        data-testid="toggle-code-collapse-btn"
+                        onClick={() =>
+                          setExpandedCodeIdxMap((prev) => ({ ...prev, [idx]: false }))
+                        }
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-[#f4f1ea] transition-colors cursor-pointer whitespace-nowrap"
+                        title="Collapse code"
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                        <span>Collapse</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="preview-code-btn"
+                      onClick={() =>
+                        onOpenCodeLab(
+                          block.content,
+                          lang,
+                          undefined,
+                          codeMeta.inferredTitle,
+                          allMessageCodeBundles
+                        )
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-[#f4f1ea] transition-colors cursor-pointer whitespace-nowrap"
+                      title="Open in Artifact Viewer"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>Open</span>
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="copy-code-btn"
+                      onClick={() => handleCopyCode(block.content, idx)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/20 text-[#f4f1ea] transition-colors cursor-pointer whitespace-nowrap"
                     >
                       {copiedCodeIdx === idx ? (
                         <>
@@ -1228,44 +1329,12 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
                   </div>
                 </div>
                 <pre
-                  className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-slate-100"
+                  className="chat-code-pre px-3.5 py-2.5 m-0 overflow-x-auto font-mono-num text-[12.5px] leading-relaxed text-[#f4f1ea]"
                   data-testid="chat-code-source-pre"
                 >
                   <code>{block.content}</code>
                 </pre>
               </div>
-
-              {canLivePreview && (
-                <button
-                  type="button"
-                  data-testid="claude-artifact-card"
-                  onClick={() =>
-                    onOpenCodeLab(
-                      block.content,
-                      lang,
-                      undefined,
-                      undefined,
-                      allMessageCodeBundles
-                    )
-                  }
-                  className="w-full max-w-md px-3.5 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
-                >
-                  <span className="flex items-center gap-2.5 min-w-0">
-                    <span className="w-8 h-8 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
-                      <Code2 className="w-4 h-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[13.5px] font-medium text-[var(--ink)] truncate">
-                        Interactive {lang.toUpperCase()} Live Preview
-                      </span>
-                      <span className="block text-[11.5px] text-[var(--ink-dim)]">
-                        {preferBengali ? 'লাইভ প্রিভিউ ও কোড খুলতে ক্লিক করুন' : 'Click to open Live Preview & Code Editor'}
-                      </span>
-                    </span>
-                  </span>
-                  <ChevronRight className="w-4 h-4 text-[var(--ink-dim)] shrink-0" />
-                </button>
-              )}
             </div>
           );
         }
@@ -1284,11 +1353,13 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
             art.lang ||
             'FILE'
           ).toUpperCase();
+          const primaryLabel =
+            art.title && art.title !== art.filename ? art.title : art.filename;
           return (
             <div
               key={`art-${idx}-${art.id}`}
               data-testid="claude-file-artifact-card"
-              className="my-2.5 w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] flex items-center justify-between gap-2 transition-colors overflow-hidden"
+              className="my-2.5 w-full max-w-[540px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--primary-border)] flex items-center justify-between gap-2 transition-colors overflow-hidden font-sans"
             >
               <button
                 type="button"
@@ -1303,7 +1374,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
                 }
                 className="flex-1 min-w-0 px-3.5 py-3 flex items-center gap-3 text-left cursor-pointer"
               >
-                <span className="w-9 h-9 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
+                <span className="w-9 h-9 rounded-xl bg-[var(--primary-soft)] border border-[var(--primary-border)] inline-flex items-center justify-center text-[var(--primary)] shrink-0">
                   {isMd ? (
                     <FileText className="w-4 h-4" />
                   ) : (
@@ -1311,13 +1382,11 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
                   )}
                 </span>
                 <span className="min-w-0 block">
-                  <span className="block text-[13.5px] font-medium text-[var(--ink)] truncate">
-                    {art.isStreaming
-                      ? `Writing ${art.filename}…`
-                      : `${art.filename}, created`}
+                  <span className="block text-[13.5px] font-semibold text-[var(--ink)] truncate">
+                    {art.isStreaming ? `Writing ${primaryLabel}…` : primaryLabel}
                   </span>
-                  <span className="block text-[11.5px] text-[var(--ink-dim)] truncate font-mono">
-                    {art.title && art.title !== art.filename ? `${art.title} · ` : ''}
+                  <span className="block text-[11.5px] text-[var(--ink-dim)] truncate font-mono mt-0.5">
+                    {art.title && art.title !== art.filename ? `${art.filename} · ` : ''}
                     {extBadge} · {formatArtifactSize(art.content)}
                   </span>
                 </span>
@@ -1335,7 +1404,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
                     });
                     onToast(`Downloaded ${art.filename}`);
                   }}
-                  className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer"
+                  className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[var(--ink-dim)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
                   title={`Download ${art.filename}`}
                   aria-label={`Download ${art.filename}`}
                 >

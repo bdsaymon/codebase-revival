@@ -1499,7 +1499,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           ) : null}
 
-          <h1 className="text-sm sm:text-[15px] font-semibold text-[var(--ink)] truncate">
+          <h1 className="font-editorial-serif text-[18px] sm:text-[19px] font-semibold text-[var(--ink)] truncate">
             {mobileDetailOpen ? currentMeta.label : 'Settings'}
           </h1>
         </div>
@@ -1508,7 +1508,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           type="button"
           onClick={onClose}
           data-testid="settings-close-btn"
-          className="w-8 h-8 rounded-lg border border-[var(--border)] bg-[var(--surface)] inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:border-[var(--primary-border)] cursor-pointer"
+          className="w-8 h-8 rounded-xl border border-[var(--border)] bg-[var(--surface)] inline-flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--ink)] hover:border-[var(--primary-border)] cursor-pointer transition-colors"
           aria-label="Close settings"
           title="Close (Esc)"
         >
@@ -1523,10 +1523,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           aria-label="Settings categories"
           className="fs-settings-rail hidden md:flex"
         >
-          <div className="flex-1 overflow-y-auto px-3 py-3">
+          <div className="flex-1 overflow-y-auto px-3 py-4">
             {renderNavContent(false)}
           </div>
-          <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--ink-dim)]">
+          <div className="px-3.5 py-2.5 border-t border-[var(--border)] flex items-center justify-between text-[11px] text-[var(--ink-dim)]">
             <span className="truncate font-medium">{activeProfile.name}</span>
             <span className="font-mono">v{APP_VERSION}</span>
           </div>
@@ -1546,8 +1546,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }`}
         >
           <div className="fs-settings-content">
-            <div className="hidden md:flex items-center justify-between mb-3 pb-2 border-b border-[var(--border)]">
-              <h2 className="text-[15px] font-semibold text-[var(--ink)]">
+            <div className="hidden md:flex items-center justify-between mb-4 pb-2.5 border-b border-[var(--border)]">
+              <h2 className="font-editorial-serif text-[20px] font-semibold text-[var(--ink)]">
                 {currentMeta.label}
               </h2>
             </div>

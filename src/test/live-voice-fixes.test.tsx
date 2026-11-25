@@ -3,6 +3,11 @@ import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LiveVoiceOverlay, LiveVoiceOverlayProps } from '../smfta/src/components/LiveVoiceOverlay';
 import { applySkillDirectiveToMessages } from '../smfta/src/utils/selfEngine';
+import { buildNaturalHumanLanguageRules } from '../smfta/server/systemPrompt';
+import { buildV2GenAiRequestConfig } from '../smfta/server/v2FirebaseAi';
+import { getV2ModelSpec } from '../smfta/src/utils/v2UsageLimits';
+import fs from 'node:fs';
+import path from 'node:path';
 
 interface MockTrack {
   enabled: boolean;
@@ -475,5 +480,121 @@ describe('SMFTA AI Pro Live Voice 8-defect regression suite', () => {
 
     expect(mockTrack.enabled).toBe(true);
     expect(MockSpeechRecognition.instances.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('9. renders uncluttered 3-button ChatGPT bottom dock and passive screen/orb touches never cut or interrupt AI', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: 'tts off' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const onEndCall = vi.fn();
+    const onAbortGeneration = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <LiveVoiceOverlay
+          {...createBaseProps({
+            onEndCall,
+            onAbortGeneration,
+            isGenerating: false,
+            lastAiMessage: {
+              id: 'ai-speak-1',
+              text: 'এখানে আপনার উত্তরটি সংক্ষেপে দেওয়া হলো।',
+            },
+          })}
+        />
+      );
+    });
+    await flush(80);
+
+    const dock = container.querySelector('[data-testid="live-voice-bottom-dock"]');
+    expect(dock).not.toBeNull();
+    const dockButtons = dock?.querySelectorAll('button') || [];
+    expect(dockButtons).toHaveLength(3);
+    expect(dock?.querySelector('[data-testid="live-voice-attach-image-btn"]')).not.toBeNull();
+    expect(dock?.querySelector('[data-testid="live-voice-keyboard-toggle"]')).not.toBeNull();
+    expect(dock?.querySelector('[data-testid="live-voice-end-btn"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="live-voice-quick-prompts"]')).toBeNull();
+
+    // Tapping orb / center stage must NEVER interrupt, abort, or end the call
+    const orbStage = container.querySelector('[data-testid="live-voice-orb-stage"]') as HTMLElement;
+    expect(orbStage).not.toBeNull();
+    const recCountBefore = MockSpeechRecognition.instances.length;
+    await act(async () => {
+      orbStage.click();
+    });
+    await flush(30);
+    expect(onEndCall).not.toHaveBeenCalled();
+    expect(onAbortGeneration).not.toHaveBeenCalled();
+    expect(MockSpeechRecognition.instances.length).toBe(recCountBefore);
+  });
+
+  it('10. renders uploaded photo centered in uncropped gold-biscuit frame and enforces concise voice caps & minimal .env.example', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: 'tts off' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    class MockFileReader {
+      result = 'data:image/png;base64,QUFB';
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL() {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal('FileReader', MockFileReader);
+
+    await act(async () => {
+      root.render(<LiveVoiceOverlay {...createBaseProps({ chatId: 505 })} />);
+    });
+    await flush(60);
+
+    const fileInput = container.querySelector(
+      '[data-testid="live-voice-image-input"]'
+    ) as HTMLInputElement;
+    const imgFile = new File(['abc'], 'photo.png', { type: 'image/png' });
+
+    await act(async () => {
+      Object.defineProperty(fileInput, 'files', {
+        configurable: true,
+        value: [imgFile],
+      });
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await flush(40);
+
+    const card = container.querySelector('[data-testid="live-voice-image-preview-card"]');
+    expect(card?.className).toContain('live-voice-gold-biscuit-card');
+    const imgEl = card?.querySelector('img');
+    expect(imgEl?.className).toContain('object-contain');
+
+    vi.unstubAllGlobals();
+
+    // Concise live voice rules & token override
+    const rules = buildNaturalHumanLanguageRules({
+      replyLang: 'bn',
+      liveVoiceMode: true,
+    });
+    expect(rules).toContain('under 45 words');
+    const v2Cfg = buildV2GenAiRequestConfig({
+      modelName: 'gemini-4-hydrogen',
+      spec: getV2ModelSpec('smfta-v2-pro'),
+      fullSystemInstruction: 'Concise test',
+      maxOutputTokensOverride: 200,
+    });
+    expect(v2Cfg.maxOutputTokens).toBe(200);
+
+    // Clean .env.example only keeps GEMINI_API_KEY active
+    const envExample = fs.readFileSync(path.resolve(process.cwd(), '.env.example'), 'utf8');
+    const activeVars = envExample
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    expect(activeVars).toEqual(['GEMINI_API_KEY=']);
   });
 });

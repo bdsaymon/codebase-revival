@@ -2,19 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp,
   ChevronDown,
-  FileText,
-  Hand,
   ImagePlus,
   Keyboard,
-  Maximize2,
-  Mic,
-  MicOff,
-  Minimize2,
-  Paperclip,
   PhoneOff,
   RefreshCw,
-  RotateCcw,
-  Sparkles,
   Volume2,
   X,
   ZoomIn,
@@ -39,7 +30,6 @@ import {
   streamGeminiPcmSpeech,
 } from '../utils/voiceEngine';
 import type { AppSettings, ChatMessage, ImageAttachment } from '../types';
-import { readDocumentFile } from '../utils/documentReader';
 import {
   BargeInState,
   buildUnifiedVoiceTimeline,
@@ -193,22 +183,22 @@ const STATE_COPY: Record<
   connecting: {
     label: 'Connecting',
     headline: 'Connecting voice...',
-    hint: 'Preparing live microphone and audio',
+    hint: 'Preparing live audio',
   },
   listening: {
     label: 'Listening',
     headline: 'Listening',
-    hint: 'Speak naturally — I am listening',
+    hint: 'Speak naturally anytime',
   },
   thinking: {
     label: 'Thinking',
     headline: 'Thinking...',
-    hint: 'Crafting your reply',
+    hint: 'Preparing reply',
   },
   speaking: {
     label: 'Speaking',
     headline: 'Speaking',
-    hint: 'Speak or tap anytime to interrupt',
+    hint: 'Speaking now',
   },
   reconnecting: {
     label: 'Reconnecting',
@@ -217,24 +207,10 @@ const STATE_COPY: Record<
   },
   disconnected: {
     label: 'Disconnected',
-    headline: 'Voice disconnected',
-    hint: 'Tap reconnect to resume',
+    headline: 'Voice paused',
+    hint: 'Tap reconnect below to resume',
   },
 };
-
-interface StarParticle {
-  angle: number;
-  radius: number;
-  speed: number;
-  size: number;
-  alpha: number;
-  drift: number;
-}
-
-interface AcousticRipple {
-  radius: number;
-  alpha: number;
-}
 
 export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   isOpen,
@@ -262,10 +238,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const [voiceLang, setVoiceLang] = useState<'bn-BD' | 'en-US'>(() =>
     loadSavedVoiceLang(preferredLang)
   );
-  const [speechRate, setSpeechRate] = useState<VoiceSpeechRate>(loadSavedVoiceRate);
+  const [speechRate] = useState<VoiceSpeechRate>(loadSavedVoiceRate);
   const [activeVoiceModel, setActiveVoiceModel] = useState<string | null>(null);
   const [micStreamLive, setMicStreamLive] = useState(false);
-  const [expandedTranscript, setExpandedTranscript] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -278,7 +253,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [isSynthesizingVoice, setIsSynthesizingVoice] = useState(false);
   const [isUserVoicing, setIsUserVoicing] = useState(false);
-  const [hasRecordedAudio, setHasRecordedAudio] = useState(false);
+  const [, setHasRecordedAudio] = useState(false);
   const [liveCaption, setLiveCaption] = useState('');
   const [liveFinalText, setLiveFinalText] = useState('');
   const [liveInterimText, setLiveInterimText] = useState('');
@@ -307,10 +282,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     url: string;
     name?: string;
   } | null>(null);
-  const [seconds, setSeconds] = useState(0);
+  const [, setSeconds] = useState(0);
 
   const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const userScrolledUpRef = useRef<boolean>(false);
   const attachedImgsRef = useRef(attachedImgs);
@@ -318,9 +292,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const attachedFilesRef = useRef(attachedFiles);
   attachedFilesRef.current = attachedFiles;
 
-  // Visual canvas refs
+  // Visual canvas ref
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const waveCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Audio playback refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -370,11 +343,9 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const sessionTokenRef = useRef<number>(0);
   const textInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Smooth animation & reactive ripple refs
+  // Smooth animation refs
   const energyRef = useRef(0);
   const micLevelRef = useRef(0);
-  const ripplesRef = useRef<AcousticRipple[]>([]);
-  const lastRippleAtRef = useRef<number>(0);
   const visualStateRef = useRef<VoiceConnectionState>('connecting');
 
   const voiceState: VoiceConnectionState = deriveVoiceSessionState({
@@ -1680,9 +1651,13 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         isInitialGreetingPendingRef.current = false;
         setIsConnecting(false);
         stateRef.current.isConnecting = false;
-        setIsDisconnected(true);
-        stateRef.current.isDisconnected = true;
-        setStatusNotice('Microphone API unavailable in this browser. Tap keyboard to chat.');
+        setIsDisconnected(false);
+        stateRef.current.isDisconnected = false;
+        setStatusNotice(
+          stateRef.current.voiceLang === 'bn-BD'
+            ? 'কীবোর্ড বা ছবি পাঠিয়ে কথা বলুন'
+            : 'Type or send a photo below'
+        );
         return;
       }
 
@@ -1775,17 +1750,25 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         setMicStreamLive(false);
         setIsConnecting(false);
         stateRef.current.isConnecting = false;
-        setIsDisconnected(true);
-        stateRef.current.isDisconnected = true;
         const name = err instanceof Error ? err.name : '';
-        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          setIsDisconnected(false);
+          stateRef.current.isDisconnected = false;
           setStatusNotice(
-            'মাইক পারমিশন বন্ধ আছে — মাইক অনুমতি দিয়ে Reconnect চাপুন অথবা কীবোর্ডে লিখুন।'
+            stateRef.current.voiceLang === 'bn-BD'
+              ? 'কীবোর্ড বা ছবি পাঠিয়ে কথা বলুন'
+              : 'Type or send a photo below'
           );
-        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          setStatusNotice('কোনো মাইক্রোফোন পাওয়া যায়নি। কীবোর্ড ব্যবহার করুন।');
         } else {
-          setStatusNotice('মাইক্রোফোন চালু করা যায়নি। আবার চেষ্টা করুন।');
+          setIsDisconnected(true);
+          stateRef.current.isDisconnected = true;
+          if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+            setStatusNotice(
+              'মাইক পারমিশন বন্ধ আছে — মাইক অনুমতি দিয়ে Reconnect চাপুন অথবা কীবোর্ডে লিখুন।'
+            );
+          } else {
+            setStatusNotice('মাইক্রোফোন চালু করা যায়নি। আবার চেষ্টা করুন।');
+          }
         }
 
         if (allowGreeting && !hasGreetedRef.current) {
@@ -1831,7 +1814,6 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       setLiveInterimText('');
       setIsUserVoicing(false);
       setHasRecordedAudio(false);
-      setExpandedTranscript(false);
       setNeedsTapToPlay(false);
       setGreetingText('');
       setSessionUserText('');
@@ -1851,7 +1833,6 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       recognitionFinalPrefixRef.current = '';
       recognitionSessionFinalRef.current = '';
       recognitionLiveTextRef.current = '';
-      ripplesRef.current = [];
       stopAiSpeechPlayback();
       releaseAllMicResources();
       return;
@@ -2097,7 +2078,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     stopListeningTurnOnly,
   ]);
 
-  // Unified 60fps loop: Real VAD + Barge-In + Sculptural 3D Holographic Quantum Orb + 36-Bar Mirrored Spectrum
+  // Unified 60fps loop: Real VAD + Barge-In + Clean ChatGPT Luminous Fluid Orb
   useEffect(() => {
     if (!isOpen) return;
     const orbCanvas = orbCanvasRef.current;
@@ -2113,18 +2094,6 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     let t = 0;
     const timeBuf = new Uint8Array(256);
     const freqBuf = new Uint8Array(128);
-    const barCount = 36;
-    const smoothBars = new Float32Array(barCount);
-
-    // Orbiting quantum dust constellation
-    const stars: StarParticle[] = Array.from({ length: 36 }, (_, idx) => ({
-      angle: (idx / 36) * Math.PI * 2 + (idx % 3) * 0.25,
-      radius: 96 + (idx % 6) * 12,
-      speed: (idx % 2 === 0 ? 1 : -1) * (0.0026 + (idx % 4) * 0.0011),
-      size: 0.85 + (idx % 3) * 0.55,
-      alpha: 0.24 + (idx % 4) * 0.15,
-      drift: idx * 0.68,
-    }));
 
     const tick = () => {
       const nowMs = Date.now();
@@ -2160,19 +2129,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           if (!recognitionRef.current) {
             startSingleTurnRecognition();
           }
-          if (nowMs - lastRippleAtRef.current > 290) {
-            lastRippleAtRef.current = nowMs;
-            ripplesRef.current.push({ radius: 78, alpha: 0.78 });
-          }
         } else if (vadRes.action === 'speaking') {
           if (!turnHadRealSpeechRef.current && vadRes.nextState.speechConfirmed) {
             turnHadRealSpeechRef.current = true;
           }
           setIsUserVoicing(vadRes.nextState.isVoiceActive);
-          if (vadRes.nextState.isVoiceActive && nowMs - lastRippleAtRef.current > 420) {
-            lastRippleAtRef.current = nowMs;
-            ripplesRef.current.push({ radius: 78, alpha: 0.56 });
-          }
         } else if (vadRes.action === 'commit') {
           setIsUserVoicing(false);
           void commitActiveUtteranceRef.current(false);
@@ -2205,8 +2166,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         }
       }
 
-      // 2. Compute real acoustic spectrum energy for visuals
-      let targetEnergy = 0.09;
+      // 2. Compute smooth vocal energy for ChatGPT luminous cloud orb
+      let targetEnergy = 0.08;
       const activeAnalyser =
         state === 'speaking'
           ? playbackAnalyserRef.current
@@ -2221,28 +2182,28 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         for (let i = 0; i < bins; i += 1) {
           sum += freqBuf[i]!;
         }
-        targetEnergy = Math.min(1, (sum / (bins * 255)) * 2.8);
+        targetEnergy = Math.min(1, (sum / (bins * 255)) * 2.7);
         if (state === 'listening') {
-          targetEnergy = Math.max(targetEnergy, micLevelRef.current * 0.96);
+          targetEnergy = Math.max(targetEnergy, micLevelRef.current * 0.94);
         }
       } else if (state === 'thinking') {
-        targetEnergy = 0.3 + 0.14 * Math.sin(t * 2.8);
+        targetEnergy = 0.24 + 0.1 * Math.sin(t * 2.4);
       } else if (state === 'connecting' || state === 'reconnecting') {
-        targetEnergy = 0.2 + 0.08 * Math.sin(t * 2.1);
+        targetEnergy = 0.16 + 0.06 * Math.sin(t * 1.9);
       } else if (state === 'disconnected') {
-        targetEnergy = 0.03;
+        targetEnergy = 0.02;
       }
 
-      if (state === 'speaking' && targetEnergy < 0.18) {
-        targetEnergy = 0.32 + 0.2 * Math.abs(Math.sin(t * 4.0)) + 0.12 * Math.cos(t * 6.5);
+      if (state === 'speaking' && targetEnergy < 0.16) {
+        targetEnergy = 0.28 + 0.18 * Math.abs(Math.sin(t * 3.6)) + 0.1 * Math.cos(t * 5.8);
       }
 
-      energyRef.current += (targetEnergy - energyRef.current) * 0.21;
+      energyRef.current += (targetEnergy - energyRef.current) * 0.18;
       const e = energyRef.current;
 
-      // 3. Render Sculptural 3D Holographic Quantum Core + Gyroscopic Equatorial Rings + Ripples
+      // 3. Render smooth ChatGPT-style Sky & Pearl Fluid Sphere
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const orbSize = 320;
+      const orbSize = 260;
       if (orbCanvas.width !== orbSize * dpr || orbCanvas.height !== orbSize * dpr) {
         orbCanvas.width = orbSize * dpr;
         orbCanvas.height = orbSize * dpr;
@@ -2254,461 +2215,123 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
       const cx = orbSize / 2;
       const cy = orbSize / 2;
+      const breath = Math.sin(t * 1.35) * 2.2;
       const baseRadius =
         state === 'disconnected'
           ? 70
           : state === 'speaking'
-            ? 81 + e * 18
+            ? 84 + e * 14 + breath
             : state === 'listening'
-              ? 78 + e * 16
-              : 75 + e * 9;
+              ? 82 + e * 12 + breath
+              : 78 + e * 7 + breath;
 
-      const palette =
-        state === 'speaking'
-          ? {
-              hueA: 264,
-              hueB: 316,
-              hueC: 196,
-              glow: 'rgba(168, 85, 247,',
-              halo: 'rgba(236, 72, 153,',
-              accent: 'rgba(56, 189, 248,',
-              star: 'rgba(233, 213, 255,',
-            }
-          : state === 'listening'
-            ? {
-                hueA: 174,
-                hueB: 154,
-                hueC: 198,
-                glow: 'rgba(16, 185, 129,',
-                halo: 'rgba(34, 211, 238,',
-                accent: 'rgba(52, 211, 153,',
-                star: 'rgba(167, 243, 208,',
-              }
-            : state === 'thinking'
-              ? {
-                  hueA: 234,
-                  hueB: 266,
-                  hueC: 42,
-                  glow: 'rgba(99, 102, 241,',
-                  halo: 'rgba(168, 85, 247,',
-                  accent: 'rgba(250, 204, 21,',
-                  star: 'rgba(199, 210, 254,',
-                }
-              : state === 'reconnecting'
-                ? {
-                    hueA: 36,
-                    hueB: 48,
-                    hueC: 22,
-                    glow: 'rgba(245, 158, 11,',
-                    halo: 'rgba(251, 191, 36,',
-                    accent: 'rgba(253, 224, 71,',
-                    star: 'rgba(253, 230, 138,',
-                  }
-                : state === 'disconnected'
-                  ? {
-                      hueA: 215,
-                      hueB: 220,
-                      hueC: 210,
-                      glow: 'rgba(100, 116, 139,',
-                      halo: 'rgba(71, 85, 105,',
-                      accent: 'rgba(148, 163, 184,',
-                      star: 'rgba(148, 163, 184,',
-                    }
-                  : {
-                      hueA: 202,
-                      hueB: 226,
-                      hueC: 188,
-                      glow: 'rgba(56, 189, 248,',
-                      halo: 'rgba(99, 102, 241,',
-                      accent: 'rgba(125, 211, 252,',
-                      star: 'rgba(191, 219, 254,',
-                    };
-
-      // 3a. Orbiting Quantum Dust Constellation
-      if (!reducedMotion && state !== 'disconnected') {
-        const starBoost = state === 'speaking' ? 2.2 : state === 'listening' ? 1.45 + e * 2.3 : 1.05;
-        for (const s of stars) {
-          s.angle += s.speed * starBoost;
-          const radialPulse =
-            s.radius + Math.sin(t * 1.5 + s.drift) * 6 + e * (state === 'speaking' ? 15 : -5);
-          const sx = cx + Math.cos(s.angle) * radialPulse;
-          const sy = cy + Math.sin(s.angle) * radialPulse;
-          const twinkle = s.alpha * (0.6 + 0.4 * Math.sin(t * 2.7 + s.drift));
-          orbCtx.fillStyle = `${palette.star} ${twinkle})`;
-          orbCtx.beginPath();
-          orbCtx.arc(sx, sy, s.size, 0, Math.PI * 2);
-          orbCtx.fill();
-        }
-      }
-
-      // 3b. Expanding Voice-Reactive Shockwave Ripples
-      if (ripplesRef.current.length > 0) {
-        const nextRipples: AcousticRipple[] = [];
-        for (const rip of ripplesRef.current) {
-          rip.radius += 1.55;
-          rip.alpha *= 0.96;
-          if (rip.alpha > 0.03 && rip.radius < orbSize * 0.49) {
-            orbCtx.beginPath();
-            orbCtx.arc(cx, cy, rip.radius, 0, Math.PI * 2);
-            orbCtx.strokeStyle = `${palette.accent} ${rip.alpha})`;
-            orbCtx.lineWidth = 1.6;
-            orbCtx.stroke();
-            nextRipples.push(rip);
-          }
-        }
-        ripplesRef.current = nextRipples;
-      }
-
-      // 3c. Deep Volumetric Outer Corona Bloom
-      const haloGrad = orbCtx.createRadialGradient(
+      // Soft ambient outer bloom
+      const outerHalo = orbCtx.createRadialGradient(
         cx,
         cy,
-        baseRadius * 0.32,
+        baseRadius * 0.45,
         cx,
         cy,
-        baseRadius * 1.88
+        baseRadius * 1.48
       );
-      haloGrad.addColorStop(
+      outerHalo.addColorStop(
         0,
-        `${palette.glow} ${state === 'disconnected' ? 0.14 : 0.42 + e * 0.34})`
+        state === 'disconnected'
+          ? 'rgba(148, 163, 184, 0.12)'
+          : `rgba(96, 165, 250, ${0.22 + e * 0.22})`
       );
-      haloGrad.addColorStop(
-        0.5,
-        `${palette.halo} ${state === 'disconnected' ? 0.04 : 0.18 + e * 0.14})`
-      );
-      haloGrad.addColorStop(1, 'rgba(2, 5, 14, 0)');
-      orbCtx.fillStyle = haloGrad;
+      outerHalo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      orbCtx.fillStyle = outerHalo;
       orbCtx.beginPath();
-      orbCtx.arc(cx, cy, baseRadius * 1.88, 0, Math.PI * 2);
+      orbCtx.arc(cx, cy, baseRadius * 1.48, 0, Math.PI * 2);
       orbCtx.fill();
 
-      // 3d. 3D Tilted Gyroscopic Equatorial Rings & Photon Nodes (Signature SMFTA Architectural Halo)
-      if (state !== 'disconnected') {
-        const gyroCount = state === 'speaking' ? 3 : 2;
-        for (let g = 0; g < gyroCount; g += 1) {
-          const tiltAngle =
-            t * (g % 2 === 0 ? 0.55 : -0.44) + g * (Math.PI / gyroCount) + e * 0.35;
-          const rx = baseRadius * (1.22 + g * 0.09 + e * 0.14);
-          const ry = baseRadius * (0.38 + g * 0.08 + Math.sin(t * 0.9 + g) * 0.06);
-
-          orbCtx.save();
-          orbCtx.translate(cx, cy);
-          orbCtx.rotate(tiltAngle);
-
-          // Glowing elliptical orbit track
-          orbCtx.beginPath();
-          orbCtx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-          orbCtx.strokeStyle =
-            g === 0
-              ? `${palette.accent} ${0.26 + e * 0.34})`
-              : `${palette.glow} ${0.2 + e * 0.28})`;
-          orbCtx.lineWidth = g === 0 ? 1.4 : 1.1;
-          orbCtx.stroke();
-
-          // Orbiting photon node traveling along the 3D ellipse
-          const photonTheta = t * (1.8 + g * 0.55) * (g % 2 === 0 ? 1 : -1);
-          const px = Math.cos(photonTheta) * rx;
-          const py = Math.sin(photonTheta) * ry;
-          const nodeGrad = orbCtx.createRadialGradient(px, py, 0.5, px, py, 7 + e * 4);
-          nodeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
-          nodeGrad.addColorStop(0.45, `${palette.accent} 0.7)`);
-          nodeGrad.addColorStop(1, `${palette.glow} 0)`);
-          orbCtx.fillStyle = nodeGrad;
-          orbCtx.beginPath();
-          orbCtx.arc(px, py, 7 + e * 4, 0, Math.PI * 2);
-          orbCtx.fill();
-
-          orbCtx.restore();
-        }
-      }
-
-      // 3e. Deep Refractive Obsidian-Crystal Sphere Clip
+      // Clipped fluid sky-pearl sphere
       orbCtx.save();
       orbCtx.beginPath();
       orbCtx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
       orbCtx.clip();
 
-      const coreGrad = orbCtx.createRadialGradient(
-        cx - baseRadius * 0.28,
-        cy - baseRadius * 0.28,
-        4,
-        cx + baseRadius * 0.12,
-        cy + baseRadius * 0.15,
+      const sphereBase = orbCtx.createRadialGradient(
+        cx - baseRadius * 0.25,
+        cy - baseRadius * 0.3,
+        baseRadius * 0.08,
+        cx + baseRadius * 0.15,
+        cy + baseRadius * 0.2,
         baseRadius * 1.15
       );
-      coreGrad.addColorStop(
-        0,
-        state === 'disconnected' ? 'rgba(30, 41, 59, 0.78)' : 'rgba(15, 38, 96, 0.78)'
-      );
-      coreGrad.addColorStop(0.58, 'rgba(5, 12, 34, 0.95)');
-      coreGrad.addColorStop(1, 'rgba(2, 5, 18, 0.99)');
-      orbCtx.fillStyle = coreGrad;
+      if (state === 'disconnected') {
+        sphereBase.addColorStop(0, 'rgba(203, 213, 225, 0.55)');
+        sphereBase.addColorStop(0.65, 'rgba(71, 85, 105, 0.85)');
+        sphereBase.addColorStop(1, 'rgba(30, 41, 59, 0.96)');
+      } else {
+        sphereBase.addColorStop(0, '#f8fafc');
+        sphereBase.addColorStop(0.38, '#7dd3fc');
+        sphereBase.addColorStop(0.76, '#3b82f6');
+        sphereBase.addColorStop(1, '#1d4ed8');
+      }
+      orbCtx.fillStyle = sphereBase;
       orbCtx.fillRect(cx - baseRadius, cy - baseRadius, baseRadius * 2, baseRadius * 2);
 
-      // 3f. Internal Bioluminescent Vocal Nucleus + 6 Iridescent Aurora Plasma Curtains
-      orbCtx.globalCompositeOperation = 'screen';
-
-      // Inner living vocal nucleus that breathes with real voice energy
-      const nucleusRadius = baseRadius * (0.34 + e * 0.36);
-      const nucleusGrad = orbCtx.createRadialGradient(
-        cx + Math.cos(t * 1.3) * 5,
-        cy + Math.sin(t * 1.1) * 5,
-        2,
-        cx,
-        cy,
-        nucleusRadius * 1.5
-      );
-      nucleusGrad.addColorStop(
-        0,
-        state === 'disconnected'
-          ? 'rgba(148, 163, 184, 0.15)'
-          : `rgba(255, 255, 255, ${0.42 + e * 0.42})`
-      );
-      nucleusGrad.addColorStop(
-        0.42,
-        `${palette.accent} ${state === 'disconnected' ? 0.08 : 0.36 + e * 0.35})`
-      );
-      nucleusGrad.addColorStop(1, `${palette.glow} 0)`);
-      orbCtx.fillStyle = nucleusGrad;
-      orbCtx.beginPath();
-      orbCtx.arc(cx, cy, nucleusRadius * 1.5, 0, Math.PI * 2);
-      orbCtx.fill();
-
-      const ribbonCount = state === 'speaking' ? 6 : 5;
-      const sat = state === 'disconnected' ? 16 : 96;
-      const hues = [
-        palette.hueA,
-        palette.hueB,
-        palette.hueC,
-        palette.hueA + 20,
-        palette.hueB - 16,
-        palette.hueC + 14,
-      ];
-      for (let r = 0; r < ribbonCount; r += 1) {
-        const speedMul =
-          state === 'speaking'
-            ? 1.24
-            : state === 'listening'
-              ? 0.95 + e * 0.48
-              : state === 'thinking'
-                ? 1.5
-                : 0.45;
-        const phase = t * speedMul * (0.66 + r * 0.14) + r * 1.35;
-        const swell = 1 + e * (state === 'speaking' ? 0.38 : 0.26);
-        const hue = hues[r % hues.length]!;
-
-        const fillGrad = orbCtx.createRadialGradient(
-          cx + Math.cos(phase) * baseRadius * 0.44,
-          cy + Math.sin(phase * 0.92) * baseRadius * 0.44,
-          baseRadius * 0.05,
-          cx,
-          cy,
-          baseRadius * 1.06
-        );
-        fillGrad.addColorStop(
-          0,
-          `hsla(${hue}, ${sat}%, 85%, ${state === 'disconnected' ? 0.16 : 0.54 + e * 0.34})`
-        );
-        fillGrad.addColorStop(
-          0.48,
-          `hsla(${hue + 14}, ${sat}%, 58%, ${state === 'disconnected' ? 0.08 : 0.28 + e * 0.28})`
-        );
-        fillGrad.addColorStop(1, `hsla(${hue + 32}, ${sat}%, 50%, 0)`);
-
-        orbCtx.beginPath();
-        const steps = 64;
-        for (let i = 0; i <= steps; i += 1) {
-          const a = (i / steps) * Math.PI * 2;
-          const harmonicAmp =
-            state === 'speaking'
-              ? 14 + e * 27
-              : state === 'listening'
-                ? 9 + e * 19
-                : 6 + e * 9;
-          const wave =
-            Math.sin(a * (state === 'speaking' ? 3 : 2) + phase) * harmonicAmp +
-            Math.cos(a * 4 - phase * 1.2) * (harmonicAmp * 0.48);
-          const rx =
-            baseRadius * (0.82 + 0.11 * Math.sin(phase + r)) * swell + wave * 0.36;
-          const ry =
-            baseRadius * (0.56 + 0.19 * Math.cos(phase * 0.82 + r)) * swell +
-            wave * 0.28;
-          const rot = phase * 0.39 + r * 0.82;
-          const px = Math.cos(a) * rx;
-          const py = Math.sin(a) * ry;
-          const x = cx + px * Math.cos(rot) - py * Math.sin(rot);
-          const y = cy + px * Math.sin(rot) + py * Math.cos(rot);
-          if (i === 0) orbCtx.moveTo(x, y);
-          else orbCtx.lineTo(x, y);
+      // Gentle internal fluid clouds (ChatGPT sky swirl)
+      if (state !== 'disconnected') {
+        orbCtx.globalCompositeOperation = 'screen';
+        for (let i = 0; i < 3; i += 1) {
+          const driftSpeed = state === 'speaking' ? 1.1 : state === 'thinking' ? 1.35 : 0.65;
+          const a = t * driftSpeed * (0.7 + i * 0.22) + i * 2.1;
+          const bx = cx + Math.cos(a) * baseRadius * (0.28 + e * 0.14);
+          const by = cy + Math.sin(a * 0.88) * baseRadius * (0.26 + e * 0.14);
+          const cloud = orbCtx.createRadialGradient(
+            bx,
+            by,
+            baseRadius * 0.04,
+            bx,
+            by,
+            baseRadius * 0.78
+          );
+          cloud.addColorStop(
+            0,
+            i === 0
+              ? `rgba(255, 255, 255, ${0.52 + e * 0.28})`
+              : `rgba(186, 230, 253, ${0.38 + e * 0.24})`
+          );
+          cloud.addColorStop(1, 'rgba(59, 130, 246, 0)');
+          orbCtx.fillStyle = cloud;
+          orbCtx.beginPath();
+          orbCtx.arc(bx, by, baseRadius * 0.78, 0, Math.PI * 2);
+          orbCtx.fill();
         }
-        orbCtx.closePath();
-        orbCtx.fillStyle = fillGrad;
-        orbCtx.fill();
-
-        orbCtx.strokeStyle = `hsla(${hue - 6}, ${sat}%, 86%, ${state === 'disconnected' ? 0.08 : 0.2 + e * 0.32})`;
-        orbCtx.lineWidth = 1.35 + e * 1.6;
-        orbCtx.stroke();
       }
 
-      // 3g. Dual Optical Glass Specular Lens Sheen + Fresnel Rim
-      const glassHighlight = orbCtx.createRadialGradient(
-        cx - baseRadius * 0.36,
-        cy - baseRadius * 0.38,
-        2,
-        cx - baseRadius * 0.28,
-        cy - baseRadius * 0.3,
-        baseRadius * 0.58
-      );
-      glassHighlight.addColorStop(0, 'rgba(255, 255, 255, 0.42)');
-      glassHighlight.addColorStop(0.45, 'rgba(224, 242, 254, 0.12)');
-      glassHighlight.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      orbCtx.fillStyle = glassHighlight;
-      orbCtx.beginPath();
-      orbCtx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-      orbCtx.fill();
-
-      const innerRim = orbCtx.createRadialGradient(
-        cx - baseRadius * 0.12,
-        cy - baseRadius * 0.12,
-        baseRadius * 0.65,
+      // Soft bottom crescent shadow for natural sphere depth
+      orbCtx.globalCompositeOperation = 'source-over';
+      const rim = orbCtx.createRadialGradient(
+        cx - baseRadius * 0.18,
+        cy - baseRadius * 0.22,
+        baseRadius * 0.55,
         cx,
         cy,
         baseRadius
       );
-      innerRim.addColorStop(0, 'rgba(56, 189, 248, 0)');
-      innerRim.addColorStop(0.74, `${palette.glow} ${0.16 + e * 0.24})`);
-      innerRim.addColorStop(
-        0.95,
-        state === 'disconnected'
-          ? 'rgba(148, 163, 184, 0.22)'
-          : `rgba(224, 248, 255, ${0.62 + e * 0.32})`
-      );
-      innerRim.addColorStop(1, 'rgba(186, 230, 253, 0.2)');
-      orbCtx.fillStyle = innerRim;
+      rim.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      rim.addColorStop(1, 'rgba(255, 255, 255, 0.28)');
+      orbCtx.fillStyle = rim;
       orbCtx.beginPath();
       orbCtx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
       orbCtx.fill();
+
       orbCtx.restore();
-
-      // 3h. Iridescent Chromatic Sphere Edge
-      orbCtx.globalCompositeOperation = 'screen';
-      const rimGrad = orbCtx.createLinearGradient(
-        cx - baseRadius,
-        cy - baseRadius,
-        cx + baseRadius,
-        cy + baseRadius
-      );
-      rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
-      rimGrad.addColorStop(0.45, `${palette.accent} 0.28)`);
-      rimGrad.addColorStop(0.84, `${palette.halo} ${state === 'disconnected' ? 0.18 : 0.78})`);
-      rimGrad.addColorStop(1, 'rgba(244, 114, 182, 0.42)');
-      orbCtx.beginPath();
-      orbCtx.arc(cx, cy, baseRadius, 0, Math.PI * 2);
-      orbCtx.strokeStyle = rimGrad;
-      orbCtx.lineWidth = 1.6 + e * 1.3;
-      orbCtx.stroke();
       orbCtx.restore();
-
-      // 4. Render Symmetrical 36-Bar Mirrored Harmonic Spectrum below the Orb
-      const waveCanvas = waveCanvasRef.current;
-      if (waveCanvas) {
-        const wCtx = waveCanvas.getContext('2d');
-        if (wCtx) {
-          const wWidth = 264;
-          const wHeight = 42;
-          if (waveCanvas.width !== wWidth * dpr || waveCanvas.height !== wHeight * dpr) {
-            waveCanvas.width = wWidth * dpr;
-            waveCanvas.height = wHeight * dpr;
-          }
-          wCtx.save();
-          wCtx.scale(dpr, dpr);
-          wCtx.clearRect(0, 0, wWidth, wHeight);
-
-          const gap = wWidth / barCount;
-          const barW = 2.8;
-          const midY = wHeight / 2;
-          const half = (barCount - 1) / 2;
-
-          for (let i = 0; i < barCount; i += 1) {
-            const symDist = Math.abs(i - half) / half;
-            const envelope = 0.22 + 0.78 * Math.pow(1 - symDist, 1.35);
-
-            let rawBar = 0.08;
-            if (state === 'speaking') {
-              const binIdx = Math.min(freqBuf.length - 1, Math.floor((1 - symDist) * 32) + 2);
-              const specVal = activeAnalyser ? (freqBuf[binIdx]! / 255) * 1.25 : 0;
-              const vocalHarmonic =
-                0.22 +
-                0.38 * Math.abs(Math.sin(t * 4.5 - symDist * 4.8)) +
-                0.18 * Math.abs(Math.cos(t * 6.8 + i * 0.4));
-              rawBar = Math.max(specVal, vocalHarmonic * (0.65 + e * 0.55));
-            } else if (state === 'listening' && !cur.isMuted) {
-              const binIdx = Math.min(freqBuf.length - 1, Math.floor((1 - symDist) * 34) + 1);
-              const specVal = activeAnalyser ? (freqBuf[binIdx]! / 255) * 1.28 : 0;
-              const idleBreath = 0.11 + 0.08 * (0.5 + 0.5 * Math.sin(t * 2.4 - symDist * 3.2));
-              rawBar = Math.max(
-                idleBreath,
-                specVal,
-                micLevelRef.current * (0.58 + 0.42 * Math.sin(t * 5.2 + i * 0.45))
-              );
-            } else if (state === 'thinking') {
-              rawBar = 0.16 + 0.25 * (0.5 + 0.5 * Math.sin(t * 3.8 - i * 0.36));
-            } else if (state === 'connecting' || state === 'reconnecting') {
-              rawBar = 0.12 + 0.16 * (0.5 + 0.5 * Math.sin(t * 2.2 - i * 0.32));
-            } else {
-              rawBar = 0.06;
-            }
-
-            const targetH = Math.max(3.2, Math.min(wHeight - 4, (3.6 + rawBar * 34) * envelope));
-            smoothBars[i] = smoothBars[i]! + (targetH - smoothBars[i]!) * 0.28;
-
-            const h = smoothBars[i]!;
-            const x = i * gap + (gap - barW) / 2;
-            const y = midY - h / 2;
-
-            const barGrad = wCtx.createLinearGradient(x, y, x, y + h);
-            if (state === 'speaking') {
-              barGrad.addColorStop(0, `rgba(244, 114, 182, ${0.48 + envelope * 0.5})`);
-              barGrad.addColorStop(0.5, `rgba(192, 132, 252, ${0.58 + envelope * 0.42})`);
-              barGrad.addColorStop(1, `rgba(56, 189, 248, ${0.46 + envelope * 0.48})`);
-            } else if (state === 'listening') {
-              if (cur.isMuted) {
-                barGrad.addColorStop(0, 'rgba(148, 163, 184, 0.25)');
-                barGrad.addColorStop(1, 'rgba(100, 116, 139, 0.25)');
-              } else {
-                barGrad.addColorStop(0, `rgba(103, 232, 249, ${0.42 + envelope * 0.56})`);
-                barGrad.addColorStop(0.5, `rgba(52, 211, 153, ${0.54 + envelope * 0.46})`);
-                barGrad.addColorStop(1, `rgba(16, 185, 129, ${0.38 + envelope * 0.52})`);
-              }
-            } else if (state === 'reconnecting') {
-              barGrad.addColorStop(0, `rgba(253, 224, 71, ${0.4 + envelope * 0.45})`);
-              barGrad.addColorStop(1, `rgba(245, 158, 11, ${0.4 + envelope * 0.45})`);
-            } else if (state === 'disconnected') {
-              barGrad.addColorStop(0, 'rgba(100, 116, 139, 0.28)');
-              barGrad.addColorStop(1, 'rgba(71, 85, 105, 0.28)');
-            } else {
-              barGrad.addColorStop(0, `rgba(165, 180, 252, ${0.42 + envelope * 0.5})`);
-              barGrad.addColorStop(1, `rgba(56, 189, 248, ${0.42 + envelope * 0.5})`);
-            }
-
-            wCtx.fillStyle = barGrad;
-            wCtx.beginPath();
-            wCtx.roundRect(x, y, barW, h, 999);
-            wCtx.fill();
-          }
-          wCtx.restore();
-        }
-      }
 
       if (!reducedMotion) {
         t +=
           state === 'speaking'
-            ? 0.045
+            ? 0.036
             : state === 'listening'
-              ? 0.037
+              ? 0.028
               : state === 'thinking'
-                ? 0.035
-                : 0.022;
+                ? 0.032
+                : 0.018;
         rafId = window.requestAnimationFrame(tick);
       }
     };
@@ -2798,13 +2421,6 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
   if (!isOpen) return null;
 
-  const formattedTime =
-    String(Math.floor(seconds / 60)).padStart(2, '0') +
-    ':' +
-    String(seconds % 60).padStart(2, '0');
-
-  const isBackupVoiceActive =
-    activeVoiceModel === 'neural-voice-hd' || activeVoiceModel === 'browser';
   const micOffOrMissing = isMuted || isDisconnected || !micStreamLive;
 
   const activeCopy = STATE_COPY[voiceState];
@@ -2815,64 +2431,25 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         : 'Thinking...'
       : voiceState === 'disconnected' || (voiceState === 'listening' && micOffOrMissing)
         ? voiceLang === 'bn-BD'
-          ? 'মাইক চালু নেই'
+          ? 'মাইক বন্ধ'
           : isMuted
             ? 'Microphone muted'
             : 'Microphone off'
         : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
           ? voiceLang === 'bn-BD'
             ? 'শুনছি…'
-            : 'Hearing you...'
+            : 'Listening...'
           : voiceState === 'listening'
             ? voiceLang === 'bn-BD'
-              ? 'শুনছি…'
+              ? 'শুনছি'
               : activeCopy.headline
             : voiceState === 'speaking'
               ? voiceLang === 'bn-BD'
-                ? 'কথা বলছি…'
+                ? 'কথা বলছি'
                 : activeCopy.headline
               : voiceState === 'connecting' && voiceLang === 'bn-BD'
-                ? 'ভয়েস সংযোগ হচ্ছে…'
+                ? 'সংযোগ হচ্ছে…'
                 : activeCopy.headline;
-
-  const effectiveHint =
-    voiceState === 'thinking'
-      ? voiceLang === 'bn-BD'
-        ? 'আপনার উত্তর তৈরি হচ্ছে'
-        : 'Crafting your reply'
-      : voiceState === 'disconnected' || (voiceState === 'listening' && micOffOrMissing)
-        ? voiceLang === 'bn-BD'
-          ? 'মাইক অনুমতি দিন বা নিচের মাইক বাটনে ট্যাপ করুন'
-          : 'Tap mic or reconnect below to talk'
-        : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
-          ? voiceLang === 'bn-BD'
-            ? 'কথা শেষ হলে একটু থামুন অথবা Send চাপুন'
-            : 'Pause briefly or tap send to reply'
-          : voiceState === 'speaking' && voiceLang === 'bn-BD'
-            ? 'মাঝে কথা বলে বা ট্যাপ করে থামাতে পারেন'
-            : voiceLang === 'bn-BD' && voiceState === 'listening'
-              ? 'বাংলা বা ইংরেজিতে স্বাভাবিকভাবে কথা বলুন'
-              : activeCopy.hint;
-
-  const hasCapturedSpeechToSend =
-    voiceState === 'listening' &&
-    !isMuted &&
-    (isUserVoicing ||
-      Boolean(liveCaption.trim()) ||
-      hasRecordedAudio ||
-      attachedImgs.length > 0 ||
-      attachedFiles.length > 0);
-
-  const quickStarters =
-    voiceLang === 'bn-BD'
-      ? [
-          'আজকের ফোকাস টিপস দাও',
-          'মজার একটি বিজ্ঞানের তথ্য বলো',
-        ]
-      : [
-          '3 focus tips for today',
-          'Tell me a short story',
-        ];
 
   const handleTimelineScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -2880,60 +2457,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     userScrolledUpRef.current = distanceFromBottom > 56;
   };
 
-  const handleCycleSpeechRate = () => {
-    ensureAudioContext();
-    setSpeechRate((prev) => {
-      const idx = VOICE_RATE_STEPS.indexOf(prev);
-      return VOICE_RATE_STEPS[(idx + 1) % VOICE_RATE_STEPS.length]!;
-    });
-  };
-
-  const handleReplayAiSpeech = (customText?: string) => {
-    const source = (customText || fullAiSourceText).trim();
-    if (!source || isGenerating || isOffline) return;
-    ensureAudioContext();
-    ttsFailedTurnRef.current = null;
-    stopListeningTurnOnly();
-    stopAiSpeechPlayback();
-    setStatusNotice(null);
-    const { chunks } = extractReadySpeechChunks(source, 0, true);
-    if (chunks.length === 0) return;
-    ttsAbortRef.current = new AbortController();
-    pendingChunksRef.current = chunks;
-    void drainSpeechPipeline(`replay-${Date.now()}`);
-  };
-
-  const handleQuickPrompt = (promptText: string) => {
-    const verdict = shouldSubmitVoiceUtterance({
-      rawText: promptText,
-      hadRealSpeechEnergy: true,
-      lastSubmitted: lastSubmittedRef.current,
-      nowMs: Date.now(),
-    });
-    if (!verdict.accept) return;
-    const nowTs = Date.now();
-    ensureAudioContext();
-    stopListeningTurnOnly();
-    stopAiSpeechPlayback();
-    lastSubmittedRef.current = { text: verdict.cleanText, at: nowTs };
-    setSessionUserText(verdict.cleanText);
-    userScrolledUpRef.current = false;
-    setPendingSharedTurn({
-      id: `turn-${nowTs}`,
-      text: verdict.cleanText,
-      ts: nowTs,
-      imgs: [],
-    });
-    setStatusNotice(null);
-    onSendText(verdict.cleanText);
-  };
-
   const handleSelectVoicePersona = (nextVoice: GeminiFemaleVoiceName) => {
     ensureAudioContext();
     setSelectedVoice(nextVoice);
     stateRef.current.selectedVoice = nextVoice;
     onChangePreferredVoice?.(nextVoice);
-    // Speak a brief natural voice sample in the chosen persona whenever not actively generating
     if (
       !isGenerating &&
       !isTranscribingTurn &&
@@ -2954,71 +2482,12 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     }
   };
 
-  const handleToggleMute = () => {
-    ensureAudioContext();
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    if (persistentStreamRef.current) {
-      persistentStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = !nextMuted;
-      });
-    }
-    if (nextMuted) {
-      stopTurnRecognition();
-      setIsUserVoicing(false);
-    } else if (
-      voiceState === 'listening' &&
-      !isGenerating &&
-      !isAiSpeaking &&
-      !isDisconnected
-    ) {
-      startListeningTurn();
-    }
-  };
-
-  const handleToggleVoiceLang = () => {
-    ensureAudioContext();
-    const nextLang: 'bn-BD' | 'en-US' = voiceLang === 'bn-BD' ? 'en-US' : 'bn-BD';
-    setVoiceLang(nextLang);
-    stateRef.current.voiceLang = nextLang;
-    if (
-      voiceState === 'listening' &&
-      !isMuted &&
-      !isGenerating &&
-      !isAiSpeaking &&
-      !isDisconnected
-    ) {
-      stopTurnRecognition();
-      startSingleTurnRecognition(nextLang);
-    }
-  };
-
-  const handlePrimaryOrbAction = () => {
+  // Screen/orb taps must NEVER interrupt AI speech or force microphone listening.
+  // Only restore connection if currently disconnected; otherwise passively keep AudioContext alive.
+  const handlePassiveOrbTap = () => {
     ensureAudioContext();
     if (voiceState === 'disconnected') {
       void establishVoiceConnection(false);
-      return;
-    }
-    if (voiceState === 'speaking' || isSynthesizingVoice) {
-      handleInterruptAndListen();
-      return;
-    }
-    if (voiceState === 'listening') {
-      if (isMuted) {
-        handleToggleMute();
-        return;
-      }
-      if (
-        turnHadRealSpeechRef.current ||
-        recognitionLiveTextRef.current.trim() ||
-        turnChunksRef.current.length >= 2 ||
-        attachedImgs.length > 0 ||
-        attachedFiles.length > 0
-      ) {
-        void commitActiveUtterance(true);
-      } else {
-        startSingleTurnRecognition();
-      }
     }
   };
 
@@ -3105,67 +2574,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               },
             ];
           });
-          setStatusNotice(
-            voiceLang === 'bn-BD'
-              ? `ছবি যুক্ত হয়েছে (${f.name}) — ভয়েস সেশন চালু আছে, মুখে বলুন বা বিশ্লেষণ করুন চাপুন।`
-              : `Image shared (${f.name}) — voice session active, speak or tap Analyze.`
-          );
-          // Ensure ongoing voice session remains active when file picker closes
-          if (
-            stateRef.current.isOpen &&
-            !stateRef.current.isDisconnected &&
-            !stateRef.current.isOffline &&
-            !stateRef.current.isGenerating &&
-            !stateRef.current.isAiSpeaking &&
-            !stateRef.current.isSessionListening
-          ) {
-            startListeningTurn();
-          }
+          setStatusNotice(null);
         }
       } catch {
         setStatusNotice('ছবিটি পড়া যায়নি, অন্য ছবি চেষ্টা করুন।');
-      }
-    }
-  };
-
-  const handlePickVoiceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
-
-    for (const f of files.slice(0, 2)) {
-      if (
-        /^image\//i.test(f.type) ||
-        /\.(png|jpe?g|webp|gif|bmp)$/i.test(f.name)
-      ) {
-        // Route image picked via file picker to image handler
-        const dt = {
-          target: { files: [f], value: '' },
-        } as unknown as React.ChangeEvent<HTMLInputElement>;
-        await handlePickVoiceImage(dt);
-        continue;
-      }
-      if (/\.(exe|dll|so|dylib|bin|iso|dmg|apk|mp4|mkv|avi|mov)$/i.test(f.name)) {
-        setStatusNotice('এই ফাইল ফরম্যাটটি সমর্থিত নয়। টেক্সট, কোড, PDF, CSV বা JSON ফাইল দিন।');
-        continue;
-      }
-      try {
-        const doc = await readDocumentFile(f);
-        setAttachedFiles((prev) => [
-          ...prev.slice(-2),
-          {
-            name: doc.name,
-            content: doc.content,
-            summary: doc.summary,
-          },
-        ]);
-        setStatusNotice(
-          voiceLang === 'bn-BD'
-            ? `ফাইল যুক্ত হয়েছে (${doc.name}) — এখন মুখে প্রশ্ন করুন বা সেন্ড করুন।`
-            : `Attached file (${doc.name}) — ask your question now.`
-        );
-      } catch {
-        setStatusNotice('এই ফাইলটি পড়া যায়নি। অনুগ্রহ করে সমর্থিত টেক্সট বা ডকুমেন্ট ফাইল দিন।');
       }
     }
   };
@@ -3182,8 +2594,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       spokenOrTyped ||
       (hasAttachments
         ? voiceLang === 'bn-BD'
-          ? 'এই ছবি বা ফাইলটি বিশ্লেষণ করে বিস্তারিত বলো।'
-          : 'Please analyze the shared image in detail.'
+          ? 'এই ছবিটি দেখে সংক্ষেপে বলো কী আছে।'
+          : 'Briefly describe what is in this image.'
         : '');
     const verdict = shouldSubmitVoiceUtterance({
       rawText: rawPrompt,
@@ -3251,25 +2663,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
     onEndCall();
   };
 
-  const stateDotColor =
-    voiceState === 'listening'
-      ? isMuted
-        ? 'bg-slate-400'
-        : isUserVoicing
-          ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]'
-          : 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]'
-      : voiceState === 'speaking'
-        ? 'bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.9)]'
-        : voiceState === 'thinking'
-          ? 'bg-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.85)]'
-          : voiceState === 'reconnecting'
-            ? 'bg-amber-400'
-            : voiceState === 'disconnected'
-              ? 'bg-rose-400'
-              : 'bg-sky-400';
-
-  const hasVisualConversationContent =
-    unifiedTimeline.length > 0 || liveConversationImages.length > 0;
+  const featuredImage = liveConversationImages[0] || null;
+  const secondaryImages = liveConversationImages.slice(1, 3);
 
   return (
     <div
@@ -3281,84 +2676,17 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       aria-label="SMFTA Live Voice Conversation"
       className={`live-voice-overlay live-voice-state-${voiceState} fixed inset-0 z-[70] h-[100dvh] w-full text-white flex flex-col justify-between select-none overflow-hidden`}
     >
-      {/* Ambient Obsidian Horizon Glow */}
-      <div className="live-voice-aurora-horizon pointer-events-none" aria-hidden="true" />
+      {/* Clean ChatGPT-style Top Header: Quiet State Label + Voice Picker + Close */}
+      <header className="relative z-10 w-full max-w-2xl mx-auto flex items-center justify-between gap-3 px-4 sm:px-6 pt-[max(1rem,env(safe-area-inset-top))] pb-2 shrink-0">
+        <span
+          data-testid="live-voice-status-label"
+          className="text-[13px] font-medium text-white/75 tracking-tight whitespace-nowrap"
+        >
+          {effectiveHeadline}
+        </span>
 
-      {/* Top Uncluttered Bar: Minimal Live Status & Timer + Quiet Controls */}
-      <header className="relative z-10 w-full max-w-4xl mx-auto flex items-center justify-between gap-2 px-4 sm:px-7 pt-[max(0.85rem,env(safe-area-inset-top))] pb-1.5 shrink-0">
-        <div className="inline-flex items-center gap-2 min-w-0 shrink-0">
-          <span
-            className={`w-2 h-2 rounded-full shrink-0 transition-colors ${stateDotColor}`}
-            aria-hidden="true"
-          />
-          <span
-            data-testid="live-voice-status-label"
-            className="text-[13px] font-medium tracking-tight text-white/90 whitespace-nowrap"
-          >
-            {voiceState === 'thinking'
-              ? voiceLang === 'bn-BD'
-                ? 'ভাবছি…'
-                : 'Thinking'
-              : micOffOrMissing && (voiceState === 'listening' || voiceState === 'disconnected')
-                ? voiceLang === 'bn-BD'
-                  ? 'মাইক বন্ধ'
-                  : 'Mic off'
-                : voiceState === 'speaking' && voiceLang === 'bn-BD'
-                  ? 'কথা বলছি'
-                  : voiceState === 'listening' && voiceLang === 'bn-BD'
-                    ? 'শুনছি'
-                    : activeCopy.label}
-          </span>
-          <span className="text-white/25 text-[12px]" aria-hidden="true">
-            ·
-          </span>
-          <span className="font-mono text-[12px] tabular-nums text-slate-300/75 shrink-0">
-            {formattedTime}
-          </span>
-          {isBackupVoiceActive && (
-            <span
-              data-testid="live-voice-backup-badge"
-              className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-300/30 text-[10.5px] font-medium text-amber-200 whitespace-nowrap"
-            >
-              ব্যাকআপ ভয়েস চলছে
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {onToggleRealtimeMode && (
-            <button
-              type="button"
-              data-testid="live-voice-realtime-toggle"
-              aria-pressed={realtimeMode}
-              onClick={() => onToggleRealtimeMode(!realtimeMode)}
-              title={
-                realtimeMode
-                  ? 'Low-Latency Live Audio ON (gemini-3.8-live)'
-                  : 'Standard Fast Voice Mode'
-              }
-              className={`live-voice-control h-9 sm:h-10 px-2.5 sm:px-3 rounded-full text-[11.5px] font-medium transition-colors cursor-pointer shrink-0 whitespace-nowrap border ${
-                realtimeMode
-                  ? 'bg-emerald-400/20 border-emerald-300/45 text-emerald-200'
-                  : 'live-voice-ghost-btn border-transparent text-slate-300 hover:text-white'
-              }`}
-            >
-              {realtimeMode ? 'Live 3.8 ⚡' : 'Live'}
-            </button>
-          )}
-
-          <button
-            type="button"
-            data-testid="live-voice-rate-btn"
-            onClick={handleCycleSpeechRate}
-            aria-label={`Speech playback speed ${speechRate}x`}
-            title={`Speed: ${speechRate}x`}
-            className="live-voice-control live-voice-ghost-btn h-9 sm:h-10 px-2.5 sm:px-3 rounded-full text-[12px] font-mono tabular-nums font-medium text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-          >
-            {speechRate === 1 ? '1.0×' : `${speechRate}×`}
-          </button>
-
-          <label className="live-voice-select-wrap live-voice-ghost-btn relative inline-flex items-center h-9 sm:h-10 px-3 sm:px-3.5 rounded-full transition-colors cursor-pointer shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <label className="live-voice-select-wrap live-voice-ghost-btn relative inline-flex items-center h-9 px-3 rounded-full transition-colors cursor-pointer shrink-0">
             <span className="text-[12.5px] font-medium text-white/90 pr-4 whitespace-nowrap pointer-events-none">
               {selectedVoice}
             </span>
@@ -3372,8 +2700,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               className="live-voice-select absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             >
               {VOICE_OPTIONS.map((v) => (
-                <option key={v.id} value={v.id} className="bg-slate-950 text-white">
-                  {v.name} · {v.subtitle} ({v.tone})
+                <option key={v.id} value={v.id} className="bg-zinc-950 text-white">
+                  {v.name} · {v.subtitle}
                 </option>
               ))}
             </select>
@@ -3385,494 +2713,209 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             data-testid="live-voice-close-btn"
             onClick={handleSafeExit}
             aria-label="Exit Voice Mode"
-            title="Exit"
-            className="live-voice-control live-voice-ghost-btn w-9 h-9 sm:w-10 sm:h-10 rounded-full inline-flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer shrink-0"
+            title="Close"
+            className="live-voice-control live-voice-ghost-btn w-9 h-9 rounded-full inline-flex items-center justify-center text-white/75 hover:text-white transition-colors cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Center Stage: Live Image Preview + Quantum Orb + Unified Live Visual Conversation Timeline */}
-      <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-between w-full max-w-2xl mx-auto px-4 sm:px-6 py-1.5 overflow-hidden">
-        {/* 1. LIVE IMAGE PREVIEW BAR — Instant top-of-conversation visual cards with fullscreen expansion */}
-        {liveConversationImages.length > 0 && (
+      {/* Main Center Stage: Top-Center Luminous Animation + Centered Gold-Biscuit Photo Frame */}
+      <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center w-full max-w-xl mx-auto px-4 sm:px-6 py-2 overflow-hidden">
+        {/* Top-Center Animation Orb (compact above photo when photo exists, large centered when empty) */}
+        <div
+          data-testid="live-voice-orb-stage"
+          onClick={handlePassiveOrbTap}
+          className={`relative flex items-center justify-center shrink-0 transition-all duration-300 ${
+            featuredImage ? 'mb-3.5' : 'my-auto'
+          }`}
+        >
+          <div
+            className={`live-voice-orb-pedestal pointer-events-none ${
+              featuredImage ? 'is-compact' : ''
+            } ${isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''}`}
+            aria-hidden="true"
+          />
+          <canvas
+            ref={orbCanvasRef}
+            data-testid="live-voice-orb-canvas"
+            className={`${
+              featuredImage
+                ? 'w-[78px] h-[78px] sm:w-[90px] sm:h-[90px]'
+                : 'w-[208px] h-[208px] sm:w-[238px] sm:h-[238px]'
+            } block transition-all duration-300`}
+            aria-label="Live voice orb animation"
+          />
+        </div>
+
+        {/* Centered Front Uploaded Photo in Clean Gold-Biscuit Sized Card (Uncropped object-contain) */}
+        {featuredImage && (
           <section
             data-testid="live-voice-top-image-preview"
-            aria-label="Live shared images"
-            className="w-full shrink-0 mb-2 rounded-2xl bg-slate-900/75 border border-white/14 backdrop-blur-xl px-3 py-2.5 shadow-[0_12px_36px_rgba(2,6,23,0.55)]"
+            aria-label="Uploaded photo preview"
+            className="flex flex-col items-center justify-center gap-2.5 shrink-0"
           >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="inline-flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-200/90">
-                  {voiceLang === 'bn-BD'
-                    ? `লাইভ ভিজ্যুয়াল প্রিভিউ (${liveConversationImages.length})`
-                    : `Live Visual Context (${liveConversationImages.length})`}
-                </span>
-              </div>
-              {attachedImgs.length > 0 && (
+            <div
+              data-testid="live-voice-image-preview-card"
+              data-image-staged={featuredImage.isStaged ? 'true' : 'false'}
+              className="live-voice-gold-biscuit-card w-[248px] sm:w-[288px] h-[144px] sm:h-[166px] group"
+            >
+              <div className="live-voice-gold-biscuit-card-inner relative">
                 <button
                   type="button"
-                  data-testid="live-voice-analyze-image-btn"
-                  onClick={() => handleSubmitTyped()}
-                  disabled={isGenerating}
-                  className="live-voice-control h-7 px-2.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 disabled:opacity-45 text-slate-950 text-[11.5px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                  data-testid="live-voice-expand-image-btn"
+                  onClick={() =>
+                    setFullscreenImage({
+                      url: featuredImage.url,
+                      name: featuredImage.name,
+                    })
+                  }
+                  aria-label={`Expand ${featuredImage.name} to fullscreen`}
+                  title={voiceLang === 'bn-BD' ? 'বড় করে দেখুন' : 'View full image'}
+                  className="w-full h-full flex items-center justify-center cursor-pointer bg-transparent border-0 p-1"
                 >
-                  <Sparkles className="w-3 h-3" />
-                  <span>
-                    {voiceLang === 'bn-BD' ? 'AI দিয়ে বিশ্লেষণ' : 'Analyze with AI'}
+                  <img
+                    src={featuredImage.url}
+                    alt={featuredImage.name}
+                    className="w-full h-full object-contain rounded-[12px]"
+                  />
+                  <span className="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-black/65 border border-amber-200/35 text-white/90 inline-flex items-center justify-center opacity-85 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md">
+                    <ZoomIn className="w-3.5 h-3.5" />
                   </span>
                 </button>
-              )}
-            </div>
+              </div>
 
-            <div className="flex items-center gap-2.5 overflow-x-auto pb-0.5">
-              {liveConversationImages.map((imgItem) => (
-                <div
-                  key={imgItem.id}
-                  data-testid="live-voice-image-preview-card"
-                  data-image-staged={imgItem.isStaged ? 'true' : 'false'}
-                  className={`group relative flex items-center gap-2.5 p-1.5 pr-2.5 rounded-2xl border transition-all shrink-0 ${
-                    imgItem.isStaged
-                      ? 'bg-emerald-950/40 border-emerald-400/45 shadow-[0_0_20px_rgba(16,185,129,0.16)]'
-                      : 'bg-white/[0.06] border-white/12 hover:border-white/25'
-                  }`}
-                >
+              {featuredImage.isStaged &&
+                typeof featuredImage.stagedIndex === 'number' && (
                   <button
                     type="button"
-                    data-testid="live-voice-expand-image-btn"
+                    data-testid={`live-voice-remove-img-${featuredImage.stagedIndex}`}
                     onClick={() =>
-                      setFullscreenImage({ url: imgItem.url, name: imgItem.name })
+                      setAttachedImgs((prev) =>
+                        prev.filter((_, i) => i !== featuredImage.stagedIndex)
+                      )
                     }
-                    aria-label={`Expand ${imgItem.name} to fullscreen`}
-                    title={
-                      voiceLang === 'bn-BD'
-                        ? 'পূর্ণ স্ক্রিনে দেখুন'
-                        : 'Expand to fullscreen'
-                    }
-                    className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden shrink-0 border border-white/15 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    aria-label={`Remove ${featuredImage.name}`}
+                    className="live-voice-control absolute -top-2 -right-2 w-7 h-7 rounded-full bg-zinc-900/95 border border-amber-200/40 hover:bg-rose-500 text-white inline-flex items-center justify-center shadow-lg cursor-pointer transition-colors"
                   >
-                    <img
-                      src={imgItem.url}
-                      alt={imgItem.name}
-                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                    />
-                    <span className="absolute inset-0 bg-slate-950/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <ZoomIn className="w-4 h-4 text-white" />
-                    </span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
+                )}
+            </div>
 
-                  <div className="min-w-0 max-w-[128px] sm:max-w-[150px] text-left">
-                    <p className="text-[12px] font-medium text-white/95 truncate">
-                      {imgItem.name}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span
-                        className={`text-[10px] font-medium px-1.5 py-0.2 rounded-md ${
-                          imgItem.isStaged
-                            ? 'bg-emerald-400/20 text-emerald-200'
-                            : 'bg-white/10 text-slate-300'
-                        }`}
-                      >
-                        {imgItem.isStaged
-                          ? voiceLang === 'bn-BD'
-                            ? 'প্রস্তুত'
-                            : 'Ready'
-                          : voiceLang === 'bn-BD'
-                            ? 'শেয়ার্ড'
-                            : 'Shared'}
-                      </span>
-                      {imgItem.formattedTime && (
-                        <span className="text-[10px] font-mono tabular-nums text-slate-400">
-                          {imgItem.formattedTime}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {imgItem.isStaged && typeof imgItem.stagedIndex === 'number' && (
+            {secondaryImages.length > 0 && (
+              <div className="flex items-center justify-center gap-2">
+                {secondaryImages.map((imgItem) => (
+                  <div
+                    key={imgItem.id}
+                    data-testid="live-voice-image-preview-card"
+                    data-image-staged={imgItem.isStaged ? 'true' : 'false'}
+                    className="relative w-12 h-12 rounded-xl border border-amber-300/35 bg-zinc-950 p-0.5"
+                  >
                     <button
                       type="button"
-                      data-testid={`live-voice-remove-img-${imgItem.stagedIndex}`}
                       onClick={() =>
-                        setAttachedImgs((prev) =>
-                          prev.filter((_, i) => i !== imgItem.stagedIndex)
-                        )
+                        setFullscreenImage({ url: imgItem.url, name: imgItem.name })
                       }
-                      aria-label={`Remove ${imgItem.name}`}
-                      className="w-6 h-6 rounded-full bg-white/10 hover:bg-rose-500/85 text-white/85 hover:text-white inline-flex items-center justify-center shrink-0 cursor-pointer transition-colors"
+                      aria-label={`View ${imgItem.name}`}
+                      className="w-full h-full rounded-lg overflow-hidden cursor-pointer"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <img
+                        src={imgItem.url}
+                        alt={imgItem.name}
+                        className="w-full h-full object-contain"
+                      />
                     </button>
-                  )}
-                </div>
-              ))}
-            </div>
+                    {imgItem.isStaged &&
+                      typeof imgItem.stagedIndex === 'number' && (
+                        <button
+                          type="button"
+                          data-testid={`live-voice-remove-img-${imgItem.stagedIndex}`}
+                          onClick={() =>
+                            setAttachedImgs((prev) =>
+                              prev.filter((_, i) => i !== imgItem.stagedIndex)
+                            )
+                          }
+                          aria-label={`Remove ${imgItem.name}`}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-900 border border-white/25 hover:bg-rose-500 text-white inline-flex items-center justify-center cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {attachedImgs.length > 0 && !keyboardOpen && (
+              <button
+                type="button"
+                data-testid="live-voice-send-attachments-btn"
+                onClick={() => handleSubmitTyped()}
+                disabled={isGenerating}
+                className="live-voice-control h-8 px-4 rounded-full bg-white text-black hover:bg-zinc-200 disabled:opacity-45 text-[12px] font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <ArrowUp className="w-3.5 h-3.5 stroke-[2.4]" />
+                <span>{voiceLang === 'bn-BD' ? 'ছবি পাঠান' : 'Send photo'}</span>
+              </button>
+            )}
           </section>
         )}
 
-        {/* Luminous Quantum Orb + Mirrored Harmonic Spectrum + State Readout */}
-        <div className="flex flex-col items-center justify-center text-center shrink-0 my-auto py-0.5">
-          <div className="relative flex items-center justify-center">
-            <div
-              className={`live-voice-orb-pedestal pointer-events-none ${
-                isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''
-              }`}
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              onClick={handlePrimaryOrbAction}
-              aria-label={
-                voiceState === 'speaking'
-                  ? 'Interrupt AI and start listening'
-                  : voiceState === 'disconnected'
-                    ? 'Reconnect voice session'
-                    : hasCapturedSpeechToSend
-                      ? 'Send spoken message now'
-                      : 'Voice assistant orb'
-              }
-              className="live-voice-orb-trigger relative flex items-center justify-center rounded-full cursor-pointer bg-transparent border-0 p-0 transition-transform active:scale-[0.97]"
-            >
-              <canvas
-                ref={orbCanvasRef}
-                data-testid="live-voice-orb-canvas"
-                className={`${
-                  hasVisualConversationContent
-                    ? 'w-[144px] h-[144px] sm:w-[184px] sm:h-[184px]'
-                    : 'w-[208px] h-[208px] sm:w-[256px] sm:h-[256px]'
-                } block transition-all duration-300`}
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-
-          {/* Clean Mirrored Harmonic Spectrum */}
-          <div className="mt-0.5 mb-0.5 flex items-center justify-center h-7">
-            <canvas
-              ref={waveCanvasRef}
-              data-testid="live-voice-waveform-canvas"
-              className="w-[216px] sm:w-[248px] h-[32px] block"
-              aria-label="Live audio waveform"
-            />
-          </div>
-
-          {/* Serene Typographic State Readout */}
-          <div className="space-y-0.5 max-w-md px-2">
-            <h2
-              data-testid="live-voice-headline"
-              className="live-voice-headline-glow text-[20px] sm:text-[24px] font-medium tracking-tight text-white leading-tight [text-wrap:balance]"
-            >
-              {effectiveHeadline}
-            </h2>
-            <p className="text-[12px] sm:text-[12.5px] font-normal text-slate-300/70 leading-snug">
-              {effectiveHint}
-            </p>
-          </div>
-        </div>
-
-        {/* 2, 3, 4. UNIFIED LIVE TIMELINE: Real-Time Partial/Finalized Speech + Images + Streaming AI Responses */}
-        {unifiedTimeline.length > 0 ? (
+        {/* Quiet Minimal Live Subtitle/Caption Feed (Zero card chrome or metadata clutter) */}
+        {unifiedTimeline.length > 0 && (
           <div
-            data-testid="live-voice-transcript-box"
-            className="live-voice-transcript live-voice-dialogue-card mt-2 w-full px-3.5 sm:px-4 py-2.5 rounded-2xl text-left flex flex-col shrink-0"
+            ref={timelineScrollRef}
+            onScroll={handleTimelineScroll}
+            data-testid="live-voice-timeline"
+            className="live-voice-transcript mt-4 w-full max-w-md max-h-[112px] overflow-y-auto px-2 space-y-1.5 text-center shrink-0"
           >
-            {/* Pinned Timeline Header Bar */}
-            <div className="flex items-center justify-between gap-2 pb-1.5 mb-2 border-b border-white/[0.07] shrink-0">
-              <div className="inline-flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-300/80">
-                  {voiceLang === 'bn-BD' ? 'লাইভ কথোপকথন টাইমলাইন' : 'Live Conversation Timeline'}
-                </span>
-                <span className="text-[10.5px] font-mono tabular-nums px-1.5 py-0.2 rounded-full bg-white/[0.07] text-slate-300/85">
-                  {unifiedTimeline.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {!isGenerating && fullAiSourceText.trim() && (
-                  <button
-                    type="button"
-                    data-testid="live-voice-replay-btn"
-                    onClick={() => handleReplayAiSpeech()}
-                    aria-label="Replay voice response"
-                    title="Replay"
-                    className="live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/75 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  data-testid="live-voice-expand-btn"
-                  onClick={() => setExpandedTranscript((v) => !v)}
-                  aria-label={expandedTranscript ? 'Collapse transcript' : 'Expand transcript'}
-                  title={expandedTranscript ? 'Collapse' : 'Expand'}
-                  className="live-voice-control w-7 h-7 rounded-lg inline-flex items-center justify-center text-slate-300/75 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
-                >
-                  {expandedTranscript ? (
-                    <Minimize2 className="w-3.5 h-3.5" />
-                  ) : (
-                    <Maximize2 className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Scrollable Chronological Timeline Entries */}
-            <div
-              ref={timelineScrollRef}
-              onScroll={handleTimelineScroll}
-              data-testid="live-voice-timeline"
-              className={`space-y-2 overflow-y-auto pr-0.5 transition-[max-height] duration-200 ${
-                expandedTranscript
-                  ? 'max-h-[250px] sm:max-h-[300px]'
-                  : 'max-h-[152px] sm:max-h-[192px]'
-              }`}
-            >
-              {unifiedTimeline.map((entry) => {
-                const isPartial = entry.transcriptState === 'partial';
-                const isUser = entry.role === 'user';
-
-                if (isUser) {
-                  return (
-                    <article
-                      key={entry.id}
-                      data-testid={
-                        isPartial
-                          ? 'live-voice-partial-transcript'
-                          : 'live-voice-message-user'
-                      }
-                      data-transcript-state={entry.transcriptState}
-                      className={`rounded-xl px-3 py-2 transition-all ${
-                        isPartial
-                          ? 'border border-dashed border-cyan-400/50 bg-cyan-950/30 shadow-[0_0_20px_rgba(34,211,238,0.12)]'
-                          : 'border border-emerald-400/20 bg-emerald-950/20'
-                      }`}
-                    >
-                      {/* Ownership & Timestamp Header */}
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="inline-flex items-center gap-1.5">
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              isPartial
-                                ? 'bg-cyan-400 animate-ping'
-                                : 'bg-emerald-400'
-                            }`}
-                          />
-                          <span className="text-[11px] font-semibold text-emerald-300/95">
-                            {entry.ownerLabel}
-                          </span>
-                          <span
-                            data-testid={
-                              isPartial
-                                ? 'live-voice-partial-badge'
-                                : 'live-voice-finalized-badge'
-                            }
-                            className={`text-[10px] font-medium px-1.5 py-0.2 rounded-md ${
-                              isPartial
-                                ? 'bg-cyan-400/20 text-cyan-200 border border-cyan-400/30'
-                                : 'bg-emerald-400/15 text-emerald-200/90'
-                            }`}
-                          >
-                            {isPartial
-                              ? voiceLang === 'bn-BD'
-                                ? 'লাইভ কথা…'
-                                : 'Live speaking…'
-                              : voiceLang === 'bn-BD'
-                                ? 'চূড়ান্ত'
-                                : 'Finalized'}
-                          </span>
-                        </div>
-                        {entry.formattedTime && (
-                          <time className="text-[10.5px] font-mono tabular-nums text-slate-400">
-                            {entry.formattedTime}
-                          </time>
-                        )}
-                      </div>
-
-                      {/* Mixed Image + Text Layout */}
-                      <div className="flex items-start gap-2.5">
-                        {entry.imgs.length > 0 && (
-                          <div
-                            data-testid="live-voice-timeline-images"
-                            className="flex flex-wrap items-center gap-1.5 shrink-0"
-                          >
-                            {entry.imgs.map((img, imgIdx) => (
-                              <button
-                                key={`${entry.id}-img-${imgIdx}`}
-                                type="button"
-                                data-testid="live-voice-timeline-image-card"
-                                onClick={() =>
-                                  setFullscreenImage({
-                                    url: img.url,
-                                    name: img.name || 'Shared image',
-                                  })
-                                }
-                                aria-label={`View ${img.name || 'shared image'} fullscreen`}
-                                className="group relative w-11 h-11 sm:w-12 sm:h-12 rounded-lg overflow-hidden border border-white/15 bg-slate-900 cursor-pointer shrink-0"
-                              >
-                                <img
-                                  src={img.url}
-                                  alt={img.name || 'Shared image'}
-                                  className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                                />
-                                <span className="absolute inset-0 bg-slate-950/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                  <ZoomIn className="w-3.5 h-3.5 text-white" />
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="flex-1 min-w-0">
-                          {/* Attached File Chips */}
-                          {entry.attachedFileNames.length > 0 && (
-                            <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                              {entry.attachedFileNames.map((fname) => (
-                                <span
-                                  key={`${entry.id}-file-${fname}`}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/[0.08] border border-white/10 text-[11px] text-sky-200"
-                                >
-                                  <FileText className="w-3 h-3 text-sky-300" />
-                                  <span>{fname}</span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Visually Distinguished Partial vs. Finalized Transcript Text */}
-                          {isPartial ? (
-                            <p className="text-[13px] sm:text-[13.5px] leading-relaxed">
-                              {entry.confirmedPrefix && (
-                                <span
-                                  data-testid="live-voice-partial-confirmed"
-                                  className="text-white font-normal"
-                                >
-                                  {entry.confirmedPrefix}{' '}
-                                </span>
-                              )}
-                              <span
-                                data-testid="live-voice-partial-interim"
-                                className="text-cyan-200/95 italic underline decoration-cyan-400/50 decoration-dotted underline-offset-4"
-                              >
-                                {entry.partialInterimText || entry.text}
-                              </span>
-                              <span
-                                className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-cyan-300 animate-pulse rounded-sm"
-                                aria-hidden="true"
-                              />
-                            </p>
-                          ) : (
-                            entry.text && (
-                              <p className="text-[13px] sm:text-[13.5px] text-slate-100/95 leading-relaxed">
-                                {entry.text}
-                              </p>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    </article>
-                  );
-                }
-
-                // AI Timeline Entry (Progressive Streaming Response + Subtle Thinking Indicator)
+            {unifiedTimeline.slice(-2).map((entry) => {
+              const isPartial = entry.transcriptState === 'partial';
+              const isUser = entry.role === 'user';
+              if (isUser) {
                 return (
-                  <article
+                  <p
                     key={entry.id}
-                    data-testid="live-voice-message-ai"
-                    data-stream-state={entry.streamState}
-                    className="rounded-xl px-3 py-2.5 border border-violet-400/20 bg-violet-950/20"
+                    data-testid={
+                      isPartial
+                        ? 'live-voice-partial-transcript'
+                        : 'live-voice-message-user'
+                    }
+                    data-transcript-state={entry.transcriptState}
+                    className="text-[13px] text-white/65 leading-snug"
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <div className="inline-flex items-center gap-1.5">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            entry.streamState !== 'complete'
-                              ? 'bg-violet-400 animate-pulse'
-                              : 'bg-violet-400'
-                          }`}
-                        />
-                        <span className="text-[11px] font-semibold text-violet-300/95">
-                          {entry.ownerLabel}
-                        </span>
-                        {entry.streamState === 'streaming' && (
-                          <span className="text-[10px] font-medium px-1.5 py-0.2 rounded-md bg-violet-400/20 text-violet-200">
-                            {voiceLang === 'bn-BD' ? 'স্ট্রিমিং…' : 'Streaming…'}
+                    {isPartial ? (
+                      <>
+                        {entry.confirmedPrefix && (
+                          <span data-testid="live-voice-partial-confirmed">
+                            {entry.confirmedPrefix}{' '}
                           </span>
                         )}
-                      </div>
-                      <div className="inline-flex items-center gap-1.5">
-                        {entry.formattedTime && (
-                          <time className="text-[10.5px] font-mono tabular-nums text-slate-400">
-                            {entry.formattedTime}
-                          </time>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Subtle Thinking Indicator */}
-                    {(entry.streamState === 'thinking' ||
-                      (entry.streamState === 'streaming' && entry.thinkingText)) && (
-                      <div
-                        data-testid="live-voice-thinking-indicator"
-                        className="inline-flex items-center gap-2 px-2.5 py-1 my-0.5 rounded-lg bg-indigo-500/15 border border-indigo-400/25 text-[11.5px] text-indigo-200/90"
-                      >
-                        <span className="inline-flex items-center gap-1" aria-hidden="true">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:-0.25s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:-0.12s]" />
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce" />
+                        <span data-testid="live-voice-partial-interim">
+                          {entry.partialInterimText || entry.text}
                         </span>
-                        <span>
-                          {entry.thinkingText ||
-                            (voiceLang === 'bn-BD'
-                              ? 'উত্তর বিশ্লেষণ ও তৈরি হচ্ছে…'
-                              : 'Thinking and analyzing…')}
-                        </span>
-                      </div>
+                      </>
+                    ) : (
+                      entry.text
                     )}
-
-                    {/* Progressive Streaming AI Text */}
-                    {entry.text && (
-                      <p
-                        className={`text-[13.5px] sm:text-[14px] text-white/95 font-normal leading-relaxed ${
-                          expandedTranscript ? '' : 'line-clamp-4'
-                        }`}
-                      >
-                        {formatTextForNaturalSpeech(entry.text, expandedTranscript ? 4000 : 1200)}
-                        {entry.streamState === 'streaming' && (
-                          <span
-                            data-testid="live-voice-stream-cursor"
-                            className="inline-block w-1.5 h-3.5 ml-1 align-middle bg-violet-300 animate-pulse rounded-sm"
-                            aria-hidden="true"
-                          />
-                        )}
-                      </p>
-                    )}
-                  </article>
+                  </p>
                 );
-              })}
-            </div>
-          </div>
-        ) : (
-          !isOffline &&
-          !isGenerating && (
-            <div
-              data-testid="live-voice-quick-prompts"
-              className="mt-3 flex flex-wrap items-center justify-center gap-2 max-w-md"
-            >
-              {quickStarters.map((promptText, idx) => (
-                <button
-                  key={promptText}
-                  type="button"
-                  data-testid={`live-voice-starter-${idx}`}
-                  onClick={() => handleQuickPrompt(promptText)}
-                  className="live-voice-control live-voice-starter-btn h-10 px-4 rounded-full text-[12.5px] font-medium text-slate-200/85 hover:text-white transition-colors cursor-pointer whitespace-nowrap"
+              }
+
+              return entry.text ? (
+                <p
+                  key={entry.id}
+                  data-testid="live-voice-message-ai"
+                  data-stream-state={entry.streamState}
+                  className="text-[14px] text-white/95 font-normal leading-relaxed line-clamp-3"
                 >
-                  {promptText}
-                </button>
-              ))}
-            </div>
-          )
+                  {formatTextForNaturalSpeech(entry.text, 600)}
+                </p>
+              ) : null;
+            })}
+          </div>
         )}
 
         {needsTapToPlay && pendingAudioBufferRef.current && (
@@ -3887,7 +2930,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                 startDecodedBufferPlayback(ctx, buf, ttsAbortRef.current);
               });
             }}
-            className="live-voice-control mt-2 inline-flex items-center gap-2 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-medium px-5 h-10 text-[13px] cursor-pointer transition-colors shrink-0"
+            className="live-voice-control mt-3 inline-flex items-center gap-2 rounded-full bg-white text-black hover:bg-zinc-200 font-medium px-4 h-9 text-[12.5px] cursor-pointer transition-colors shrink-0"
           >
             <Volume2 className="w-4 h-4" />
             <span>Tap to enable audio</span>
@@ -3898,15 +2941,15 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           <p
             data-testid="live-voice-status-notice"
             role="status"
-            className="mt-1.5 max-w-md text-[12px] text-slate-300/75 leading-snug text-center shrink-0"
+            className="mt-2 max-w-sm text-[12px] text-white/60 leading-snug text-center shrink-0"
           >
             {statusNotice}
           </p>
         )}
       </main>
 
-      {/* Bottom Sculpted Floating Studio Capsule */}
-      <footer className="relative z-10 w-full max-w-md mx-auto px-2 sm:px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 shrink-0">
+      {/* Minimalist ChatGPT Bottom Dock: Photo Send, Typing, and End Call ONLY */}
+      <footer className="relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1.25rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2.5 shrink-0">
         <input
           ref={imageInputRef}
           type="file"
@@ -3915,56 +2958,17 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           onChange={(e) => void handlePickVoiceImage(e)}
           className="hidden"
         />
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.jsx,.py,.html,.css,.pdf,.docx,.xml,.yaml,.yml,image/*"
-          data-testid="live-voice-file-input"
-          onChange={(e) => void handlePickVoiceFile(e)}
-          className="hidden"
-        />
 
-        {attachedFiles.length > 0 && (
-          <div
-            data-testid="live-voice-attachment-preview"
-            className="w-full flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-white/15 backdrop-blur-md"
+        {voiceState === 'disconnected' && (
+          <button
+            type="button"
+            data-testid="live-voice-reconnect-btn"
+            onClick={() => void establishVoiceConnection(false)}
+            className="live-voice-control h-9 px-4 rounded-full bg-white text-black hover:bg-zinc-200 font-medium text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            {attachedFiles.map((file, idx) => (
-              <div
-                key={`vfile-${idx}-${file.name}`}
-                data-testid={`live-voice-file-card-${idx}`}
-                className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]"
-              >
-                <FileText className="w-4 h-4 text-sky-300 shrink-0" />
-                <span className="text-[11.5px] text-white/90 truncate">
-                  {file.name}
-                </span>
-                <button
-                  type="button"
-                  data-testid={`live-voice-remove-file-${idx}`}
-                  onClick={() =>
-                    setAttachedFiles((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                  aria-label={`Remove ${file.name}`}
-                  className="w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-
-            {!keyboardOpen && (
-              <button
-                type="button"
-                data-testid="live-voice-send-attachments-btn"
-                onClick={() => handleSubmitTyped()}
-                className="ml-auto px-3 py-1 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0"
-              >
-                <ArrowUp className="w-3.5 h-3.5 stroke-[2.4]" />
-                <span>{voiceLang === 'bn-BD' ? 'পাঠান' : 'Send'}</span>
-              </button>
-            )}
-          </div>
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reconnect</span>
+          </button>
         )}
 
         {keyboardOpen && (
@@ -3979,10 +2983,10 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
               placeholder={
-                attachedImgs.length > 0 || attachedFiles.length > 0
+                attachedImgs.length > 0
                   ? voiceLang === 'bn-BD'
-                    ? 'ছবি/ফাইল সম্পর্কে প্রশ্ন লিখুন...'
-                    : 'Ask about the attachment...'
+                    ? 'ছবি সম্পর্কে লিখুন...'
+                    : 'Ask about the photo...'
                   : voiceLang === 'bn-BD'
                     ? 'মেসেজ লিখুন...'
                     : 'Type a message...'
@@ -3992,123 +2996,36 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             <button
               type="submit"
               data-testid="live-voice-send-btn"
-              disabled={
-                !draftText.trim() &&
-                attachedImgs.length === 0 &&
-                attachedFiles.length === 0
-              }
+              disabled={!draftText.trim() && attachedImgs.length === 0}
               aria-label="Send typed message"
-              className="live-voice-control w-8 h-8 rounded-full bg-white text-slate-950 disabled:opacity-35 inline-flex items-center justify-center hover:bg-sky-50 transition-opacity cursor-pointer shrink-0"
+              className="live-voice-control w-8 h-8 rounded-full bg-white text-black disabled:opacity-35 inline-flex items-center justify-center hover:bg-zinc-200 transition-opacity cursor-pointer shrink-0"
             >
               <ArrowUp className="w-4 h-4 stroke-[2.4]" />
             </button>
           </form>
         )}
 
-        <div className="live-voice-dock inline-flex flex-wrap items-center justify-center gap-1 sm:gap-2 px-1.5 sm:px-2.5 py-1.5 sm:py-2 max-w-full rounded-full">
-          {/* Mute / Unmute Microphone */}
-          <button
-            type="button"
-            data-testid="live-voice-mute-btn"
-            onClick={handleToggleMute}
-            disabled={voiceState === 'disconnected' || voiceState === 'connecting'}
-            aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-            aria-pressed={isMuted}
-            title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
-            className={`live-voice-control w-10 h-10 sm:w-12 sm:h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 shrink-0 ${
-              isMuted
-                ? 'bg-white text-slate-950'
-                : isUserVoicing
-                  ? 'bg-emerald-400/25 text-emerald-200 ring-2 ring-emerald-400/75'
-                  : 'bg-white/[0.07] hover:bg-white/[0.14] text-white'
-            }`}
-          >
-            {isMuted ? <MicOff className="w-4 h-4 sm:w-5 sm:h-5" /> : <Mic className="w-4 h-4 sm:w-5 sm:h-5" />}
-          </button>
-
-          {/* 1-Tap Bangla / English Switch */}
-          <button
-            type="button"
-            data-testid="live-voice-lang-btn"
-            onClick={handleToggleVoiceLang}
-            aria-label={`Switch speech recognition language (current: ${voiceLang === 'bn-BD' ? 'Bangla' : 'English'})`}
-            title={voiceLang === 'bn-BD' ? 'Bangla — tap for English' : 'English — tap for Bangla'}
-            className="live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[11.5px] sm:text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
-          >
-            {voiceLang === 'bn-BD' ? 'বাং' : 'EN'}
-          </button>
-
-          {/* Attach Image Button (Gallery / Camera) */}
+        <div
+          data-testid="live-voice-bottom-dock"
+          className="live-voice-dock inline-flex items-center justify-center gap-3 px-3 py-2 rounded-full"
+        >
+          {/* 1. Photo Send */}
           <button
             type="button"
             data-testid="live-voice-attach-image-btn"
             onClick={() => imageInputRef.current?.click()}
-            aria-label="Attach image"
-            title={voiceLang === 'bn-BD' ? 'ছবি যুক্ত করুন' : 'Attach image'}
-            className={`live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+            aria-label="Send photo"
+            title={voiceLang === 'bn-BD' ? 'ছবি পাঠান' : 'Send photo'}
+            className={`live-voice-control w-12 h-12 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
               attachedImgs.length > 0
-                ? 'bg-emerald-400/25 text-emerald-200 ring-1 ring-emerald-400/60'
-                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
+                ? 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-300/60'
+                : 'bg-white/[0.08] hover:bg-white/[0.15] text-white'
             }`}
           >
-            <ImagePlus className="w-4 h-4" />
+            <ImagePlus className="w-5 h-5" />
           </button>
 
-          {/* Attach Text / Document File Button */}
-          <button
-            type="button"
-            data-testid="live-voice-attach-file-btn"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach file"
-            title={voiceLang === 'bn-BD' ? 'ফাইল যুক্ত করুন' : 'Attach file'}
-            className={`live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
-              attachedFiles.length > 0
-                ? 'bg-sky-400/25 text-sky-200 ring-1 ring-sky-400/60'
-                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
-            }`}
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
-
-          {/* Contextual Primary Action */}
-          {voiceState === 'disconnected' ? (
-            <button
-              type="button"
-              data-testid="live-voice-reconnect-btn"
-              onClick={() => void establishVoiceConnection(false)}
-              aria-label="Reconnect voice session"
-              className="live-voice-control h-10 sm:h-12 px-3 sm:px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[12px] sm:text-[13px] inline-flex items-center gap-1.5 sm:gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Reconnect</span>
-            </button>
-          ) : voiceState === 'speaking' ? (
-            <button
-              type="button"
-              data-testid="live-voice-interrupt-btn"
-              onClick={handleInterruptAndListen}
-              aria-label="Interrupt AI and speak"
-              title="Interrupt (Space)"
-              className="live-voice-control h-10 sm:h-12 px-3 sm:px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[12px] sm:text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <Hand className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-200" />
-              <span>Interrupt</span>
-            </button>
-          ) : hasCapturedSpeechToSend ? (
-            <button
-              type="button"
-              data-testid="live-voice-send-now-btn"
-              onClick={() => void commitActiveUtterance(true)}
-              aria-label="Send spoken message now"
-              title="Send (Space)"
-              className="live-voice-control h-10 sm:h-12 px-3 sm:px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[12px] sm:text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <ArrowUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
-              <span>Send</span>
-            </button>
-          ) : null}
-
-          {/* Optional Keyboard Drawer Toggle */}
+          {/* 2. Typing Toggle */}
           <button
             type="button"
             data-testid="live-voice-keyboard-toggle"
@@ -4123,26 +3040,26 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             }}
             aria-label={keyboardOpen ? 'Hide text input' : 'Type a message'}
             aria-pressed={keyboardOpen}
-            title={keyboardOpen ? 'Hide text input' : 'Type a message'}
-            className={`live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
+            title={keyboardOpen ? 'Hide keyboard' : 'Type message'}
+            className={`live-voice-control w-12 h-12 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
               keyboardOpen
-                ? 'bg-white text-slate-950'
-                : 'bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white'
+                ? 'bg-white text-black'
+                : 'bg-white/[0.08] hover:bg-white/[0.15] text-white'
             }`}
           >
-            <Keyboard className="w-4 h-4" />
+            <Keyboard className="w-5 h-5" />
           </button>
 
-          {/* Safe End Call Button */}
+          {/* 3. End Call */}
           <button
             type="button"
             data-testid="live-voice-end-btn"
             onClick={handleSafeExit}
             aria-label="End voice session"
-            title="End session"
-            className="live-voice-control w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
+            title="End call"
+            className="live-voice-control w-12 h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer shrink-0"
           >
-            <PhoneOff className="w-4 h-4 sm:w-5 sm:h-5" />
+            <PhoneOff className="w-5 h-5" />
           </button>
         </div>
       </footer>

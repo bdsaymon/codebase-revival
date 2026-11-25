@@ -167,6 +167,7 @@ import {
   SimpleEntryCredentials,
 } from './utils/simpleEntryAuth';
 import { VoiceWaveformBar } from './components/VoiceWaveformBar';
+import { CollapsibleUserPrompt } from './components/chat/CollapsibleUserPrompt';
 import {
   Project,
   buildProjectPreview,
@@ -665,6 +666,17 @@ export default function App() {
   const [bottomProviderMenuOpen, setBottomProviderMenuOpen] = useState(false);
   const [bottomModelMenuOpen, setBottomModelMenuOpen] = useState(false);
   const [moreModelsOpen, setMoreModelsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!bottomModelMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setBottomModelMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [bottomModelMenuOpen]);
   const [providerLimitBanner, setProviderLimitBanner] = useState<{
     profileName: string;
     message: string;
@@ -893,13 +905,22 @@ export default function App() {
   const activeIsBuiltin = isBuiltinProviderId(
     activeProfile?.provider || settings.provider
   );
+  const activeProviderId = activeProfile?.provider || settings.provider;
+  const activeHasCustomKeys = Boolean(
+    String(activeProfile?.externalKeys || settings.externalKeys || '').trim()
+  );
+  const activeIsKeylessServer =
+    activeIsBuiltin ||
+    activeProfile?.id === DEFAULT_BUILTIN_PROFILE.id ||
+    ((activeProviderId === 'gemini_custom' || activeProviderId === 'gemini_openai') &&
+      !activeHasCustomKeys);
   const activeModelName =
     activeProfile?.externalModel?.trim() ||
     settings.externalModel?.trim() ||
-    (activeIsBuiltin ? builtinTierForModel('', settings.mode).model : '');
+    (activeIsKeylessServer ? builtinTierForModel('', settings.mode).model : '');
 
   // Human label for chrome (header, message heads, selector button).
-  const activeModelLabel = activeIsBuiltin
+  const activeModelLabel = activeIsKeylessServer
     ? builtinTierLabel(activeModelName, settings.mode)
     : activeModelName || 'No model selected';
 
@@ -908,6 +929,11 @@ export default function App() {
     : [];
 
   const activeIsV2 = isV2ModelId(activeModelName);
+  useEffect(() => {
+    if (bottomModelMenuOpen && !activeIsV2) {
+      setMoreModelsOpen(true);
+    }
+  }, [bottomModelMenuOpen, activeIsV2]);
   const isV2AuthorizedTester = isAuthorizedTestingUser(firebaseUser);
   const v2ResetInfo = getNextRiyadhResetInfo();
 
@@ -4326,12 +4352,12 @@ export default function App() {
 
       const wantsDetailedVoiceReply =
         isLiveVoiceTurn &&
-        /\b(detail|detailed|details|elaborate|explain|full|complete|step\s*by\s*step)\b|(?:বিস্তারিত|ডিটেইল|পুরো|সম্পূর্ণ|ব্যাখ্যা)/i.test(
+        /\b(detail|detailed|details|elaborate|explain\s+(?:deeply|in\s+detail|everything|fully)|step\s*by\s*step|step-by-step)\b|(?:বিস্তারিত|ডিটেইল|পুরোপুরি|সম্পূর্ণ|খুলে\s*বলো|ধাপে\s*ধাপে)/i.test(
           lastUserPrompt
         );
       const liveVoiceDirective = wantsDetailedVoiceReply
-        ? 'LIVE VOICE MODE (DETAILED): Speak clearly in natural warm Bengali or English, covering every key point in clear spoken paragraphs without markdown tables or raw code fences unless requested.'
-        : 'LIVE VOICE MODE: Respond immediately in natural, warm, spoken conversational language (2 to 4 concise sentences, plain spoken text with no markdown bullets or headings unless explicitly requested) so your answer sounds instant and human when spoken aloud.';
+        ? 'LIVE VOICE MODE (DETAILED): Deliver a clear, concise spoken explanation in 3 to 5 short sentences without markdown tables, lists, or code blocks.'
+        : 'LIVE VOICE MODE (STRICT BREVITY): Respond immediately in natural, warm conversational speech in 1 to 2 very short sentences (strictly under 45 words total). Give only the direct answer — no filler, no lists, no markdown, and no long paragraphs.';
       const effectiveGlobalInstructions = isLiveVoiceTurn
         ? [liveVoiceDirective, settings.globalInstructions || settings.customInst || '']
             .filter(Boolean)
@@ -4393,8 +4419,8 @@ export default function App() {
         allowKeylessFallback: Boolean(settings.allowKeylessFallback),
         maxOutputTokens: isLiveVoiceTurn
           ? wantsDetailedVoiceReply
-            ? Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1400, 1400)
-            : Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 1024, 380)
+            ? Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 480, 480)
+            : Math.min(profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens ?? 200, 200)
           : profileSnapshot.maxOutputTokens ?? settings.maxOutputTokens,
         contextWindow: profileSnapshot.contextWindow,
         weightTemp: settings.weightTemp ?? 0.7,
@@ -6551,17 +6577,10 @@ export default function App() {
                   data-testid="app-header-brand"
                   className="inline-flex items-center gap-2 min-w-0"
                 >
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-[var(--primary)]/15 border border-[var(--primary)]/30 text-[var(--primary)] shrink-0">
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </span>
-                  <span className="text-[15px] font-bold tracking-tight text-[var(--ink)] truncate">
+                  <SunburstMarkIcon className="w-5 h-5 text-[var(--primary)] shrink-0" />
+                  <span className="font-editorial-serif text-[17px] font-semibold tracking-tight text-[var(--ink)] truncate">
                     SMFTA AI Pro
                   </span>
-                  {activeModelLabel && (
-                    <span className="hidden xs:inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--surface-2)] border border-[var(--border)] text-[11px] font-medium text-[var(--ink-dim)] truncate max-w-[140px]">
-                      {activeModelLabel}
-                    </span>
-                  )}
                 </div>
 
                 {/* Active Project Selector Pill (Section ঘ: Projects) */}
@@ -7026,7 +7045,7 @@ export default function App() {
                             </div>
                           )}
                           {cleanUserText && (
-                            <div className="msg-user-bubble">{cleanUserText}</div>
+                            <CollapsibleUserPrompt text={cleanUserText} />
                           )}
                         </>
                       ) : (
@@ -7826,7 +7845,7 @@ export default function App() {
                           }
                         }}
                         placeholder={`Ask ${
-                          activeIsBuiltin
+                          activeIsKeylessServer
                             ? activeModelLabel
                             : activeDisplayName === 'Msfta shop ai'
                               ? activeModelLabel
@@ -7852,7 +7871,7 @@ export default function App() {
                             type="button"
                             data-testid="model-selector-btn"
                             onClick={() => {
-                              setMoreModelsOpen(!activeIsBuiltin);
+                              setMoreModelsOpen(false);
                               setBottomModelMenuOpen((v) => !v);
                             }}
                             className="composer-model"
@@ -7942,7 +7961,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Screenshot 4 Bottom-Sheet "Select model" Modal */}
+                {/* Claude-style Clean Model Selector Sheet */}
                 {bottomModelMenuOpen && (
                   <div
                     className="ref-sheet-backdrop"
@@ -7950,7 +7969,7 @@ export default function App() {
                   >
                     <div
                       data-testid="model-menu-popover"
-                      className="ref-sheet space-y-4"
+                      className="ref-sheet space-y-3"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="ref-sheet-head">
@@ -7962,20 +7981,14 @@ export default function App() {
                         >
                           <X className="w-5 h-5" />
                         </button>
-                        <div className="ref-sheet-title">Select model</div>
+                        <div className="ref-sheet-title font-editorial-serif">Select Model</div>
                       </div>
 
-                      {/* Primary Model Group (Flash / V5 at Top, Pro & Max at Bottom) */}
+                      {/* Clean Primary Model List */}
                       <div className="ref-sheet-group" data-testid="v2-model-options-list">
                         {sortV2ModelsFlashFirst(V2_SPECIAL_MODELS).map((spec) => {
                           const isSelectedV2 =
-                            activeIsBuiltin && activeModelName === spec.id;
-                          const tierChip =
-                            spec.id === 'smfta-v5'
-                              ? 'Flash'
-                              : spec.id === 'smfta-v2-pro'
-                                ? 'Pro'
-                                : 'Max';
+                            activeIsKeylessServer && activeModelName === spec.id;
                           return (
                             <button
                               key={spec.id}
@@ -7985,30 +7998,25 @@ export default function App() {
                                 handleSelectModel(spec.id);
                                 setBottomModelMenuOpen(false);
                               }}
-                              className="ref-sheet-row"
+                              className={`ref-sheet-row ${isSelectedV2 ? 'is-selected' : ''}`}
                             >
                               <div className="flex flex-col items-start flex-1 min-w-0 text-left">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="ref-sheet-row-title truncate">
-                                    {spec.label}
-                                  </span>
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--surface)] border border-[var(--border)] text-[var(--ink-muted)] shrink-0">
-                                    {tierChip}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] text-[var(--ink-dim)] truncate w-full">
+                                <span className="ref-sheet-row-title truncate">
+                                  {spec.label}
+                                </span>
+                                <span className="text-[11.5px] text-[var(--ink-dim)] truncate w-full mt-0.5">
                                   {spec.desc}
                                 </span>
                               </div>
                               {isSelectedV2 && (
-                                <Check className="w-4 h-4 text-[var(--accent-sky)] shrink-0" />
+                                <Check className="w-4 h-4 text-[var(--primary)] shrink-0" />
                               )}
                             </button>
                           );
                         })}
                       </div>
 
-                      {/* More Models (Built-in Tiers + Custom Providers) */}
+                      {/* Clean Collapsible More Models */}
                       <div className="ref-sheet-group">
                         <button
                           type="button"
@@ -8024,19 +8032,21 @@ export default function App() {
                         </button>
 
                         {moreModelsOpen && (
-                          <div className="border-t border-[var(--border)] bg-[var(--surface)]/50">
+                          <div className="border-t border-[var(--border)] bg-[var(--surface)]/60">
                             {BUILTIN_TIERS.map((tier) => {
                               const isSelectedTier =
-                                activeIsBuiltin &&
+                                activeIsKeylessServer &&
                                 !activeIsV2 &&
-                                activeModelName === tier.model;
+                                (activeModelName === tier.model ||
+                                  (tier.model === 'smfta-pro' &&
+                                    activeModelName === 'gemini-4-hydrogen'));
                               return (
                                 <button
                                   key={tier.model}
                                   type="button"
                                   data-testid={`select-model-${tier.model}`}
                                   onClick={() => {
-                                    if (!activeIsBuiltin) {
+                                    if (!activeIsKeylessServer) {
                                       const builtinProf =
                                         savedProfiles.find((p) =>
                                           isBuiltinProviderId(p.provider)
@@ -8049,78 +8059,67 @@ export default function App() {
                                     handleSelectModel(tier.model);
                                     setBottomModelMenuOpen(false);
                                   }}
-                                  className="ref-sheet-row"
+                                  className={`ref-sheet-row ${isSelectedTier ? 'is-selected' : ''}`}
                                 >
-                                  <span className="ref-sheet-row-title truncate">
-                                    {tier.label}
-                                  </span>
+                                  <div className="flex flex-col items-start flex-1 min-w-0 text-left">
+                                    <span className="ref-sheet-row-title truncate">
+                                      {tier.label}
+                                    </span>
+                                    <span className="text-[11.5px] text-[var(--ink-dim)] truncate w-full mt-0.5">
+                                      {tier.desc}
+                                    </span>
+                                  </div>
                                   {isSelectedTier && (
-                                    <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
+                                    <Check className="w-4 h-4 text-[var(--primary)] shrink-0" />
                                   )}
                                 </button>
                               );
                             })}
 
                             {savedProfiles
-                              .filter(
-                                (p) =>
+                              .filter((p) => {
+                                const isKeylessGemini =
+                                  (p.provider === 'gemini_custom' ||
+                                    p.provider === 'gemini_openai') &&
+                                  !String(p.externalKeys || '').trim();
+                                return (
+                                  p.id !== DEFAULT_BUILTIN_PROFILE.id &&
                                   !isBuiltinProviderId(p.provider) &&
+                                  !isKeylessGemini &&
                                   p.enabled !== false
-                              )
+                                );
+                              })
                               .map((customProf) => {
                                 const vModels = getModelsForProfile(customProf);
                                 if (vModels.length === 0) return null;
-                                return (
-                                  <div key={customProf.id} className="border-t border-[var(--border)]">
-                                    <div className="px-4 pt-2 pb-1 text-[11px] font-medium text-[var(--ink-dim)] truncate">
-                                      {customProf.name}
-                                    </div>
-                                    {vModels.map((mId) => {
-                                      const isSelectedCustom =
-                                        !activeIsBuiltin &&
-                                        activeProfile?.id === customProf.id &&
-                                        activeModelName === mId;
-                                      return (
-                                        <button
-                                          key={`${customProf.id}-${mId}`}
-                                          type="button"
-                                          onClick={() => {
-                                            handleSelectProfile({
-                                              ...customProf,
-                                              externalModel: mId,
-                                            });
-                                            setBottomModelMenuOpen(false);
-                                          }}
-                                          className="ref-sheet-row"
-                                        >
-                                          <span className="text-[14px] font-mono truncate">
-                                            {mId}
-                                          </span>
-                                          {isSelectedCustom && (
-                                            <Check className="w-5 h-5 text-[var(--accent-sky)] shrink-0" />
-                                          )}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                );
+                                return vModels.map((mId) => {
+                                  const isSelectedCustom =
+                                    !activeIsKeylessServer &&
+                                    activeProfile?.id === customProf.id &&
+                                    activeModelName === mId;
+                                  return (
+                                    <button
+                                      key={`${customProf.id}-${mId}`}
+                                      type="button"
+                                      onClick={() => {
+                                        handleSelectProfile({
+                                          ...customProf,
+                                          externalModel: mId,
+                                        });
+                                        setBottomModelMenuOpen(false);
+                                      }}
+                                      className={`ref-sheet-row ${isSelectedCustom ? 'is-selected' : ''}`}
+                                    >
+                                      <span className="ref-sheet-row-title truncate">
+                                        {mId}
+                                      </span>
+                                      {isSelectedCustom && (
+                                        <Check className="w-4 h-4 text-[var(--primary)] shrink-0" />
+                                      )}
+                                    </button>
+                                  );
+                                });
                               })}
-
-                            <button
-                              type="button"
-                              data-testid="sheet-manage-providers-btn"
-                              onClick={() => {
-                                setBottomModelMenuOpen(false);
-                                setSettingsTab('providers');
-                                setSettingsOpen(true);
-                              }}
-                              className="ref-sheet-row border-t border-[var(--border)] text-[var(--primary)] font-medium"
-                            >
-                              <span className="text-[13.5px]">
-                                + Add or Manage Custom Providers
-                              </span>
-                              <Settings className="w-4 h-4 shrink-0" />
-                            </button>
                           </div>
                         )}
                       </div>

@@ -132,8 +132,8 @@ export function buildNaturalHumanLanguageRules(
       bannedRoboticPhrases,
       langChoiceDirective,
       wantsDetailedVoiceReply
-        ? 'The user explicitly asked for a detailed explanation: deliver a clear, thorough, complete spoken explanation without cutting short, structured smoothly for listening.'
-        : 'Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 2 to 4 crisp, warm, natural spoken sentences — concise and complete without rambling.',
+        ? 'The user explicitly asked for a detailed explanation: deliver a clear, concise spoken explanation in 3 to 5 short sentences formatted cleanly for listening.'
+        : 'STRICT LIVE VOICE BREVITY RULE: Reply in the exact language the user spoke (Bengali, English, or mixed Banglish) in 1 to 2 very short, warm, natural spoken sentences (strictly under 45 words total). Give the direct answer right away with zero filler, zero rambling, and zero long paragraphs.',
       'NEVER output markdown tables, pipe characters (|), bullet lists, numbered lists, code blocks, raw URLs, asterisks (*), hashtags (#), or emojis — output pure, natural spoken dialogue.',
     ].join(' ');
   }
@@ -157,7 +157,7 @@ export function buildSystemInstruction(opts: SystemInstructionOptions): string {
     liveVoiceMode: false,
     userName: opts.nickname || opts.userName,
   });
-  const answerStyle = 'Answer the user request thoroughly and accurately. Only keep single-word greetings brief. Whenever the user asks for detailed information, long-form writing, designs, builds, apps, or code updates, produce complete, well-structured, production-grade output without shortening, skipping sections, or using placeholders.';
+  const answerStyle = 'Write clearly with clean headings (## / ###) and concise, scannable prose — avoid rambling filler or bloated chat walls. Keep ordinary replies well-paced and concise; when asked for apps, UIs, scripts, or documents, put full deliverables inside <file path="..." title="..." type="..."> boxes cleanly instead of pasting huge raw source inline, with zero placeholders or truncation.';
   const history = (opts.recentTranscript || []).slice(-20).map((m) => `${m.role}: ${(m.content || '').slice(0, 1400)}`).join('\n');
   const notebook = (opts.notebook || []).slice(0, 10).map((n) => `${n.title}: ${n.content.slice(0, 500)}`).join('\n');
   const skills = (opts.activeSkills || []).slice(0, 8).map((s) => `${s.name}: ${(s.description || '').slice(0, 300)} ${(s.prompt || '').slice(0, 700)}`).join('\n');

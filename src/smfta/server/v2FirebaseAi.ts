@@ -509,11 +509,16 @@ export function buildV2GenAiRequestConfig(params: {
   thinkingEnabled?: boolean;
   thinkingEffort?: 'off' | 'low' | 'medium' | 'high';
   webSearch?: boolean;
+  maxOutputTokensOverride?: number;
 }): Record<string, unknown> {
   const normalized = params.modelName.trim().toLowerCase();
   const isHydrogen = normalized.includes('gemini-4');
   const isFlash38 = normalized.includes('gemini-3.8');
   const allowThinking = params.thinkingEnabled !== false && params.thinkingEffort !== 'off';
+  const resolvedMaxOutputTokens =
+    typeof params.maxOutputTokensOverride === 'number' && params.maxOutputTokensOverride > 0
+      ? Math.round(params.maxOutputTokensOverride)
+      : params.spec.maxOutputTokens;
   const useSearch =
     typeof params.webSearch === 'boolean'
       ? params.webSearch
@@ -530,7 +535,10 @@ export function buildV2GenAiRequestConfig(params: {
     // thinks HIGH by default so always set MEDIUM explicitly unless higher/lower requested.
     const cfg: Record<string, unknown> = {
       systemInstruction: params.fullSystemInstruction,
-      maxOutputTokens: Math.max(16_384, params.spec.maxOutputTokens),
+      maxOutputTokens:
+        typeof params.maxOutputTokensOverride === 'number' && params.maxOutputTokensOverride > 0
+          ? resolvedMaxOutputTokens
+          : Math.max(16_384, params.spec.maxOutputTokens),
     };
     const requestedLevel = effort
       ? resolveEffortToThinkingLevel(effort, 'MEDIUM')
@@ -554,7 +562,7 @@ export function buildV2GenAiRequestConfig(params: {
     const cfg: Record<string, unknown> = {
       systemInstruction: params.fullSystemInstruction,
       temperature: params.spec.temperature,
-      maxOutputTokens: params.spec.maxOutputTokens,
+      maxOutputTokens: resolvedMaxOutputTokens,
     };
     if (allowThinking) {
       const budgetMap: Record<'MINIMAL' | 'LOW' | 'MEDIUM' | 'HIGH', number> = {
@@ -597,7 +605,7 @@ export function buildV2GenAiRequestConfig(params: {
   const cfg: Record<string, unknown> = {
     systemInstruction: params.fullSystemInstruction,
     temperature: params.spec.temperature,
-    maxOutputTokens: params.spec.maxOutputTokens,
+    maxOutputTokens: resolvedMaxOutputTokens,
   };
   if (allowThinking) {
     cfg.thinkingConfig = {
@@ -894,6 +902,8 @@ export async function streamV2FirebaseModel(params: {
   genAiClientOverride?: V2GenAiStreamClientLike | null;
   firstAnswerTimeoutMs?: number;
   idleChunkTimeoutMs?: number;
+  liveVoiceMode?: boolean;
+  maxOutputTokensOverride?: number;
 }): Promise<V2StreamResult> {
   const spec = getV2ModelSpec(params.modelId);
   const ai =
@@ -921,7 +931,9 @@ export async function streamV2FirebaseModel(params: {
     };
   }
 
-  const fullSystemInstruction = `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nWhen the user requests large writing, detailed information, UI/web designs, builds, or code updates, produce the full, complete, production-ready result with zero truncation or placeholders. Mirror the user's language (default to clear Bengali for Bengali prompts). Never output raw <think> tags inside the answer. Provide only the clean, final answer.`;
+  const fullSystemInstruction = params.liveVoiceMode
+    ? `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 LIVE VOICE — ${spec.label}]\nRespond like a crisp, helpful human in 1 to 2 very short spoken sentences (under 45 words total unless the user explicitly asked for details). Mirror the user's language (clear Bengali for Bengali prompts). Never output markdown, code blocks, or <think> tags.`
+    : `${params.systemInstruction}\n\n${MASTER_PROFILE_PROMPT_BASELINE}\n\n[V2 SPECIAL ENGINE — ${spec.label}]\n${spec.systemDirective}\nWhen the user requests large writing, detailed information, UI/web designs, builds, or code updates, produce the full, complete, production-ready result with zero truncation or placeholders. Mirror the user's language (default to clear Bengali for Bengali prompts). Never output raw <think> tags inside the answer. Provide only the clean, final answer.`;
 
   const baseChain = getV2ServerFallbackModels(params.modelId);
   // Section 4: smfta-v5 stays on gemini-3.5-flash-lite with one backoff retry if needed
@@ -981,6 +993,7 @@ export async function streamV2FirebaseModel(params: {
         thinkingEnabled: params.thinkingEnabled,
         thinkingEffort: params.thinkingEffort,
         webSearch: effectiveAllowTools,
+        maxOutputTokensOverride: params.maxOutputTokensOverride,
       });
       config.abortSignal = candidateCtrl.signal;
 

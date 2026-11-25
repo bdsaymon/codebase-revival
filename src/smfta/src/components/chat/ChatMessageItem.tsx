@@ -18,6 +18,7 @@ import {
   InteractiveMessageContent,
   extractThinkingAndResponse,
 } from '../InteractiveMessageContent';
+import { CollapsibleUserPrompt } from './CollapsibleUserPrompt';
 
 export interface ChatMessageItemProps {
   message: ChatMessage;
@@ -141,9 +142,7 @@ const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
                 })}
               </div>
             )}
-            {cleanUserText && (
-              <div className="msg-user-bubble">{cleanUserText}</div>
-            )}
+            {cleanUserText && <CollapsibleUserPrompt text={cleanUserText} />}
           </>
         ) : (
           <div className="w-full min-w-0">

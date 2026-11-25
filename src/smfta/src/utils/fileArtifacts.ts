@@ -9,14 +9,16 @@ export interface FileArtifactItem {
   isStreaming?: boolean;
 }
 
-export const FILE_ARTIFACT_SYSTEM_DIRECTIVE = `FILE ARTIFACT & AGENT WORKSPACE PROTOCOL (CLAUDE-STYLE):
-When producing code, apps, documents, data tables, charts, or multi-file projects:
-1. For creating or overwriting a complete file, wrap the ENTIRE file in:
-<file path="index.html" type="html">
+export const FILE_ARTIFACT_SYSTEM_DIRECTIVE = `FILE ARTIFACT & EDITORIAL PRESENTATION PROTOCOL (CLAUDE-STYLE):
+When producing code, apps, documents, data tables, or multi-file projects:
+1. Wrap every complete deliverable file inside:
+<file path="index.html" title="Interactive App" type="html">
 ...complete file content...
 </file>
 (Supported types/extensions: .md, .html, .css, .js, .ts, .tsx, .py, .json, .csv, .svg, .txt.)
-2. For targeted edits to an EXISTING workspace file, prefer emitting ONLY the changed parts using:
+Always include a concise, clear human-readable "title" attribute on <file> (e.g. title="Responsive Dashboard UI") alongside "path".
+2. NEVER repeat or paste the same file contents again as raw inline markdown code blocks outside <file> — keep the chat message clean with only a brief, structured summary and clear section titles (## / ###).
+3. For targeted edits to an EXISTING workspace file, prefer emitting ONLY the changed parts using:
 <patch path="index.html">
 <find>
 exact existing lines
@@ -26,13 +28,7 @@ updated lines
 </replace>
 </patch>
 (You may include multiple <find>...</find><replace>...</replace> pairs inside one <patch>, and use <file_delete path="old-file.ts" /> to delete a file.)
-3. AGENT PLANNING MODE: Before non-trivial multi-file or large coding tasks, emit a concise checklist right at the start of your reply inside:
-<plan>
-- [ ] Inspect requirements and structure
-- [ ] Implement core modules
-- [ ] Wire UI & verify edge cases
-</plan>
-Keep explanations concise outside tags and NEVER truncate or leave '// ... existing code' placeholders inside <file>.`;
+4. Keep prose crisp, calm, and well-spaced (no bloated walls of redundant explanation). NEVER truncate or leave '// ... existing code' placeholders inside <file>.`;
 
 function sanitizeArtifactFilename(rawName: string, fallbackExt = 'txt'): string {
   const cleaned = String(rawName || '')

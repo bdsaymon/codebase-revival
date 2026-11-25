@@ -1102,30 +1102,6 @@ var Globe = createLucideIcon("globe", [
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
-var Hand = createLucideIcon("hand", [
-	["path", {
-		d: "M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2",
-		key: "1fvzgz"
-	}],
-	["path", {
-		d: "M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2",
-		key: "1kc0my"
-	}],
-	["path", {
-		d: "M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8",
-		key: "10h0bg"
-	}],
-	["path", {
-		d: "M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15",
-		key: "1s1gnw"
-	}]
-]);
-/**
-* @license lucide-react v0.546.0 - ISC
-*
-* This source code is licensed under the ISC license.
-* See the LICENSE file in the root directory of this source tree.
-*/
 var HardDrive = createLucideIcon("hard-drive", [
 	["line", {
 		x1: "22",
@@ -1522,38 +1498,6 @@ var MessageSquare = createLucideIcon("message-square", [["path", {
 * This source code is licensed under the ISC license.
 * See the LICENSE file in the root directory of this source tree.
 */
-var MicOff = createLucideIcon("mic-off", [
-	["path", {
-		d: "M12 19v3",
-		key: "npa21l"
-	}],
-	["path", {
-		d: "M15 9.34V5a3 3 0 0 0-5.68-1.33",
-		key: "1gzdoj"
-	}],
-	["path", {
-		d: "M16.95 16.95A7 7 0 0 1 5 12v-2",
-		key: "cqa7eg"
-	}],
-	["path", {
-		d: "M18.89 13.23A7 7 0 0 0 19 12v-2",
-		key: "16hl24"
-	}],
-	["path", {
-		d: "m2 2 20 20",
-		key: "1ooewy"
-	}],
-	["path", {
-		d: "M9 9v3a3 3 0 0 0 5.12 2.12",
-		key: "r2i35w"
-	}]
-]);
-/**
-* @license lucide-react v0.546.0 - ISC
-*
-* This source code is licensed under the ISC license.
-* See the LICENSE file in the root directory of this source tree.
-*/
 var Mic = createLucideIcon("mic", [
 	["path", {
 		d: "M12 19v3",
@@ -1668,16 +1612,6 @@ var NotebookPen = createLucideIcon("notebook-pen", [
 		key: "pqwjuv"
 	}]
 ]);
-/**
-* @license lucide-react v0.546.0 - ISC
-*
-* This source code is licensed under the ISC license.
-* See the LICENSE file in the root directory of this source tree.
-*/
-var Paperclip = createLucideIcon("paperclip", [["path", {
-	d: "m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551",
-	key: "1miecu"
-}]]);
 /**
 * @license lucide-react v0.546.0 - ISC
 *
@@ -2576,4 +2510,4 @@ var ZoomIn = createLucideIcon("zoom-in", [
 	}]
 ]);
 //#endregion
-export { Maximize2 as $, Check as $t, Send as A, FileCode2 as At, PhoneOff as B, Code as Bt, Smartphone as C, FolderOpen as Ct, ShieldAlert as D, FileSearch as Dt, ShieldCheck as E, FileSpreadsheet as Et, RefreshCw as F, Ellipsis as Ft, NotebookPen as G, CirclePlay as Gt, PenLine as H, CloudUpload as Ht, Plus as I, Download as It, Minimize2 as J, CircleAlert as Jt, Moon as K, CirclePause as Kt, Plug as L, Database as Lt, Save as M, Eye as Mt, RotateCw as N, EyeOff as Nt, Settings as O, FilePlus as Ot, RotateCcw as P, ExternalLink as Pt, MessageSquarePlus as Q, ChevronDown as Qt, Play as R, Cpu as Rt, Sparkles as S, FolderPlus as St, Shield as T, FileText as Tt, Pause as U, Clock as Ut, Pencil as V, CodeXml as Vt, Paperclip as W, CircleX as Wt, MicOff as X, ChevronRight as Xt, Mic as Y, ChevronUp as Yt, MessageSquare as Z, ChevronLeft as Zt, Tablet as _, GitBranch as _t, WandSparkles as a, ArrowRight as an, LayoutTemplate as at, Sun as b, Folder as bt, User as c, Activity as cn, Keyboard as ct, Trophy as d, ImagePlus as dt, ChartColumn as en, Lock as et, TriangleAlert as f, History as ft, Terminal as g, GitPullRequest as gt, ThumbsDown as h, Globe as ht, Wrench as i, ArrowUp as in, Lightbulb as it, Search as j, FileArchive as jt, Settings2 as k, FilePlus2 as kt, Upload as l, KeyRound as lt, ThumbsUp as m, Hand as mt, Zap as n, BookOpen as nn, ListOrdered as nt, Volume2 as o, ArrowLeft as on, Layers as ot, Trash2 as p, HardDrive as pt, Monitor as q, CircleCheck as qt, X as r, AudioLines as rn, Link2 as rt, Video as s, ArrowDown as sn, Laptop as st, ZoomIn as t, Brain as tn, LoaderCircle as tt, Unplug as u, Image as ut, Table as v, GitCommitHorizontal as vt, SlidersVertical as w, FolderKanban as wt, Square as x, FolderTree as xt, Swords as y, Gauge as yt, Pin as z, Copy as zt };
+export { LoaderCircle as $, BookOpen as $t, Send as A, EyeOff as At, PhoneOff as B, Clock as Bt, Smartphone as C, FileSpreadsheet as Ct, ShieldAlert as D, FileCode2 as Dt, ShieldCheck as E, FilePlus2 as Et, RefreshCw as F, Cpu as Ft, Moon as G, CircleAlert as Gt, PenLine as H, CirclePlay as Ht, Plus as I, Copy as It, Mic as J, ChevronLeft as Jt, Monitor as K, ChevronUp as Kt, Plug as L, Code as Lt, Save as M, Ellipsis as Mt, RotateCw as N, Download as Nt, Settings as O, FileArchive as Ot, RotateCcw as P, Database as Pt, Lock as Q, Brain as Qt, Play as R, CodeXml as Rt, Sparkles as S, FileText as St, Shield as T, FilePlus as Tt, Pause as U, CirclePause as Ut, Pencil as V, CircleX as Vt, NotebookPen as W, CircleCheck as Wt, MessageSquarePlus as X, Check as Xt, MessageSquare as Y, ChevronDown as Yt, Maximize2 as Z, ChartColumn as Zt, Tablet as _, Folder as _t, WandSparkles as a, Activity as an, Laptop as at, Sun as b, FolderOpen as bt, User as c, Image as ct, Trophy as d, HardDrive as dt, AudioLines as en, ListOrdered as et, TriangleAlert as f, Globe as ft, Terminal as g, Gauge as gt, ThumbsDown as h, GitCommitHorizontal as ht, Wrench as i, ArrowDown as in, Layers as it, Search as j, ExternalLink as jt, Settings2 as k, Eye as kt, Upload as l, ImagePlus as lt, ThumbsUp as m, GitBranch as mt, Zap as n, ArrowRight as nn, Lightbulb as nt, Volume2 as o, Keyboard as ot, Trash2 as p, GitPullRequest as pt, Minimize2 as q, ChevronRight as qt, X as r, ArrowLeft as rn, LayoutTemplate as rt, Video as s, KeyRound as st, ZoomIn as t, ArrowUp as tn, Link2 as tt, Unplug as u, History as ut, Table as v, FolderTree as vt, SlidersVertical as w, FileSearch as wt, Square as x, FolderKanban as xt, Swords as y, FolderPlus as yt, Pin as z, CloudUpload as zt };
