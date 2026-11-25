@@ -292,8 +292,12 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const attachedFilesRef = useRef(attachedFiles);
   attachedFilesRef.current = attachedFiles;
 
-  // Visual canvas ref
+  // Visual canvas & quantum waveform refs
   const orbCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformBarRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const prefetchedTtsMapRef = useRef<
+    Map<string, ReturnType<typeof requestGeminiFemaleSpeech>>
+  >(new Map());
 
   // Audio playback refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -596,6 +600,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       ttsAbortRef.current = null;
     }
     pendingChunksRef.current = [];
+    prefetchedTtsMapRef.current.clear();
     pipelineBusyRef.current = false;
     nextPlayTimeRef.current = 0;
 
@@ -721,10 +726,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
 
             // Auto-commit after speech pause so spoken words ALWAYS send even if phone RMS is soft
             clearSpeechRecCommitTimer();
-            const resultsLen = e?.results?.length ?? 0;
-            const latestIsFinal =
-              resultsLen > 0 && Boolean(e?.results?.[resultsLen - 1]?.isFinal);
-            const commitDelayMs = latestIsFinal ? 1300 : 2200;
+            const commitDelayMs = 1500;
             speechRecCommitTimerRef.current = window.setTimeout(() => {
               speechRecCommitTimerRef.current = null;
               if (
@@ -931,7 +933,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                     ) {
                       void commitActiveUtteranceRef.current(false);
                     }
-                  }, 1200);
+                  }, 1500);
                 } else if (chunkCount >= 28 && !vadStateRef.current.isVoiceActive) {
                   // Trim old silent buffer so subsequent speech is transcribed crisply
                   turnChunksRef.current = turnChunksRef.current.slice(-4);
@@ -1419,11 +1421,11 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           !ctrl.signal.aborted &&
           runId === pipelineRunIdRef.current
         ) {
-          // Coalesce queued chunks up to 560 chars so multi-sentence replies share one continuous vocal breath
+          // Coalesce queued chunks up to 850 chars (800-900 char band) for smooth, uninterrupted speech
           let sentence = (pendingChunksRef.current.shift() || '').trim();
           while (
             pendingChunksRef.current.length > 0 &&
-            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 560
+            sentence.length + 1 + (pendingChunksRef.current[0]?.length || 0) <= 850
           ) {
             const nextPart = (pendingChunksRef.current.shift() || '').trim();
             if (nextPart) {
@@ -1437,6 +1439,32 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
           const isMaleVoice =
             voice === 'Puck' || voice === 'Charon' || voice === 'Fenrir';
           const voiceStyle = buildVoiceStylePrompt(voice);
+
+          const peekNextCoalescedSentence = (): string => {
+            const queue = pendingChunksRef.current;
+            if (queue.length === 0) return '';
+            let acc = (queue[0] || '').trim();
+            for (let i = 1; i < queue.length; i += 1) {
+              const part = (queue[i] || '').trim();
+              if (!part) continue;
+              if (acc.length + 1 + part.length > 850) break;
+              acc = acc ? `${acc} ${part}` : part;
+            }
+            return acc.trim();
+          };
+
+          const triggerNextChunkPrefetch = () => {
+            if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) return;
+            const upcoming = peekNextCoalescedSentence();
+            if (!upcoming || prefetchedTtsMapRef.current.has(upcoming)) return;
+            const prefetchPromise = requestGeminiFemaleSpeech({
+              text: upcoming,
+              voiceName: voice,
+              style: voiceStyle,
+              signal: ctrl.signal,
+            });
+            prefetchedTtsMapRef.current.set(upcoming, prefetchPromise);
+          };
 
           if (activeSourcesRef.current.size === 0) {
             setIsSynthesizingVoice(true);
@@ -1456,8 +1484,13 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             break;
           }
 
+          const cachedPrefetch = prefetchedTtsMapRef.current.get(sentence);
+          if (cachedPrefetch) {
+            prefetchedTtsMapRef.current.delete(sentence);
+          }
+
           // 1. Primary ultra-low-latency 24kHz PCM stream from Gemini 3.8 Live Native Audio (~320ms first chunk)
-          if (ctx && (ctx.state as string) !== 'suspended') {
+          if (!cachedPrefetch && ctx && (ctx.state as string) !== 'suspended') {
             const streamRes = await streamGeminiPcmSpeech({
               text: sentence,
               voiceName: voice,
@@ -1475,18 +1508,21 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
               if (streamRes.modelUsed) {
                 setActiveVoiceModel(streamRes.modelUsed);
               }
+              triggerNextChunkPrefetch();
               continue;
             }
           }
 
           // 2. Unary neural audio endpoint (/api/voice/tts: Gemini 3.8 Live WAV -> Gemini TTS)
           // Retry once in the EXACT same voice before notifying fallback/error so persona never shifts
-          let res = await requestGeminiFemaleSpeech({
-            text: sentence,
-            voiceName: voice,
-            style: voiceStyle,
-            signal: ctrl.signal,
-          });
+          let res = cachedPrefetch
+            ? await cachedPrefetch
+            : await requestGeminiFemaleSpeech({
+                text: sentence,
+                voiceName: voice,
+                style: voiceStyle,
+                signal: ctrl.signal,
+              });
           if (
             (!res.ok || !res.audioBase64) &&
             !ctrl.signal.aborted &&
@@ -1523,6 +1559,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             }
             ttsFailedTurnRef.current = msgId;
             pendingChunksRef.current = [];
+            prefetchedTtsMapRef.current.clear();
             haltPipeline = true;
             setIsSynthesizingVoice(false);
             stateRef.current.isSynthesizingVoice = false;
@@ -1560,6 +1597,8 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
                   ? -150
                   : -220
                 : 0;
+            // Start prefetching next queued chunk in background while current buffer plays cleanly
+            triggerNextChunkPrefetch();
             // Ensure browser speechSynthesis is silent before playing WebAudio
             bilingualSpeechPlayer.stop();
             await startDecodedBufferPlayback(activeCtx, audioBuffer, ctrl, detuneCents);
@@ -1575,6 +1614,7 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
             } else {
               ttsFailedTurnRef.current = msgId;
               pendingChunksRef.current = [];
+              prefetchedTtsMapRef.current.clear();
               haltPipeline = true;
               setIsSynthesizingVoice(false);
               stateRef.current.isSynthesizingVoice = false;
@@ -2201,6 +2241,26 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
       energyRef.current += (targetEnergy - energyRef.current) * 0.18;
       const e = energyRef.current;
 
+      // Drive 16-bar Quantum Waveform directly via DOM style transforms (zero React re-renders)
+      const wfBars = waveformBarRefs.current;
+      for (let bi = 0; bi < wfBars.length; bi += 1) {
+        const barEl = wfBars[bi];
+        if (!barEl) continue;
+        const binIdx = Math.min(freqBuf.length - 1, 2 + bi * 2);
+        const binNorm = activeAnalyser ? (freqBuf[binIdx] || 0) / 255 : 0;
+        const waveEnvelope = Math.sin(((bi + 0.5) / wfBars.length) * Math.PI);
+        const harmonic =
+          state === 'disconnected'
+            ? 0.14
+            : state === 'thinking'
+              ? 0.28 + 0.36 * Math.abs(Math.sin(t * 2.9 + bi * 0.52))
+              : 0.22 +
+                (binNorm * 0.72 + e * 0.58) *
+                  (0.55 + 0.45 * Math.abs(Math.sin(t * 3.8 + bi * 0.44)));
+        const scaleVal = Math.max(0.14, Math.min(1.15, harmonic * (0.55 + 0.45 * waveEnvelope)));
+        barEl.style.transform = `scaleY(${scaleVal.toFixed(3)})`;
+      }
+
       // 3. Render smooth ChatGPT-style Sky & Pearl Fluid Sphere
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const orbSize = 260;
@@ -2427,29 +2487,34 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
   const effectiveHeadline =
     voiceState === 'thinking'
       ? voiceLang === 'bn-BD'
-        ? 'ভাবছি…'
+        ? 'চিন্তা করছি...'
         : 'Thinking...'
       : voiceState === 'disconnected' || (voiceState === 'listening' && micOffOrMissing)
         ? voiceLang === 'bn-BD'
-          ? 'মাইক বন্ধ'
+          ? 'শান্ত'
           : isMuted
             ? 'Microphone muted'
-            : 'Microphone off'
-        : voiceState === 'listening' && (isUserVoicing || Boolean(liveCaption.trim()))
+            : 'Idle'
+        : voiceState === 'listening'
           ? voiceLang === 'bn-BD'
-            ? 'শুনছি…'
-            : 'Listening...'
-          : voiceState === 'listening'
+            ? 'শুনছি...'
+            : 'Listening'
+          : voiceState === 'speaking'
             ? voiceLang === 'bn-BD'
-              ? 'শুনছি'
-              : activeCopy.headline
-            : voiceState === 'speaking'
-              ? voiceLang === 'bn-BD'
-                ? 'কথা বলছি'
-                : activeCopy.headline
-              : voiceState === 'connecting' && voiceLang === 'bn-BD'
-                ? 'সংযোগ হচ্ছে…'
-                : activeCopy.headline;
+              ? 'বলছি...'
+              : 'Speaking'
+            : voiceState === 'connecting' && voiceLang === 'bn-BD'
+              ? 'সংযোগ হচ্ছে...'
+              : activeCopy.headline;
+
+  const ambientStatusBadge =
+    voiceState === 'speaking'
+      ? { bn: 'বলছি...', en: 'Speaking', tone: 'speaking' }
+      : voiceState === 'thinking'
+        ? { bn: 'চিন্তা করছি...', en: 'Thinking', tone: 'thinking' }
+        : voiceState === 'listening' && !micOffOrMissing
+          ? { bn: 'শুনছি...', en: 'Listening', tone: 'listening' }
+          : { bn: 'শান্ত', en: 'Idle', tone: 'idle' };
 
   const handleTimelineScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -2721,32 +2786,84 @@ export const LiveVoiceOverlay: React.FC<LiveVoiceOverlayProps> = ({
         </div>
       </header>
 
-      {/* Main Center Stage: Top-Center Luminous Animation + Centered Gold-Biscuit Photo Frame */}
+      {/* Main Center Stage: Floating Glassmorphism Voice Stage + Glowing Radial Pulse + Quantum Waveform */}
       <main className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center w-full max-w-xl mx-auto px-4 sm:px-6 py-2 overflow-hidden">
-        {/* Top-Center Animation Orb (compact above photo when photo exists, large centered when empty) */}
         <div
-          data-testid="live-voice-orb-stage"
-          onClick={handlePassiveOrbTap}
-          className={`relative flex items-center justify-center shrink-0 transition-all duration-300 ${
-            featuredImage ? 'mb-3.5' : 'my-auto'
+          data-testid="live-voice-glass-stage"
+          data-status-tone={ambientStatusBadge.tone}
+          className={`live-voice-glass-stage is-tone-${ambientStatusBadge.tone} flex flex-col items-center justify-center ${
+            featuredImage ? 'is-compact mb-3' : 'my-auto'
           }`}
         >
+          {/* Ambient Glowing Status Indicator Badge */}
           <div
-            className={`live-voice-orb-pedestal pointer-events-none ${
-              featuredImage ? 'is-compact' : ''
-            } ${isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''}`}
+            data-testid="live-voice-status-badge"
+            data-voice-badge-tone={ambientStatusBadge.tone}
+            className={`live-voice-status-badge is-tone-${ambientStatusBadge.tone}`}
+          >
+            <span className="live-voice-status-dot" aria-hidden="true" />
+            <span className="font-semibold tracking-tight">{ambientStatusBadge.bn}</span>
+            <span className="text-white/55 text-[11px] font-medium">
+              ({ambientStatusBadge.en})
+            </span>
+          </div>
+
+          {/* Multi-layer Glowing Radial Pulse & Fluid Orb Stage (passive tap never interrupts AI) */}
+          <div
+            data-testid="live-voice-orb-stage"
+            onClick={handlePassiveOrbTap}
+            className={`relative flex items-center justify-center shrink-0 transition-all duration-300 ${
+              featuredImage ? 'my-1.5' : 'my-2.5'
+            }`}
+          >
+            <div
+              className={`live-voice-pulse-ring live-voice-pulse-ring-outer is-tone-${ambientStatusBadge.tone} ${
+                isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''
+              }`}
+              aria-hidden="true"
+            />
+            <div
+              className={`live-voice-pulse-ring live-voice-pulse-ring-inner is-tone-${ambientStatusBadge.tone} ${
+                isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''
+              }`}
+              aria-hidden="true"
+            />
+            <div
+              className={`live-voice-orb-pedestal pointer-events-none ${
+                featuredImage ? 'is-compact' : ''
+              } ${isUserVoicing || voiceState === 'speaking' ? 'is-energized' : ''}`}
+              aria-hidden="true"
+            />
+            <canvas
+              ref={orbCanvasRef}
+              data-testid="live-voice-orb-canvas"
+              className={`${
+                featuredImage
+                  ? 'w-[76px] h-[76px] sm:w-[88px] sm:h-[88px]'
+                  : 'w-[188px] h-[188px] sm:w-[218px] sm:h-[218px]'
+              } relative z-10 block transition-all duration-300`}
+              aria-label="Live voice orb animation"
+            />
+          </div>
+
+          {/* Real-time Quantum Waveform Synchronized to Audio Levels */}
+          <div
+            data-testid="live-voice-quantum-waveform"
             aria-hidden="true"
-          />
-          <canvas
-            ref={orbCanvasRef}
-            data-testid="live-voice-orb-canvas"
-            className={`${
-              featuredImage
-                ? 'w-[78px] h-[78px] sm:w-[90px] sm:h-[90px]'
-                : 'w-[208px] h-[208px] sm:w-[238px] sm:h-[238px]'
-            } block transition-all duration-300`}
-            aria-label="Live voice orb animation"
-          />
+            className={`live-voice-quantum-waveform is-tone-${ambientStatusBadge.tone} ${
+              featuredImage ? 'is-compact' : ''
+            }`}
+          >
+            {Array.from({ length: 16 }, (_, barIdx) => (
+              <span
+                key={barIdx}
+                ref={(el) => {
+                  waveformBarRefs.current[barIdx] = el;
+                }}
+                className="live-voice-quantum-bar"
+              />
+            ))}
+          </div>
         </div>
 
         {/* Centered Front Uploaded Photo in Clean Gold-Biscuit Sized Card (Uncropped object-contain) */}

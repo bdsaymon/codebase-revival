@@ -7111,6 +7111,215 @@ body {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
 }
 
+/* Futuristic Floating Glassmorphism Voice Stage */
+.live-voice-glass-stage {
+  position: relative;
+  width: min(100%, 348px);
+  padding: 20px 22px 18px;
+  border-radius: 32px;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(15, 23, 42, 0.44) 55%,
+    rgba(2, 6, 23, 0.68) 100%
+  );
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: border-color 320ms ease, box-shadow 320ms ease, padding 260ms ease;
+}
+
+.live-voice-glass-stage.is-compact {
+  width: min(100%, 288px);
+  padding: 12px 16px 10px;
+  border-radius: 26px;
+}
+
+.live-voice-glass-stage.is-tone-listening {
+  border-color: rgba(56, 189, 248, 0.36);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    0 0 42px rgba(56, 189, 248, 0.14),
+    inset 0 1px 0 rgba(186, 230, 253, 0.22);
+}
+
+.live-voice-glass-stage.is-tone-thinking {
+  border-color: rgba(167, 139, 250, 0.38);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    0 0 42px rgba(139, 92, 246, 0.16),
+    inset 0 1px 0 rgba(221, 214, 254, 0.2);
+}
+
+.live-voice-glass-stage.is-tone-speaking {
+  border-color: rgba(96, 165, 250, 0.48);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    0 0 54px rgba(59, 130, 246, 0.22),
+    inset 0 1px 0 rgba(191, 219, 254, 0.26);
+}
+
+.live-voice-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border-radius: 9999px;
+  font-size: 12.5px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(248, 250, 252, 0.94);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
+  transition: border-color 280ms ease, box-shadow 280ms ease, background 280ms ease;
+}
+
+.live-voice-status-badge.is-tone-listening {
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.22);
+}
+
+.live-voice-status-badge.is-tone-thinking {
+  background: rgba(139, 92, 246, 0.16);
+  border-color: rgba(167, 139, 250, 0.44);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.24);
+}
+
+.live-voice-status-badge.is-tone-speaking {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(96, 165, 250, 0.48);
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.28);
+}
+
+.live-voice-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #94a3b8;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.live-voice-status-badge.is-tone-listening .live-voice-status-dot {
+  background: #38bdf8;
+  color: #38bdf8;
+}
+
+.live-voice-status-badge.is-tone-thinking .live-voice-status-dot {
+  background: #a78bfa;
+  color: #a78bfa;
+}
+
+.live-voice-status-badge.is-tone-speaking .live-voice-status-dot {
+  background: #60a5fa;
+  color: #60a5fa;
+}
+
+@keyframes liveVoicePulseHalo {
+  0%, 100% {
+    transform: scale(0.96);
+    opacity: 0.42;
+  }
+  50% {
+    transform: scale(1.07);
+    opacity: 0.88;
+  }
+}
+
+.live-voice-pulse-ring {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  transition: transform 300ms ease, border-color 300ms ease, opacity 300ms ease;
+}
+
+.live-voice-pulse-ring-outer {
+  width: 224px;
+  height: 224px;
+  animation: liveVoicePulseHalo 3.2s ease-in-out infinite;
+}
+
+.live-voice-pulse-ring-inner {
+  width: 190px;
+  height: 190px;
+  animation: liveVoicePulseHalo 2.4s ease-in-out infinite reverse;
+}
+
+.live-voice-glass-stage.is-compact .live-voice-pulse-ring-outer {
+  width: 102px;
+  height: 102px;
+}
+
+.live-voice-glass-stage.is-compact .live-voice-pulse-ring-inner {
+  width: 88px;
+  height: 88px;
+}
+
+.live-voice-pulse-ring.is-tone-listening {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.live-voice-pulse-ring.is-tone-thinking {
+  border-color: rgba(167, 139, 250, 0.38);
+}
+
+.live-voice-pulse-ring.is-tone-speaking {
+  border-color: rgba(96, 165, 250, 0.5);
+  box-shadow: 0 0 28px rgba(59, 130, 246, 0.18);
+}
+
+.live-voice-pulse-ring.is-energized {
+  transform: scale(1.08);
+  opacity: 0.95;
+}
+
+.live-voice-quantum-waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px;
+  margin-top: 2px;
+}
+
+.live-voice-quantum-waveform.is-compact {
+  height: 18px;
+  gap: 3.5px;
+}
+
+.live-voice-quantum-bar {
+  width: 3px;
+  height: 24px;
+  border-radius: 9999px;
+  transform-origin: center;
+  transform: scaleY(0.18);
+  background: linear-gradient(180deg, #bae6fd 0%, #38bdf8 55%, #6366f1 100%);
+  opacity: 0.85;
+  transition: background 240ms ease;
+}
+
+.live-voice-quantum-waveform.is-compact .live-voice-quantum-bar {
+  width: 2.5px;
+  height: 16px;
+}
+
+.live-voice-quantum-waveform.is-tone-thinking .live-voice-quantum-bar {
+  background: linear-gradient(180deg, #ddd6fe 0%, #a78bfa 55%, #6366f1 100%);
+}
+
+.live-voice-quantum-waveform.is-tone-speaking .live-voice-quantum-bar {
+  background: linear-gradient(180deg, #e0f2fe 0%, #60a5fa 50%, #2563eb 100%);
+}
+
+.live-voice-quantum-waveform.is-tone-idle .live-voice-quantum-bar {
+  background: linear-gradient(180deg, rgba(203, 213, 225, 0.6) 0%, rgba(100, 116, 139, 0.45) 100%);
+  opacity: 0.45;
+}
+
 /* Preserve full keyboard accessibility with curved focus rings */
 .live-voice-overlay button,
 .live-voice-overlay select,

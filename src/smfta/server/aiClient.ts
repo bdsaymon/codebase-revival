@@ -20,6 +20,7 @@ import type { CanonicalMessage } from './engine/context';
 import type { JsonObjectSchema } from './engine/outputValidator';
 import { redactSecrets } from './engine/security';
 import { SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from './engine/defaults';
+import { decryptKeyPayloadIfSupported, resolveServerEnvGeminiKey } from './keyResolver';
 
 export function sanitizeErrorMsg(err: unknown, additionalKeys?: string[]): string {
   const raw =
@@ -45,22 +46,16 @@ export function sanitizeErrorMsg(err: unknown, additionalKeys?: string[]): strin
 }
 
 export function getServerGeminiKey(): string {
-  return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    ''
-  ).trim();
+  return resolveServerEnvGeminiKey();
 }
 
 export function normalizeGeminiModelName(requestedModel?: string): string {
   const raw = (requestedModel || '').trim();
-  if (!raw) return 'gemini-4-hydrogen';
+  if (!raw) return 'gemini-3.8-flash';
   const bare = raw.includes('/') ? raw.split('/').pop() || raw : raw;
   const lower = bare.toLowerCase();
 
   if (
-    lower === 'gemini-3.8-flash' ||
     lower === 'gemini-2.0-flash' ||
     lower === 'gemini-1.5-flash' ||
     lower === 'gemini-1.5-pro' ||
@@ -68,6 +63,13 @@ export function normalizeGeminiModelName(requestedModel?: string): string {
   ) {
     return 'gemini-3-flash-preview';
   }
+
+  if (lower === 'smfta-flash') return 'gemini-3.1-flash-lite';
+  if (lower === 'smfta-pro' || lower === 'smfta-ultra' || lower === 'smfta-v2-pro') {
+    return 'gemini-3.8-flash';
+  }
+  if (lower === 'smfta-v5') return 'gemini-3.5-flash-lite';
+  if (lower === 'smfta-max') return 'gemini-4-hydrogen';
 
   if (lower.startsWith('gemini-')) {
     return bare;
@@ -134,18 +136,25 @@ export function buildAdHocProviderConfig(params: {
   exactModelOnly?: boolean;
   respectCustomBaseUrl?: boolean;
   contextWindow?: number;
+  apiKeyOverride?: string;
 }): {
   effectiveProvider: string;
   adHocProviders: AdHocProviderInput[];
   hasUserKeys: boolean;
   allowKeylessFallback: boolean;
 } {
-  const rawKeys = Array.isArray(params.externalKeys)
+  const rawKeyCandidates = Array.isArray(params.externalKeys)
     ? params.externalKeys.map((k) => k.trim()).filter(Boolean)
     : (params.externalKeys || '')
         .split(/[\n,;]+/)
         .map((k) => k.trim())
         .filter(Boolean);
+  const rawKeys = rawKeyCandidates
+    .map((k) => {
+      const dec = decryptKeyPayloadIfSupported(k);
+      return dec.ok ? dec.key : '';
+    })
+    .filter(Boolean);
 
   const effectiveProvider = resolveEffectiveProvider(
     params.provider || 'xrahat',
@@ -302,8 +311,8 @@ export function buildAdHocProviderConfig(params: {
     });
   }
 
-  // Server Gemini key if available for smfta_cloud / xrahat OR keyless gemini_custom
-  const serverGemKey = getServerGeminiKey();
+  // Server/resolved Gemini key if available for smfta_cloud / xrahat OR keyless gemini_custom
+  const serverGemKey = (params.apiKeyOverride || getServerGeminiKey()).trim();
   const useServerGemini =
     Boolean(serverGemKey) &&
     (isExplicitKeyless ||
@@ -311,7 +320,7 @@ export function buildAdHocProviderConfig(params: {
         (effectiveProvider === 'gemini_custom' ||
           effectiveProvider === 'gemini_openai')));
   if (useServerGemini) {
-    // Map built-in SMFTA tier ids cleanly to fast valid Gemini models.
+    // Map built-in SMFTA V1/V2 tier IDs cleanly to valid Gemini models.
     const rawExt = (params.externalModel || '').trim().toLowerCase();
     const isFastTier =
       rawExt === 'smfta-flash' ||
@@ -320,7 +329,11 @@ export function buildAdHocProviderConfig(params: {
     const mappedTierModel =
       rawExt === 'smfta-flash'
         ? 'gemini-3.1-flash-lite'
-        : rawExt === 'smfta-ultra' || rawExt === 'smfta-pro'
+        : rawExt === 'smfta-ultra' || rawExt === 'smfta-pro' || rawExt === 'smfta-v2-pro'
+        ? 'gemini-3.8-flash'
+        : rawExt === 'smfta-v5'
+        ? 'gemini-3.5-flash-lite'
+        : rawExt === 'smfta-max'
         ? 'gemini-4-hydrogen'
         : rawExt &&
           !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt)
@@ -329,19 +342,19 @@ export function buildAdHocProviderConfig(params: {
     const orderedFallbacks = isFastTier
       ? [
           ...(mappedTierModel ? [mappedTierModel] : []),
+          'gemini-3.1-flash-lite',
           'gemini-flash-lite-latest',
           'gemini-3-flash-preview',
-          'gemini-3.1-flash-lite',
           'gemini-2.5-flash-lite',
           'gemini-4-hydrogen',
         ]
       : [
           ...(mappedTierModel ? [mappedTierModel] : []),
-          'gemini-3-flash-preview',
-          'gemini-flash-lite-latest',
-          'gemini-3.1-flash-lite',
+          'gemini-3.8-flash',
           'gemini-4-hydrogen',
-          'gemini-2.5-flash',
+          'gemini-3-flash-preview',
+          'gemini-3.1-flash-lite',
+          'gemini-flash-lite-latest',
         ];
     const gemModels = Array.from(new Set(orderedFallbacks)).map((m) => ({
       model_id: m,

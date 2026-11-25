@@ -1,4 +1,5 @@
 import { GoogleGenAI, ThinkingLevel, type GenerateContentResponse } from '@google/genai';
+import { resolveServerEnvGeminiKey } from '../keyResolver';
 
 export type GeminiTextModelId =
   | 'gemini-4-hydrogen'
@@ -66,12 +67,7 @@ export const GEMINI_IMAGE_MODELS = [
 ] as const;
 
 export function getServerGeminiApiKey(): string {
-  return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    ''
-  ).trim();
+  return resolveServerEnvGeminiKey();
 }
 
 export function isGeminiConfigured(): boolean {
@@ -133,14 +129,16 @@ export function normalizeActiveGeminiModel(requestedModel?: string): GeminiTextM
   ) {
     return 'gemini-3-flash-preview';
   }
-  if (lower === 'smfta-pro' || lower === 'smfta-ultra' || lower === 'smfta-v2-pro' || lower === 'smfta-max') {
+  if (lower === 'smfta-pro' || lower === 'smfta-ultra' || lower === 'smfta-v2-pro') {
+    return 'gemini-3.8-flash';
+  }
+  if (lower === 'smfta-max') {
     return 'gemini-4-hydrogen';
   }
-  if (
-    lower === 'gemini-2.5-flash-lite' ||
-    lower === 'smfta-flash' ||
-    lower === 'smfta-v5'
-  ) {
+  if (lower === 'smfta-v5') {
+    return 'gemini-3.5-flash-lite';
+  }
+  if (lower === 'gemini-2.5-flash-lite' || lower === 'smfta-flash') {
     return 'gemini-3.1-flash-lite';
   }
 

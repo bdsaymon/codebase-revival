@@ -703,14 +703,75 @@ export const ProvidersApiSection: React.FC<ProvidersApiSectionProps> = ({
                   placeholder='Custom Headers JSON: {"HTTP-Referer": "..."}'
                   className="cs-input w-full font-mono text-xs py-1.5"
                 />
-                <input
-                  type="text"
-                  data-testid="provider-custom-params-input"
-                  value={newCustomParams}
-                  onChange={(e) => setNewCustomParams(e.target.value)}
-                  placeholder='Custom Params JSON: {"seed": 42}'
-                  className="cs-input w-full font-mono text-xs py-1.5"
-                />
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-medium text-[var(--text-2)]">
+                      JSON Provider Gateway / Custom Params
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="provider-json-preset-btn"
+                      onClick={() => {
+                        onChangeNewProviderId('custom');
+                        setNewCustomParams(
+                          JSON.stringify(
+                            {
+                              endpoint: 'https://api.openai.com/v1/chat/completions',
+                              requestFormat: 'openai',
+                              responsePath: 'choices[0].message.content',
+                              stream: true,
+                              models: [newModel || 'gpt-4o-mini'],
+                            },
+                            null,
+                            2
+                          )
+                        );
+                      }}
+                      className="text-[11px] font-semibold text-[var(--primary)] hover:underline cursor-pointer"
+                    >
+                      Load JSON Gateway Preset
+                    </button>
+                  </div>
+                  <textarea
+                    rows={3}
+                    data-testid="provider-custom-params-input"
+                    value={newCustomParams}
+                    onChange={(e) => setNewCustomParams(e.target.value)}
+                    placeholder='Custom Params or JSON Provider Spec: {"endpoint": "...", "requestFormat": "openai", "responsePath": "choices[0].message.content"}'
+                    className="cs-input w-full font-mono text-xs py-1.5 min-h-[68px]"
+                  />
+                </div>
+                {(() => {
+                  const errors: string[] = [];
+                  const checkJsonObj = (raw: string, label: string) => {
+                    const trimmed = raw.trim();
+                    if (!trimmed) return;
+                    try {
+                      const parsed = JSON.parse(trimmed);
+                      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                        errors.push(`${label} অবশ্যই একটি বৈধ JSON অবজেক্ট ({...}) হতে হবে।`);
+                      }
+                    } catch (e) {
+                      errors.push(
+                        `${label} JSON ফরম্যাট সঠিক নয়: ${e instanceof Error ? e.message : 'Syntax error'}`
+                      );
+                    }
+                  };
+                  checkJsonObj(newCustomHeaders, 'Headers');
+                  checkJsonObj(newCustomParams, 'JSON Provider / Params');
+                  if (errors.length === 0) return null;
+                  return (
+                    <div
+                      data-testid="provider-json-validation-error"
+                      role="alert"
+                      className="px-2.5 py-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-[11.5px] text-rose-500 dark:text-rose-300 space-y-0.5"
+                    >
+                      {errors.map((errMsg, idx) => (
+                        <div key={idx}>{errMsg}</div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>

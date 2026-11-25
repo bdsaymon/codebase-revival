@@ -4490,6 +4490,13 @@ export default function App() {
       const streamReqHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-Custom-Provider': activeProvider,
+        ...(effectiveExternalKeys &&
+        !effectiveExternalKeys.startsWith('enc:') &&
+        (activeProvider === 'gemini_custom' ||
+          activeProvider === 'gemini_openai' ||
+          effectiveExternalKeys.startsWith('AIza'))
+          ? { 'x-gemini-key': effectiveExternalKeys }
+          : {}),
       };
 
       let response: Response | null = null;
@@ -7594,7 +7601,11 @@ export default function App() {
 
                 {/* Manual Provider Switch Alert Banner (when active provider hits rate limit / quota / error) */}
                 {providerLimitBanner && (
-                  <div className="limit-banner w-full max-w-[780px] mb-3 flex flex-col gap-2">
+                  <div
+                    data-testid="chat-provider-error-banner"
+                    role="alert"
+                    className="limit-banner w-full max-w-[780px] mb-3 flex flex-col gap-2"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-start gap-2 text-xs">
                         <AlertTriangle className="limit-banner-icon w-4 h-4 shrink-0 mt-0.5" />

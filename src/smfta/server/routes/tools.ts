@@ -4,6 +4,7 @@ import { Router, Request, Response } from '../runtime/express';
 import { callBackendEngine, sanitizeErrorMsg } from '../aiClient';
 import { sanitizeProprietaryOutput } from '../providers';
 import { getV2GeminiApiKey } from '../v2FirebaseAi';
+import { resolveGeminiApiKey } from '../keyResolver';
 import { generateOrEditGeminiImage } from '../services/geminiService';
 import { getNeuralStatus, retrainModelWeights } from '../intentRules';
 import {
@@ -535,11 +536,15 @@ toolsRouter.post('/voice/transcribe', async (req: Request, res: Response) => {
       ? req.body.language.trim()
       : 'bn-BD / en-US';
 
-  const geminiKey = getV2GeminiApiKey();
+  const resolvedGem = resolveGeminiApiKey(req);
+  const geminiKey = resolvedGem.apiKey || getV2GeminiApiKey();
   if (!geminiKey) {
-    return res.status(503).json({
+    return res.status(resolvedGem.errorCode === 'KEY_DECRYPT_FAILED' ? 401 : 503).json({
       ok: false,
-      error: 'Voice transcription service key is not configured on the server.',
+      code: resolvedGem.errorCode || 'INTEGRATION_REQUIRED',
+      error:
+        resolvedGem.errorBn ||
+        'Voice transcription service key is not configured on the server.',
     });
   }
 
@@ -1057,7 +1062,8 @@ async function streamGeminiLiveVerbatimTts(params: {
       return { ok: false, totalBytes: 0, sampleRate: 24000, error: 'Aborted' };
     }
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 150));
+      const waitMs = /429|resource_exhausted|quota|rate/i.test(lastErr) ? 1500 : 180;
+      await new Promise((r) => setTimeout(r, waitMs));
     }
     const handle = await createWarmLiveTtsSession(params.apiKey, params.voiceName);
     if (!handle) {
@@ -1128,7 +1134,7 @@ toolsRouter.post('/voice/tts', async (req: Request, res: Response) => {
   const voiceName = resolveGeminiFemaleVoice(
     typeof req.body?.voiceName === 'string' ? req.body.voiceName : undefined
   );
-  const geminiKey = getV2GeminiApiKey();
+  const geminiKey = resolveGeminiApiKey(req).apiKey || getV2GeminiApiKey();
 
   // 1. Instant in-memory cache hit (skip old robotic fallback cache if Gemini key is active)
   const cached = getCachedTtsEntry(voiceName, speechText);
@@ -1337,7 +1343,8 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
       'Content-Type',
       `audio/pcm; rate=${sampleRate}; channels=1; encoding=signed-int`
     );
-    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.setHeader('X-Voice-Sample-Rate', String(sampleRate));
     res.setHeader('X-Voice-Model-Used', `${cached.modelUsed}-cached`);
     res.flushHeaders();
@@ -1346,7 +1353,7 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
     return;
   }
 
-  const geminiKey = getV2GeminiApiKey();
+  const geminiKey = resolveGeminiApiKey(req).apiKey || getV2GeminiApiKey();
   if (!geminiKey) {
     console.warn('[voice/tts-stream] Gemini streaming TTS unavailable: GEMINI_API_KEY is missing.');
     return res.status(200).json({
@@ -1394,7 +1401,8 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
           'Content-Type',
           `audio/pcm; rate=${liveSampleRate}; channels=1; encoding=signed-int`
         );
-        res.setHeader('Cache-Control', 'no-cache, no-store');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('X-Accel-Buffering', 'no');
         res.setHeader('X-Voice-Sample-Rate', String(liveSampleRate));
         res.setHeader('X-Voice-Model-Used', 'gemini-3.8-live');
         res.flushHeaders();
@@ -1499,7 +1507,8 @@ toolsRouter.post('/voice/tts-stream', async (req: Request, res: Response) => {
               'Content-Type',
               `audio/pcm; rate=${streamSampleRate}; channels=1; encoding=signed-int`
             );
-            res.setHeader('Cache-Control', 'no-cache, no-store');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('X-Accel-Buffering', 'no');
             res.setHeader('X-Voice-Sample-Rate', String(streamSampleRate));
             res.setHeader('X-Voice-Model-Used', model);
             res.flushHeaders();

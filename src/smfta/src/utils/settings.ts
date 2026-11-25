@@ -227,12 +227,8 @@ export function sanitizeSettings(input: unknown): AppSettings {
   let externalModel = str(raw.externalModel, DEFAULT_SETTINGS.externalModel || '')
     .trim()
     .slice(0, 200);
-  if (
-    /^(?:gemini-1\.5|gemini-2\.0|gemini-pro|gemini-3\.8-flash)/i.test(externalModel)
-  ) {
+  if (/^(?:gemini-1\.5|gemini-2\.0|gemini-pro)/i.test(externalModel)) {
     externalModel = 'gemini-4-hydrogen';
-  } else if (/^gemini-3\.5-flash-lite/i.test(externalModel)) {
-    externalModel = 'gemini-3.1-flash-lite';
   }
 
   // Clamp (and round) instead of rejecting: an outdated/corrupt stored value

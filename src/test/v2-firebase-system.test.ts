@@ -59,8 +59,8 @@ describe('V2 Special Firebase AI System', () => {
       maxOutputTokens: 8192,
       thinkingLevel: 'LOW',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.1-flash-lite',
-      firebaseAiModel: 'gemini-3.1-flash-lite',
+      serverGeminiModel: 'gemini-3.5-flash-lite',
+      firebaseAiModel: 'gemini-3.5-flash-lite',
     });
 
     const pro = getV2ModelSpec('smfta-v2-pro');
@@ -70,8 +70,8 @@ describe('V2 Special Firebase AI System', () => {
       maxOutputTokens: 16384,
       thinkingLevel: 'MEDIUM',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-4-hydrogen',
-      firebaseAiModel: 'gemini-4-hydrogen',
+      serverGeminiModel: 'gemini-3.8-flash',
+      firebaseAiModel: 'gemini-3.8-flash',
     });
 
     const max = getV2ModelSpec('smfta-max');

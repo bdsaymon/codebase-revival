@@ -75,6 +75,11 @@ import {
   retrieveRelevantV2Memories,
   retrieveV2RagContext,
 } from '../v2Rag';
+import { extractApiKeyList, resolveGeminiApiKey } from '../keyResolver';
+import {
+  executeJsonProviderChat,
+  parseJsonProviderSpec,
+} from '../jsonProviderGateway';
 
 export const chatRouter = Router();
 
@@ -884,6 +889,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     knowledgeContext = '',
     mcpToolsContext = '',
     customParams,
+    customHeaders,
     requestTimeoutSec,
     maxOutputTokens,
     trainingData,
@@ -919,7 +925,15 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     liveVoiceMode = false,
   } = req.body || {};
 
-  const parsedCustomParams = parseCustomParamsSafe(customParams);
+  const resolvedGeminiKey = resolveGeminiApiKey(req);
+  const jsonGatewaySpec = parseJsonProviderSpec({
+    customParams,
+    customHeaders,
+    fallbackBaseUrl: typeof externalBaseUrl === 'string' ? externalBaseUrl : '',
+  });
+  const parsedCustomParams = jsonGatewaySpec.isJsonGateway
+    ? jsonGatewaySpec.extraParams
+    : parseCustomParamsSafe(customParams);
   const parsedStopSequences = Array.isArray(stopSequences)
     ? stopSequences
         .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
@@ -965,16 +979,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     });
   }
 
-  const rawKeysInput =
-    typeof externalKeys === 'string'
-      ? externalKeys
-      : Array.isArray(externalKeys)
-      ? externalKeys.map((k) => String(k || '')).join('\n')
-      : '';
-  const parsedKeys = rawKeysInput
-    .split(/[\n,;]+/)
-    .map((k: string) => k.trim())
-    .filter(Boolean);
+  const parsedKeys = extractApiKeyList(externalKeys);
 
   const effectiveProvider = resolveEffectiveProvider(
     provider,
@@ -1086,6 +1091,30 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   });
 
   try {
+  if (
+    resolvedGeminiKey.errorCode === 'KEY_DECRYPT_FAILED' &&
+    !resolvedGeminiKey.apiKey &&
+    (isV2ModelId(activeCustomModelName) ||
+      effectiveProvider === 'gemini_custom' ||
+      effectiveProvider === 'gemini_openai')
+  ) {
+    const decryptMsg =
+      resolvedGeminiKey.errorBn ||
+      '⚠️ সেভ করা Gemini API কী ডিক্রিপ্ট করা যায়নি। অনুগ্রহ করে Settings থেকে নতুন কী দিন অথবা সার্ভার এনভায়রনমেন্ট ভেরিয়েবল চেক করুন।';
+    emitEvent({
+      type: 'error',
+      ok: false,
+      code: 'KEY_DECRYPT_FAILED',
+      httpStatus: 400,
+      retryable: false,
+      requestId,
+      message: decryptMsg,
+      text: decryptMsg,
+      delta: decryptMsg,
+    });
+    finishStream();
+    return;
+  }
 
   // ============================================================================
   // INDEPENDENT V2 – SPECIAL (FIREBASE AI SYSTEM) BRANCH
@@ -1327,6 +1356,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       thinkingEffort:
         liveVoiceMode || requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
       liveVoiceMode,
+      apiKeyOverride: resolvedGeminiKey.apiKey || undefined,
       maxOutputTokensOverride: liveVoiceMode
         ? v2WantsDetailedVoice
           ? 480
@@ -1388,6 +1418,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         },
         thinkingEnabled: false,
         thinkingEffort: 'low',
+        apiKeyOverride: resolvedGeminiKey.apiKey || undefined,
       });
       if (!v2ContRes.ok || !contBuffer.trim()) {
         v2LastTruncated = v2LastTruncated || Boolean(v2ContRes.truncated);
@@ -1762,6 +1793,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     exactModelOnly: Boolean(activeCustomModelName),
     contextWindow,
     respectCustomBaseUrl: true,
+    apiKeyOverride: resolvedGeminiKey.apiKey || undefined,
   });
 
   const cleanVoiceUserName = String(nickname || userName || '').trim();
@@ -1799,6 +1831,74 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     emitStatus('চিন্তা করছি…', 'thinking', 'Reasoning in progress');
   }
 
+  // 3A. Malformed JSON / V1 JSON Custom Provider Gateway branch
+  if (jsonGatewaySpec.parseError && (effectiveProvider === 'custom' || Boolean(customParams))) {
+    const parseErrBn = `⚠️ JSON প্রোভাইডার কনফিগারেশন ত্রুটি: ${jsonGatewaySpec.parseError}`;
+    emitEvent({
+      type: 'error',
+      ok: false,
+      code: 'BAD_JSON_PROVIDER_CONFIG',
+      httpStatus: 400,
+      retryable: false,
+      requestId,
+      message: parseErrBn,
+      text: parseErrBn,
+      delta: parseErrBn,
+    });
+    finishStream();
+    return;
+  }
+
+  if (jsonGatewaySpec.isJsonGateway && jsonGatewaySpec.spec && !clientClosed) {
+    const gwRes = await executeJsonProviderChat({
+      spec: jsonGatewaySpec.spec,
+      messages: canonicalMessages,
+      modelId: activeCustomModelName || jsonGatewaySpec.spec.models[0] || 'gpt-4o-mini',
+      apiKey: parsedKeys[0] || resolvedGeminiKey.apiKey || undefined,
+      maxTokens: effectiveMaxOutputTokens,
+      temperature: typeof weightTemp === 'number' ? weightTemp : algoDecision.temperature,
+      stream: supportsStreaming !== false && jsonGatewaySpec.spec.stream,
+      abortSignal: upstreamAbortController.signal,
+      onDelta: (deltaChunk) => {
+        emitDelta(deltaChunk);
+      },
+    });
+    if (gwRes.ok && (fullReplyAccumulator.trim() || gwRes.text.trim())) {
+      finishStream({
+        type: 'done',
+        ok: true,
+        requestId,
+        requestedProvider: effectiveProvider,
+        requestedModel: activeCustomModelName || gwRes.modelUsed,
+        providerUsed: 'custom_json_gateway',
+        modelUsed: gwRes.modelUsed,
+        attemptCount: 1,
+        ttftMs:
+          firstTokenPerf !== null
+            ? Math.max(1, Math.round(firstTokenPerf - streamStartPerf))
+            : undefined,
+        latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+      });
+      return;
+    }
+    const gwErrMsg =
+      gwRes.errorBn ||
+      '⚠️ কাস্টম JSON প্রোভাইডার থেকে উত্তর পাওয়া যায়নি। URL ও ফরম্যাট পরীক্ষা করুন।';
+    emitEvent({
+      type: 'error',
+      ok: false,
+      code: 'JSON_PROVIDER_FAILED',
+      httpStatus: gwRes.httpStatus,
+      retryable: (gwRes.httpStatus ?? 0) >= 500 || gwRes.httpStatus === 429,
+      requestId,
+      message: gwErrMsg,
+      text: gwErrMsg,
+      delta: gwErrMsg,
+    });
+    finishStream();
+    return;
+  }
+
   // 3B. Ultra-low-latency Live Voice Fast-Lane (sub-second TTFT via gemini-3.1-flash-lite)
   const isCustomNonGeminiProvider =
     Boolean(parsedKeys.length > 0) &&
@@ -1808,8 +1908,12 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     effectiveProvider !== 'smfta_cloud';
 
   if (liveVoiceMode && !isCustomNonGeminiProvider && !clientClosed) {
-    const fastGeminiKey =
-      (parsedKeys.find((k) => k.startsWith('AIza')) || getV2GeminiApiKey() || '').trim();
+    const fastGeminiKey = (
+      parsedKeys.find((k) => k.startsWith('AIza')) ||
+      resolvedGeminiKey.apiKey ||
+      getV2GeminiApiKey() ||
+      ''
+    ).trim();
     if (fastGeminiKey) {
       const fastAi = new GoogleGenAI({
         apiKey: fastGeminiKey,
@@ -1821,8 +1925,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           ? formattedTurns
           : [{ role: 'user' as const, parts: [{ text: lastUserText || 'Hello' }] }];
       const fastVoiceCandidates: Array<{ model: string; level?: ThinkingLevel }> = [
-        { model: 'gemini-flash-lite-latest', level: ThinkingLevel.MINIMAL },
         { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
+        { model: 'gemini-3.8-flash', level: ThinkingLevel.LOW },
+        { model: 'gemini-flash-lite-latest', level: ThinkingLevel.MINIMAL },
         { model: 'gemini-3-flash-preview' },
       ];
 

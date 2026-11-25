@@ -25,6 +25,7 @@ import {
   createIdleWatchdog,
   mergeContinuationText,
 } from '../src/utils/streamGuard';
+import { resolveServerEnvGeminiKey } from './keyResolver';
 
 interface UserDailyUsageRecord {
   dateRiyadh: string;
@@ -462,16 +463,11 @@ export function stripPrivateChainOfThought(text: string): string {
 }
 
 export function getV2GeminiApiKey(): string {
-  return (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    ''
-  ).trim();
+  return resolveServerEnvGeminiKey();
 }
 
-function getGenAIClient(): GoogleGenAI | null {
-  const apiKey = getV2GeminiApiKey();
+function getGenAIClient(apiKeyOverride?: string): GoogleGenAI | null {
+  const apiKey = (apiKeyOverride || getV2GeminiApiKey()).trim();
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,
@@ -810,9 +806,9 @@ function markV2ModelHealthy(model: string): void {
 
 /**
  * Downward-only single-pass V2 server model chain:
- * - smfta-max: gemini-4-hydrogen -> gemini-3-flash-preview -> gemini-3.1-flash-lite
- * - smfta-v2-pro: gemini-4-hydrogen -> gemini-3-flash-preview -> gemini-3.1-flash-lite
- * - smfta-v5: gemini-3.1-flash-lite -> gemini-flash-lite-latest
+ * - smfta-v5: gemini-3.5-flash-lite -> gemini-3.1-flash-lite -> gemini-flash-lite-latest -> gemini-3-flash-preview
+ * - smfta-v2-pro: gemini-3.8-flash -> gemini-3-flash-preview -> gemini-3.1-flash-lite -> gemini-flash-lite-latest
+ * - smfta-max: gemini-4-hydrogen -> gemini-3.8-flash -> gemini-3.1-flash-lite -> gemini-3-flash-preview
  */
 export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const spec = getV2ModelSpec(modelId);
@@ -822,9 +818,9 @@ export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
       ? Array.from(
           new Set([
             primary,
+            'gemini-3.1-flash-lite',
             'gemini-flash-lite-latest',
             'gemini-3-flash-preview',
-            'gemini-2.5-flash-lite',
           ])
         )
       : modelId === 'smfta-v2-pro'
@@ -839,9 +835,9 @@ export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
         : Array.from(
             new Set([
               primary,
+              'gemini-3.8-flash',
               'gemini-3.1-flash-lite',
               'gemini-3-flash-preview',
-              'gemini-flash-lite-latest',
             ])
           );
   const healthy = raw.filter((m) => !isV2ModelInCooldown(m));
@@ -904,12 +900,13 @@ export async function streamV2FirebaseModel(params: {
   idleChunkTimeoutMs?: number;
   liveVoiceMode?: boolean;
   maxOutputTokensOverride?: number;
+  apiKeyOverride?: string;
 }): Promise<V2StreamResult> {
   const spec = getV2ModelSpec(params.modelId);
   const ai =
     params.genAiClientOverride !== undefined
       ? params.genAiClientOverride
-      : (getGenAIClient() as unknown as V2GenAiStreamClientLike | null);
+      : (getGenAIClient(params.apiKeyOverride) as unknown as V2GenAiStreamClientLike | null);
 
   if (!ai) {
     return {

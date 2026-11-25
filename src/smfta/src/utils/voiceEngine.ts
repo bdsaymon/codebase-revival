@@ -611,7 +611,7 @@ export async function streamGeminiPcmSpeech(params: {
   fallbackToBrowser?: boolean;
   error?: string;
 }> {
-  const cleanText = formatTextForNaturalSpeech(params.text, 600);
+  const cleanText = formatTextForNaturalSpeech(params.text, 900);
   if (!cleanText) {
     return { ok: false, receivedAudio: false, error: 'Empty speech text.' };
   }

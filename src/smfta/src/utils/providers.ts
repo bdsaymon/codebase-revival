@@ -717,6 +717,8 @@ export const SAVED_PROFILES_KEY = 'smfta_provider_profiles';
 
 export const GEMINI_ACTIVE_MODELS = [
   'gemini-4-hydrogen',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
   'gemini-4-neon',
   'gemini-4-carbon',
@@ -739,13 +741,7 @@ export function normalizeProviderProfile(
   p: SavedProviderProfile
 ): SavedProviderProfile {
   if (p.provider === 'gemini_custom' || isBuiltinProviderId(p.provider)) {
-    const current = (p.externalModel || '').trim();
-    const cleaned =
-      current === 'gemini-3.8-flash'
-        ? 'gemini-4-hydrogen'
-        : current === 'gemini-3.5-flash-lite'
-        ? 'gemini-3.1-flash-lite'
-        : current;
+    const cleaned = (p.externalModel || '').trim();
     return {
       ...p,
       availableModels: [...GEMINI_ACTIVE_MODELS, ...BUILTIN_TIER_MODELS],

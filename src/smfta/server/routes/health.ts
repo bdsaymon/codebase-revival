@@ -9,6 +9,7 @@ import {
   GEMINI_TEXT_MODELS,
   isGeminiConfigured,
 } from '../services/geminiService';
+import { resolveGeminiApiKey } from '../keyResolver';
 
 export const healthRouter = Router();
 
@@ -21,11 +22,12 @@ export interface KillSwitchAuditEntry {
 
 export const killSwitchAuditLog: KillSwitchAuditEntry[] = [];
 
-healthRouter.get('/health', (_req: Request, res: Response) => {
+healthRouter.get('/health', (req: Request, res: Response) => {
   const engine = getSharedHardenedEngine();
   const engineHealth = engine.getHealth();
   const neural = getNeuralStatus();
-  const geminiConfigured = isGeminiConfigured();
+  const resolvedReqKey = resolveGeminiApiKey(req);
+  const geminiConfigured = isGeminiConfigured() || Boolean(resolvedReqKey.apiKey);
   const adminTokenConfigured = Boolean(process.env.AI_ADMIN_TOKEN?.trim());
   const appUrlConfigured = Boolean(process.env.APP_URL?.trim());
   const envStatus = {
@@ -49,6 +51,9 @@ healthRouter.get('/health', (_req: Request, res: Response) => {
     engine: `SMFTA Neural Core v${APP_VERSION}`,
     geminiConfigured,
     geminiServerKeyConfigured: geminiConfigured,
+    keySource: resolvedReqKey.source,
+    corsEnabled: true,
+    vercelCompatible: true,
     adminTokenConfigured,
     appUrlConfigured,
     envStatus,
@@ -63,13 +68,8 @@ healthRouter.get('/health', (_req: Request, res: Response) => {
   });
 });
 
-healthRouter.post('/health/live-check', async (_req: Request, res: Response) => {
-  const apiKey = (
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_API_KEY ||
-    process.env.API_KEY ||
-    ''
-  ).trim();
+healthRouter.post('/health/live-check', async (req: Request, res: Response) => {
+  const apiKey = resolveGeminiApiKey(req).apiKey;
 
   let geminiChatOk = false;
   let geminiChatMessage = 'GEMINI_API_KEY সেট করা নেই';

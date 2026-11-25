@@ -176,6 +176,23 @@ export async function dispatchToLegacyApp(request: Request): Promise<Response> {
   const writer = stream.writable.getWriter();
   const closeListeners: Array<() => void> = [];
   const resHeaders = new Headers();
+  const originHeader = headers['origin'];
+  resHeaders.set('Access-Control-Allow-Origin', originHeader || '*');
+  resHeaders.set('Vary', 'Origin');
+  resHeaders.set(
+    'Access-Control-Allow-Methods',
+    'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+  );
+  resHeaders.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Gemini-Key, X-Api-Key, X-Custom-Provider, X-Admin-Token, X-Request-Id, X-SMFTA-Client-Id'
+  );
+  resHeaders.set('Access-Control-Max-Age', '86400');
+
+  if (request.method.toUpperCase() === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: resHeaders });
+  }
+
   let statusCode = 200;
   let headersSent = false;
   let ended = false;

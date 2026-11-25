@@ -16,6 +16,14 @@ import {
   normalizeGeminiModelName,
   sanitizeErrorMsg,
 } from '../aiClient';
+import {
+  decryptKeyPayloadIfSupported,
+  extractApiKeyList,
+} from '../keyResolver';
+import {
+  executeJsonProviderChat,
+  parseJsonProviderSpec,
+} from '../jsonProviderGateway';
 import { verifyConnectionTargetSafe } from '../engine/config';
 import { parseCustomParamsSafe } from '../engine/adapters';
 import {
@@ -394,20 +402,81 @@ providerRouter.post('/test-provider', async (req: Request, res: Response) => {
     testStreaming = false,
     contextWindow,
     customParams,
+    customHeaders,
   } = req.body || {};
 
   const parsedCustomParams = parseCustomParamsSafe(customParams);
 
-  const keys = String(externalKeys || '')
-    .split(/[\n,;]+/)
-    .map((k: string) => k.trim())
-    .filter(Boolean);
+  const rawKeyTokens = extractApiKeyList(externalKeys);
+  const keys: string[] = [];
+  for (const tok of rawKeyTokens) {
+    const dec = decryptKeyPayloadIfSupported(tok);
+    if (dec.sealedDetected && !dec.ok) {
+      return res.json({
+        ok: false,
+        errorCode: 'KEY_DECRYPT_FAILED',
+        latencyMs: Math.max(1, Math.round(performance.now() - startPerf)),
+        message: `❌ ${dec.errorBn || 'এনক্রিপ্টেড কী পড়া যাচ্ছে না। অনুগ্রহ করে API Key পুনরায় দিন।'}`,
+      });
+    }
+    if (dec.ok && dec.key) keys.push(dec.key);
+  }
 
   const effectiveProvider = resolveEffectiveProvider(
     provider,
     keys,
     externalBaseUrl
   );
+
+  const jsonSpecProbe = parseJsonProviderSpec({
+    customParams,
+    customHeaders,
+    fallbackBaseUrl: String(externalBaseUrl || '').trim(),
+  });
+  if (jsonSpecProbe.parseError) {
+    return res.json({
+      ok: false,
+      errorCode: 'INVALID_JSON_SPEC',
+      latencyMs: Math.max(1, Math.round(performance.now() - startPerf)),
+      message: `❌ JSON কনফিগারেশন সঠিক নয়: ${jsonSpecProbe.parseError}`,
+    });
+  }
+  if (jsonSpecProbe.isJsonGateway && jsonSpecProbe.spec) {
+    const gwProbe = await executeJsonProviderChat({
+      spec: jsonSpecProbe.spec,
+      messages: [{ role: 'user', content: 'Say OK' }],
+      modelId:
+        String(externalModel || '').trim() ||
+        jsonSpecProbe.spec.models[0] ||
+        'gpt-4o-mini',
+      apiKey: keys[0],
+      maxTokens: 16,
+      temperature: 0.2,
+      stream: false,
+    });
+    const latencyMs = Math.max(1, Math.round(performance.now() - startPerf));
+    if (gwProbe.ok) {
+      return res.json({
+        ok: true,
+        workingModel: gwProbe.modelUsed,
+        testedProvider: effectiveProvider,
+        testedModel: gwProbe.modelUsed,
+        normalizedEndpoint: jsonSpecProbe.spec.endpoint,
+        supportsStreaming: jsonSpecProbe.spec.stream,
+        discoveredModels: jsonSpecProbe.spec.models,
+        latencyMs,
+        message: `✅ JSON প্রোভাইডার কানেকশন সফল! মডেল: ${gwProbe.modelUsed} (${latencyMs}ms) — উত্তর: "${gwProbe.text.slice(0, 35)}"`,
+      });
+    }
+    return res.json({
+      ok: false,
+      errorCode: 'JSON_PROVIDER_FAILED',
+      httpStatus: gwProbe.httpStatus,
+      normalizedEndpoint: jsonSpecProbe.spec.endpoint,
+      latencyMs,
+      message: gwProbe.errorBn || '❌ JSON প্রোভাইডার কানেকশন ব্যর্থ হয়েছে।',
+    });
+  }
 
   // SSRF verification on externalBaseUrl before any request (Phase 4.1)
   const rawBaseUrl = String(externalBaseUrl || '').trim();

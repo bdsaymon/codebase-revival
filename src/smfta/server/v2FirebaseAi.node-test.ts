@@ -47,7 +47,7 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(V2_SPECIAL_MODELS.length, 3);
 
   assert.equal(v5.label, 'SMFTA V5');
-  assert.equal(v5.serverGeminiModel, 'gemini-3.1-flash-lite');
+  assert.equal(v5.serverGeminiModel, 'gemini-3.5-flash-lite');
   assert.equal(v5.temperature, 0.7);
   assert.equal(v5.maxOutputTokens, 8192);
   assert.equal(v5.defaultDailyLimit, 100);
@@ -55,7 +55,7 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(v5.useSearchGrounding, false);
 
   assert.equal(pro.label, 'SMFTA Pro');
-  assert.equal(pro.serverGeminiModel, 'gemini-4-hydrogen');
+  assert.equal(pro.serverGeminiModel, 'gemini-3.8-flash');
   assert.equal(pro.temperature, 0.4);
   assert.equal(pro.maxOutputTokens, 16384);
   assert.equal(pro.defaultDailyLimit, 40);
@@ -155,9 +155,13 @@ test('sanitizeChatBody skips blank intermediate non-user messages[1] while rejec
 
 test('streamV2FirebaseModel fails cleanly without retry loops when key is absent', async () => {
   const prevGemini = process.env.GEMINI_API_KEY;
+  const prevMaster = process.env.AI_MASTER_KEY;
+  const prevVite = process.env.VITE_GEMINI_API_KEY;
   const prevGoogle = process.env.GOOGLE_API_KEY;
   const prevApi = process.env.API_KEY;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.AI_MASTER_KEY;
+  delete process.env.VITE_GEMINI_API_KEY;
   delete process.env.GOOGLE_API_KEY;
   delete process.env.API_KEY;
 
@@ -174,6 +178,8 @@ test('streamV2FirebaseModel fails cleanly without retry loops when key is absent
     assert.equal(res.modelLabel, 'SMFTA V5');
   } finally {
     if (prevGemini !== undefined) process.env.GEMINI_API_KEY = prevGemini;
+    if (prevMaster !== undefined) process.env.AI_MASTER_KEY = prevMaster;
+    if (prevVite !== undefined) process.env.VITE_GEMINI_API_KEY = prevVite;
     if (prevGoogle !== undefined) process.env.GOOGLE_API_KEY = prevGoogle;
     if (prevApi !== undefined) process.env.API_KEY = prevApi;
   }
@@ -301,22 +307,22 @@ test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays b
   );
 
   assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
+    'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
     'gemini-flash-lite-latest',
     'gemini-3-flash-preview',
-    'gemini-2.5-flash-lite',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-v2-pro'), [
-    'gemini-4-hydrogen',
+    'gemini-3.8-flash',
     'gemini-3-flash-preview',
     'gemini-3.1-flash-lite',
     'gemini-flash-lite-latest',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
     'gemini-4-hydrogen',
+    'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-3-flash-preview',
-    'gemini-flash-lite-latest',
   ]);
 });
 
@@ -380,8 +386,8 @@ test('streamV2FirebaseModel falls back downward when primary stalls thinking-onl
   });
 
   assert.equal(res.ok, true);
-  assert.equal(res.modelUsed, 'gemini-3.1-flash-lite');
+  assert.equal(res.modelUsed, 'gemini-3.8-flash');
   assert.equal(res.truncated, true);
   assert.equal(emitted, 'Clean downward reply!');
-  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
+  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.8-flash']);
 });
