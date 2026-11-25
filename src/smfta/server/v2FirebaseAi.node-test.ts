@@ -47,19 +47,19 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(V2_SPECIAL_MODELS.length, 3);
 
   assert.equal(v5.label, 'SMFTA V5');
-  assert.equal(v5.serverGeminiModel, 'gemini-3.5-flash-lite');
+  assert.equal(v5.serverGeminiModel, 'gemini-3.1-flash-lite');
   assert.equal(v5.temperature, 0.7);
   assert.equal(v5.maxOutputTokens, 8192);
   assert.equal(v5.defaultDailyLimit, 100);
-  assert.equal(v5.thinkingLevel, 'MINIMAL');
+  assert.equal(v5.thinkingLevel, 'LOW');
   assert.equal(v5.useSearchGrounding, false);
 
   assert.equal(pro.label, 'SMFTA Pro');
-  assert.equal(pro.serverGeminiModel, 'gemini-3.8-flash');
+  assert.equal(pro.serverGeminiModel, 'gemini-4-hydrogen');
   assert.equal(pro.temperature, 0.4);
   assert.equal(pro.maxOutputTokens, 16384);
   assert.equal(pro.defaultDailyLimit, 40);
-  assert.equal(pro.thinkingLevel, 'LOW');
+  assert.equal(pro.thinkingLevel, 'MEDIUM');
   assert.equal(pro.useSearchGrounding, false);
 
   assert.equal(max.label, 'SMFTA Max');
@@ -104,7 +104,7 @@ test('gemini-2.5 config sets thinkingBudget and preserves parameter safety', () 
   assert.equal(liteCfg.maxOutputTokens, 8192);
   assert.deepEqual(liteCfg.thinkingConfig, {
     includeThoughts: true,
-    thinkingBudget: 1024,
+    thinkingBudget: 2048,
   });
   assert.equal('tools' in liteCfg, false);
 });
@@ -301,16 +301,22 @@ test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays b
   );
 
   assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
-    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3-flash-preview',
+    'gemini-2.5-flash-lite',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-v2-pro'), [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
+    'gemini-4-hydrogen',
+    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-flash-lite-latest',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
     'gemini-4-hydrogen',
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
   ]);
 });
 
@@ -374,8 +380,8 @@ test('streamV2FirebaseModel falls back downward when primary stalls thinking-onl
   });
 
   assert.equal(res.ok, true);
-  assert.equal(res.modelUsed, 'gemini-3.8-flash');
+  assert.equal(res.modelUsed, 'gemini-3.1-flash-lite');
   assert.equal(res.truncated, true);
   assert.equal(emitted, 'Clean downward reply!');
-  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.8-flash']);
+  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.1-flash-lite']);
 });

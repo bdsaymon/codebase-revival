@@ -1,7 +1,7 @@
 import { Router } from "./express-DfD0yhJD.mjs";
-import { s as listLiveGeminiModels } from "./v2FirebaseAi-C-VZjJHy.mjs";
-import { a as ingestV2Document, i as deleteV2Memory, l as retrieveV2RagContext, n as clearAllV2Memories, o as listV2DocumentSummaries, r as deleteV2Document, s as listV2Memories, t as addV2Memory, u as updateV2Memory } from "./v2Rag-DNjRY2sF.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/v2-gb1oE1jp.js
+import { s as listLiveGeminiModels } from "./v2FirebaseAi-CBM8Vd-m.mjs";
+import { a as ingestV2Document, i as deleteV2Memory, l as retrieveV2RagContext, n as clearAllV2Memories, o as listV2DocumentSummaries, r as deleteV2Document, s as listV2Memories, t as addV2Memory, u as updateV2Memory } from "./v2Rag-DZtM3tA1.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/v2-D15hdXCI.js
 var v2Router = Router();
 function resolveV2RequestUserId(req) {
 	const headerUid = String(req.headers["x-firebase-uid"] || "").trim();

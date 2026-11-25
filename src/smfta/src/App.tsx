@@ -1141,14 +1141,19 @@ export default function App() {
     // Picking a built-in tier also switches the reasoning mode so request and
     // label stay consistent; external models only change the model id.
     const tier = BUILTIN_TIERS.find((t) => t.model === trimmed);
+    const isKeylessBuiltinGemini = (prov?: string | null, keys?: string | null) =>
+      (prov === 'gemini_custom' || prov === 'gemini_openai') &&
+      !String(keys || '').trim();
     setSettings((prev) =>
       sanitizeSettings(
         tier
           ? {
               ...prev,
-              provider: isBuiltinProviderId(prev.provider)
-                ? 'smfta_cloud'
-                : prev.provider,
+              provider:
+                isBuiltinProviderId(prev.provider) ||
+                isKeylessBuiltinGemini(prev.provider, prev.externalKeys)
+                  ? 'smfta_cloud'
+                  : prev.provider,
               externalModel: trimmed,
               mode: tier.id,
             }
@@ -1173,7 +1178,9 @@ export default function App() {
           ? {
               ...p,
               provider:
-                (isV2 || Boolean(tier)) && isBuiltinProviderId(p.provider)
+                (isV2 || Boolean(tier)) &&
+                (isBuiltinProviderId(p.provider) ||
+                  isKeylessBuiltinGemini(p.provider, p.externalKeys))
                   ? 'smfta_cloud'
                   : p.provider,
               externalModel: trimmed,

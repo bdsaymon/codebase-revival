@@ -1,8 +1,8 @@
 import { r as __exportAll } from "../_runtime.mjs";
 import { t as __exportAll$1 } from "./rolldown-runtime-D7D4PA-g.mjs";
 import crypto from "node:crypto";
-//#region node_modules/.nitro/vite/services/ssr/assets/security-lsE4uyVm.js
-var security_lsE4uyVm_exports = /* @__PURE__ */ __exportAll({
+//#region node_modules/.nitro/vite/services/ssr/assets/security-DUYHl2Kb.js
+var security_DUYHl2Kb_exports = /* @__PURE__ */ __exportAll({
 	a: () => hasConfiguredMasterKey,
 	c: () => security_exports,
 	d: () => ENGINE_DEFAULTS,
@@ -79,25 +79,48 @@ var DEFAULT_PROVIDER_REGISTRY = [
 		protocol: "gemini_native",
 		base_url: "https://generativelanguage.googleapis.com/v1beta",
 		key_env_var_name: "GEMINI_API_KEY",
-		models: [{
-			model_id: "gemini-3.1-flash-lite",
-			context_window: 1e6,
-			max_output: 16384,
-			tools: true,
-			json: true,
-			stream: true,
-			input_price_per_1k: 1e-4,
-			output_price_per_1k: 4e-4
-		}, {
-			model_id: "gemini-4-hydrogen",
-			context_window: 1e6,
-			max_output: 32768,
-			tools: true,
-			json: true,
-			stream: true,
-			input_price_per_1k: 25e-5,
-			output_price_per_1k: .001
-		}],
+		models: [
+			{
+				model_id: "gemini-3.1-flash-lite",
+				context_window: 1e6,
+				max_output: 16384,
+				tools: true,
+				json: true,
+				stream: true,
+				input_price_per_1k: 1e-4,
+				output_price_per_1k: 4e-4
+			},
+			{
+				model_id: "gemini-4-hydrogen",
+				context_window: 1e6,
+				max_output: 32768,
+				tools: true,
+				json: true,
+				stream: true,
+				input_price_per_1k: 25e-5,
+				output_price_per_1k: .001
+			},
+			{
+				model_id: "gemini-3-flash-preview",
+				context_window: 1e6,
+				max_output: 32768,
+				tools: true,
+				json: true,
+				stream: true,
+				input_price_per_1k: 15e-5,
+				output_price_per_1k: 6e-4
+			},
+			{
+				model_id: "gemini-flash-lite-latest",
+				context_window: 1e6,
+				max_output: 16384,
+				tools: true,
+				json: true,
+				stream: true,
+				input_price_per_1k: 1e-4,
+				output_price_per_1k: 4e-4
+			}
+		],
 		rpm: 15,
 		rpd: 1500,
 		tpm: 1e6,
@@ -1007,4 +1030,4 @@ function createApiIdentityMiddleware(options) {
 	};
 }
 //#endregion
-export { decryptKeyInMemory as a, getActiveDefaultProviderRegistry as c, redactSecrets as d, security_lsE4uyVm_exports as f, buildPromptInjectionGuard as i, hasConfiguredMasterKey as l, ENGINE_DEFAULTS as n, encryptKeyAtRest as o, timingSafeTokenEqual as p, SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN as r, formatKeyLast4 as s, DEFAULT_SERVER_KEY_DAILY_CAP as t, redactPersonalData as u };
+export { decryptKeyInMemory as a, getActiveDefaultProviderRegistry as c, redactSecrets as d, security_DUYHl2Kb_exports as f, buildPromptInjectionGuard as i, hasConfiguredMasterKey as l, ENGINE_DEFAULTS as n, encryptKeyAtRest as o, timingSafeTokenEqual as p, SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN as r, formatKeyLast4 as s, DEFAULT_SERVER_KEY_DAILY_CAP as t, redactPersonalData as u };

@@ -1,9 +1,9 @@
 import { r as extractSseEventsFromLine, t as buildGeminiThinkingConfig } from "./thinking-DAYUonWm.mjs";
-import { d as redactSecrets, i as buildPromptInjectionGuard, n as ENGINE_DEFAULTS, r as SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN, s as formatKeyLast4, u as redactPersonalData } from "./security-lsE4uyVm.mjs";
+import { d as redactSecrets, i as buildPromptInjectionGuard, n as ENGINE_DEFAULTS, r as SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN, s as formatKeyLast4, u as redactPersonalData } from "./security-DUYHl2Kb.mjs";
 import { a as buildXrahatUrl, c as inferModelForCustomBaseUrl, f as resolveEffectiveProvider, i as buildXrahatPrompt, n as PROVIDER_ENDPOINTS, o as detectProviderFromKey, p as sanitizeProprietaryOutput, r as buildProviderModelCandidates, s as extractXrahatReply, u as normalizeEndpointUrl } from "./providers-BGzUoiqh.mjs";
-import { a as mapKeyStateToSimplified, c as verifyConnectionTargetSafe, n as DEFAULT_ENGINE_REGISTRY_CONFIG, o as validateCustomHeaders, r as DurableStorage, s as validateRegistryConfig, t as CasConflictError } from "./storage-CFQ5IeNc.mjs";
+import { a as mapKeyStateToSimplified, c as verifyConnectionTargetSafe, n as DEFAULT_ENGINE_REGISTRY_CONFIG, o as validateCustomHeaders, r as DurableStorage, s as validateRegistryConfig, t as CasConflictError } from "./storage-DysOPz1L.mjs";
 import crypto from "node:crypto";
-//#region node_modules/.nitro/vite/services/ssr/assets/aiClient-HAAuOL29.js
+//#region node_modules/.nitro/vite/services/ssr/assets/aiClient-Bkf37C6D.js
 /**
 * C2: Converts canonical messages into OpenAI-compatible format.
 * Preserves system instruction at top, enforces call-result pairing.
@@ -3016,7 +3016,10 @@ var HardenedAIEngine = class {
 					break;
 				}
 				if (!kp.isModelAvailableForKey(provider.provider_id, keyId, model.model_id, provider.config_hash)) break;
-				if (!kp.acquireEligibilityForAttempt(provider.provider_id, keyId).eligible) break;
+				if (!kp.acquireEligibilityForAttempt(provider.provider_id, keyId).eligible) {
+					sawSlotBusy = true;
+					break;
+				}
 				const reservation = this.ledger.reserveQuota({
 					requestId,
 					providerId: provider.provider_id,
@@ -3848,6 +3851,7 @@ var HardenedAIEngine = class {
 		let streamFinishReason = "";
 		let lockedToProvider = false;
 		let accumulatedText = "";
+		let sawSkippedBusyOrUnavailable = false;
 		for (const cand of candidates) {
 			if (attempts.length >= ENGINE_DEFAULTS.MAX_ATTEMPTS_PER_REQUEST) break;
 			if (lockedToProvider) break;
@@ -3865,7 +3869,10 @@ var HardenedAIEngine = class {
 				maxOutput: effectiveMaxOut
 			});
 			if (ctxResult.messageTooLong) continue;
-			if (!kp.acquireEligibilityForAttempt(provider.provider_id, keyId).eligible) continue;
+			if (!kp.acquireEligibilityForAttempt(provider.provider_id, keyId).eligible) {
+				sawSkippedBusyOrUnavailable = true;
+				continue;
+			}
 			const reservation = this.ledger.reserveQuota({
 				requestId,
 				providerId: provider.provider_id,
@@ -4184,8 +4191,17 @@ var HardenedAIEngine = class {
 						attempts
 					};
 				}
-				const errorClass = /FirstTokenTimeoutError|NextChunkTimeoutError|TimeoutError|AbortError/i.test(errMsg) ? "TIMEOUT" : "NETWORK_ERROR";
-				kp.recordTransientFailure(provider.provider_id, keyId, errorClass);
+				const isTimeout = /FirstTokenTimeoutError|NextChunkTimeoutError|TimeoutError|AbortError/i.test(errMsg);
+				const errorClass = isTimeout ? "TIMEOUT" : "NETWORK_ERROR";
+				const hasSiblingForKey = provider.models.some((m) => m.model_id !== model.model_id && kp.isModelAvailableForKey(provider.provider_id, keyId, m.model_id, provider.config_hash));
+				if (isTimeout && hasSiblingForKey) kp.markModelUnavailableForKey({
+					providerId: provider.provider_id,
+					keyId,
+					modelId: model.model_id,
+					durationMs: ENGINE_DEFAULTS.RATE_LIMIT_MIN_COOLDOWN_MS,
+					reason: "model_stream_timeout_cooldown"
+				});
+				else kp.recordTransientFailure(provider.provider_id, keyId, errorClass);
 				this.ledger.finalizeReservation({
 					reservationId: reservation.reservationId,
 					actualInputTokens: null,
@@ -4238,7 +4254,7 @@ var HardenedAIEngine = class {
 				req.abortSignal?.removeEventListener("abort", onClientAbort);
 			}
 		}
-		const fallbackMsg = formatActionableProviderError(attempts, lang, lastUserMsg);
+		const fallbackMsg = attempts.length === 0 && (sawSkippedBusyOrUnavailable || candidates.length === 0) ? getSafeUserMessage("busy", lang, lastUserMsg) : formatActionableProviderError(attempts, lang, lastUserMsg);
 		updateStoredMessage(accumulatedText, "interrupted");
 		callbacks.onErrorEvent?.(fallbackMsg);
 		return {
@@ -4252,7 +4268,8 @@ var HardenedAIEngine = class {
 	applyErrorClassToKeyState(params) {
 		const { classified, provider, keyId, modelId } = params;
 		const kp = this.getKeyPool(provider);
-		const hasUntriedSiblingModel = provider.resolved_keys.length === 1 && provider.models.some((m) => m.model_id !== modelId && kp.isModelAvailableForKey(provider.provider_id, keyId, m.model_id, provider.config_hash));
+		const hasAvailableSiblingForKey = provider.models.some((m) => m.model_id !== modelId && kp.isModelAvailableForKey(provider.provider_id, keyId, m.model_id, provider.config_hash));
+		const hasUntriedSiblingModel = provider.resolved_keys.length === 1 && hasAvailableSiblingForKey;
 		switch (classified.errorClass) {
 			case "RATE_LIMITED":
 				if (hasUntriedSiblingModel) kp.markModelUnavailableForKey({
@@ -4308,6 +4325,15 @@ var HardenedAIEngine = class {
 				break;
 			case "TIMEOUT":
 			case "SERVER_ERROR":
+				if (hasAvailableSiblingForKey) kp.markModelUnavailableForKey({
+					providerId: provider.provider_id,
+					keyId,
+					modelId,
+					durationMs: ENGINE_DEFAULTS.RATE_LIMIT_MIN_COOLDOWN_MS,
+					reason: classified.errorClass === "TIMEOUT" ? "model_timeout_cooldown" : "model_server_overloaded_cooldown"
+				});
+				else kp.recordTransientFailure(provider.provider_id, keyId, classified.errorClass);
+				break;
 			case "NETWORK_ERROR":
 			case "UNKNOWN": kp.recordTransientFailure(provider.provider_id, keyId, classified.errorClass);
 		}
@@ -4410,8 +4436,7 @@ function normalizeGeminiModelName(requestedModel) {
 	if (!raw) return "gemini-4-hydrogen";
 	const bare = raw.includes("/") ? raw.split("/").pop() || raw : raw;
 	const lower = bare.toLowerCase();
-	if (lower === "gemini-3.8-flash" || lower === "gemini-3.5-flash" || lower === "gemini-2.5-flash" || lower === "gemini-2.0-flash" || lower === "gemini-1.5-flash" || lower === "gemini-1.5-pro" || lower === "gemini-pro") return "gemini-4-hydrogen";
-	if (lower === "gemini-3.5-flash-lite" || lower === "gemini-2.5-flash-lite") return "gemini-3.1-flash-lite";
+	if (lower === "gemini-3.8-flash" || lower === "gemini-2.0-flash" || lower === "gemini-1.5-flash" || lower === "gemini-1.5-pro" || lower === "gemini-pro") return "gemini-3-flash-preview";
 	if (lower.startsWith("gemini-")) return bare;
 	if (lower.includes("reasoner") || lower.includes("r1") || lower.includes("opus") || lower.includes("sonnet") || lower.includes("gpt-4o") || lower.includes("gpt-5") || lower.includes("pro") || lower.includes("70b") || lower.includes("72b") || lower.includes("405b")) return "gemini-4-hydrogen";
 	return "gemini-3.1-flash-lite";
@@ -4497,12 +4522,24 @@ function buildAdHocProviderConfig(params) {
 	const serverGemKey = getServerGeminiKey();
 	if (Boolean(serverGemKey) && (isExplicitKeyless || !hasUserKeys && (effectiveProvider === "gemini_custom" || effectiveProvider === "gemini_openai"))) {
 		const rawExt = (params.externalModel || "").trim().toLowerCase();
+		const isFastTier = rawExt === "smfta-flash" || rawExt === "smfta-v5" || rawExt.includes("flash-lite");
 		const mappedTierModel = rawExt === "smfta-flash" ? "gemini-3.1-flash-lite" : rawExt === "smfta-ultra" || rawExt === "smfta-pro" ? "gemini-4-hydrogen" : rawExt && !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt) ? normalizeGeminiModelName(params.externalModel) : "";
-		const gemModels = Array.from(/* @__PURE__ */ new Set([
+		const orderedFallbacks = isFastTier ? [
 			...mappedTierModel ? [mappedTierModel] : [],
+			"gemini-flash-lite-latest",
+			"gemini-3-flash-preview",
 			"gemini-3.1-flash-lite",
+			"gemini-2.5-flash-lite",
 			"gemini-4-hydrogen"
-		])).map((m) => ({
+		] : [
+			...mappedTierModel ? [mappedTierModel] : [],
+			"gemini-3-flash-preview",
+			"gemini-flash-lite-latest",
+			"gemini-3.1-flash-lite",
+			"gemini-4-hydrogen",
+			"gemini-2.5-flash"
+		];
+		const gemModels = Array.from(new Set(orderedFallbacks)).map((m) => ({
 			model_id: m,
 			context_window: 1e6,
 			max_output: maxOut,
@@ -4533,11 +4570,12 @@ function buildAdHocProviderConfig(params) {
 			isServerHeldKey: true
 		});
 	}
+	const isBuiltinDefaultServerGemini = !hasUserKeys && !String(params.externalBaseUrl || "").trim() && (effectiveProvider === "gemini_custom" || effectiveProvider === "gemini_openai");
 	return {
 		effectiveProvider,
 		adHocProviders,
 		hasUserKeys,
-		allowKeylessFallback: isExplicitKeyless && !hasUserKeys
+		allowKeylessFallback: (isExplicitKeyless || isBuiltinDefaultServerGemini) && !hasUserKeys
 	};
 }
 async function callXrahatKeylessJson(params) {

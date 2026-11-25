@@ -1,5 +1,5 @@
 import { o as __toESM } from "../_runtime.mjs";
-import { t as supabase } from "./client-SAOWSTXM.mjs";
+import { t as supabase } from "./client-BSBW-TU9.mjs";
 import { t as APP_VERSION } from "./version-DomTpKw0.mjs";
 import { a as stripContactTokensForText, i as resolveActiveSystemLabel, n as buildCreatorAndSecurityDirective, r as maskAndNormalizeIdentityOutput, t as CREATOR_NAME } from "./creatorIdentity-TTkWUL_b.mjs";
 import { C as extractMemoryCandidates, D as getRiyadhDateKey, E as getNextRiyadhResetInfo, F as mergeExtractedMemories, H as sortV2ModelsFlashFirst, I as migrateMemory, M as looksTruncated, N as matchAnswerLength, O as getV2ModelLabel, P as mergeContinuationText, R as polishReply, S as extractFileArtifacts, T as formatArtifactSize, U as toggleMemoryPin, V as searchMemoryFacts, W as updateMemoryFact, _ as downloadArtifactsAsZip, a as MASTER_PROFILE_FACTS, b as ensureMasterProfileMemory, c as V2_MODEL_IDS, d as addManualMemoryFact, g as deleteMemoryFact, h as createIdleWatchdog, i as FILE_ARTIFACT_SYSTEM_DIRECTIVE, j as isV2ModelId, k as getV2ModelSpec, l as V2_SPECIAL_MODELS, m as continuationDirective, n as DEFAULT_IDLE_TIMEOUT_MS, o as MASTER_PROFILE_NAME, p as clearEntireMemoryBank, r as DEFAULT_V2_QUOTA_CONFIG, t as ADMIN_EMAILS, u as addFacts, v as downloadSingleArtifactFile, w as factsToText, x as evaluateV2ModelQuota, y as dropStallSentences, z as retrieveRelevantMemories } from "./v2UsageLimits-BjYCttv1.mjs";
@@ -28,7 +28,7 @@ import "../_libs/firebase.mjs";
 import { n as initializeAppCheck, t as ReCaptchaV3Provider } from "../_libs/firebase__app-check.mjs";
 import { i as signInWithPopup, n as getAuth, r as onAuthStateChanged, t as GoogleAuthProvider } from "../_libs/firebase__auth.mjs";
 import { a as query, c as collection, d as getFirestore, f as initializeFirestore, i as onSnapshot, l as doc, n as getDocFromServer, o as runTransaction, p as serverTimestamp, r as getDocs, s as where, t as deleteDoc, u as enableNetwork } from "../_libs/@firebase/firestore+[...].mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/AppEntry-C2uNihK4.js
+//#region node_modules/.nitro/vite/services/ssr/assets/AppEntry-sQU3tFrw.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var DEFAULT_KNOWLEDGE_SETTINGS = {
@@ -6700,7 +6700,7 @@ function pickSupportedAudioMimeType() {
 * prefix text when recognition restarts after pauses.
 */
 function accumulateSpeechResults(results, previousFinalPrefix = "") {
-	const prefix = String(previousFinalPrefix || "").trim();
+	const prefix = String(previousFinalPrefix || "").replace(/\s+/g, " ").trim();
 	if (!results || results.length === 0) return {
 		finalPrefix: prefix,
 		interimText: "",
@@ -6710,17 +6710,45 @@ function accumulateSpeechResults(results, previousFinalPrefix = "") {
 	let sessionInterim = "";
 	for (let i = 0; i < results.length; i++) {
 		const item = results[i];
-		const seg = String(item?.[0]?.transcript || "").trim();
+		const seg = String(item?.[0]?.transcript || "").replace(/\s+/g, " ").trim();
 		if (!seg) continue;
-		if (item?.isFinal) sessionFinal = sessionFinal ? `${sessionFinal} ${seg}` : seg;
-		else sessionInterim = sessionInterim ? `${sessionInterim} ${seg}` : seg;
+		if (item?.isFinal) if (!sessionFinal) sessionFinal = seg;
+		else {
+			const curLower = sessionFinal.toLowerCase();
+			const segLower = seg.toLowerCase();
+			if (segLower === curLower || curLower.endsWith(` ${segLower}`)) {} else if (segLower.startsWith(`${curLower} `)) sessionFinal = seg;
+			else sessionFinal = `${sessionFinal} ${seg}`;
+		}
+		else {
+			const curInterimLower = sessionInterim.toLowerCase();
+			const segLower = seg.toLowerCase();
+			if (!sessionInterim) sessionInterim = seg;
+			else if (segLower === curInterimLower || curInterimLower.endsWith(` ${segLower}`)) {} else if (segLower.startsWith(`${curInterimLower} `)) sessionInterim = seg;
+			else sessionInterim = `${sessionInterim} ${seg}`;
+		}
 	}
-	const combinedFinal = [prefix, sessionFinal].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-	const cleanInterim = sessionInterim.replace(/\s+/g, " ").trim();
+	let combinedFinal = prefix;
+	if (sessionFinal) if (!prefix) combinedFinal = sessionFinal;
+	else {
+		const prefixLower = prefix.toLowerCase();
+		const sessionLower = sessionFinal.toLowerCase();
+		if (sessionLower === prefixLower || prefixLower.endsWith(` ${sessionLower}`)) combinedFinal = prefix;
+		else if (sessionLower.startsWith(`${prefixLower} `)) combinedFinal = sessionFinal;
+		else combinedFinal = `${prefix} ${sessionFinal}`;
+	}
+	combinedFinal = combinedFinal.replace(/\s+/g, " ").trim();
+	let cleanInterim = sessionInterim.replace(/\s+/g, " ").trim();
+	if (combinedFinal && cleanInterim) {
+		const finalLower = combinedFinal.toLowerCase();
+		const interimLower = cleanInterim.toLowerCase();
+		if (interimLower === finalLower) cleanInterim = "";
+		else if (interimLower.startsWith(`${finalLower} `)) cleanInterim = cleanInterim.slice(combinedFinal.length).trim();
+	}
+	const liveTranscript = [combinedFinal, cleanInterim].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 	return {
 		finalPrefix: combinedFinal,
 		interimText: cleanInterim,
-		liveTranscript: [combinedFinal, cleanInterim].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()
+		liveTranscript
 	};
 }
 async function blobToBase64Data(blob) {
@@ -7084,6 +7112,7 @@ function isSpeechSynthesisSupported() {
 var BilingualSpeechPlayer = class {
 	cancelled = false;
 	paused = false;
+	sessionSeq = 0;
 	currentMsgId = null;
 	currentIsBackup = false;
 	currentModelUsed = void 0;
@@ -7112,6 +7141,8 @@ var BilingualSpeechPlayer = class {
 		}
 		if (this.activeAudio) {
 			try {
+				this.activeAudio.onended = null;
+				this.activeAudio.onerror = null;
 				this.activeAudio.pause();
 				this.activeAudio.src = "";
 			} catch {}
@@ -7142,6 +7173,7 @@ var BilingualSpeechPlayer = class {
 		}
 	}
 	stop() {
+		this.sessionSeq += 1;
 		this.cancelled = true;
 		this.paused = false;
 		this.currentMsgId = null;
@@ -7192,6 +7224,8 @@ var BilingualSpeechPlayer = class {
 			this.stop();
 			return;
 		}
+		this.sessionSeq += 1;
+		const sessionId = this.sessionSeq;
 		this.cleanupAudioElement();
 		if (isSpeechSynthesisSupported()) window.speechSynthesis.cancel();
 		this.cancelled = false;
@@ -7203,12 +7237,14 @@ var BilingualSpeechPlayer = class {
 		const wantMale = chosenVoice === "Puck" || chosenVoice === "Charon" || chosenVoice === "Fenrir" || params.voiceProfile?.endsWith("male");
 		const rate = Math.min(2, Math.max(.5, params.rate || 1));
 		this.emit("speaking");
+		const isStaleSession = () => this.cancelled || sessionId !== this.sessionSeq;
 		const runBrowserFallback = (fromText = cleanText) => {
+			if (isStaleSession()) return;
 			this.currentIsBackup = true;
 			this.currentModelUsed = "browser";
 			this.emit("speaking");
-			if (this.cancelled || !isSpeechSynthesisSupported()) {
-				if (!this.cancelled) {
+			if (isStaleSession() || !isSpeechSynthesisSupported()) {
+				if (!isStaleSession()) {
 					this.currentMsgId = null;
 					this.currentIsBackup = false;
 					this.currentModelUsed = void 0;
@@ -7223,8 +7259,10 @@ var BilingualSpeechPlayer = class {
 				text: piece
 			})));
 			if (segments.length === 0) {
-				this.stop();
-				params.onDone?.();
+				if (!isStaleSession()) {
+					this.stop();
+					params.onDone?.();
+				}
 				return;
 			}
 			const voices = window.speechSynthesis.getVoices() || [];
@@ -7242,13 +7280,14 @@ var BilingualSpeechPlayer = class {
 				return pool.find((v) => v.lang?.toLowerCase() === targetLang.toLowerCase()) || pool[0] || null;
 			};
 			const playNext = (index) => {
-				if (this.cancelled || index >= segments.length) {
-					if (!this.cancelled) {
-						this.currentMsgId = null;
-						this.paused = false;
-						this.emit("idle");
-						params.onDone?.();
-					}
+				if (isStaleSession()) return;
+				if (index >= segments.length) {
+					this.currentMsgId = null;
+					this.currentIsBackup = false;
+					this.currentModelUsed = void 0;
+					this.paused = false;
+					this.emit("idle");
+					params.onDone?.();
 					return;
 				}
 				const seg = segments[index];
@@ -7259,12 +7298,16 @@ var BilingualSpeechPlayer = class {
 					utter.lang = matchedVoice.lang;
 				} else utter.lang = seg.lang;
 				utter.rate = rate;
-				utter.onend = () => {
-					if (!this.cancelled) playNext(index + 1);
+				let utterSettled = false;
+				const advance = () => {
+					if (utterSettled || isStaleSession()) return;
+					utterSettled = true;
+					utter.onend = null;
+					utter.onerror = null;
+					playNext(index + 1);
 				};
-				utter.onerror = () => {
-					if (!this.cancelled) playNext(index + 1);
-				};
+				utter.onend = advance;
+				utter.onerror = advance;
 				window.speechSynthesis.speak(utter);
 			};
 			playNext(0);
@@ -7280,9 +7323,9 @@ var BilingualSpeechPlayer = class {
 					signal: ctrl.signal,
 					fetchImpl: params.fetchImpl
 				});
-				if (firstTry.ok || this.cancelled || ctrl.signal.aborted) return firstTry;
+				if (firstTry.ok || isStaleSession() || ctrl.signal.aborted) return firstTry;
 				await new Promise((r) => setTimeout(r, 350));
-				if (this.cancelled || ctrl.signal.aborted) return firstTry;
+				if (isStaleSession() || ctrl.signal.aborted) return firstTry;
 				return requestGeminiFemaleSpeech({
 					text: chunks[i] || "",
 					voiceName: chosenVoice,
@@ -7291,6 +7334,7 @@ var BilingualSpeechPlayer = class {
 				});
 			};
 			const finishAll = () => {
+				if (isStaleSession()) return;
 				this.cleanupAudioElement();
 				this.currentMsgId = null;
 				this.currentIsBackup = false;
@@ -7301,8 +7345,9 @@ var BilingualSpeechPlayer = class {
 			};
 			const playIndex = (i, pending) => {
 				pending.then((ttsRes) => {
-					if (this.cancelled || ctrl.signal.aborted) return;
+					if (isStaleSession() || ctrl.signal.aborted) return;
 					if (!ttsRes.ok || !ttsRes.audioBase64) {
+						ctrl.abort();
 						this.releaseAudioOnly();
 						runBrowserFallback(chunks.slice(i).join(" "));
 						return;
@@ -7325,6 +7370,14 @@ var BilingualSpeechPlayer = class {
 						finishAll();
 						return;
 					}
+					let chunkSettled = false;
+					const fallbackFromCurrentChunk = () => {
+						if (chunkSettled || isStaleSession() || ctrl.signal.aborted) return;
+						chunkSettled = true;
+						ctrl.abort();
+						this.releaseAudioOnly();
+						runBrowserFallback(chunks.slice(i).join(" "));
+					};
 					try {
 						const bytes = base64ToUint8Array(ttsRes.audioBase64);
 						const blob = new Blob([bytes.buffer], { type: ttsRes.mimeType || "audio/wav" });
@@ -7335,26 +7388,18 @@ var BilingualSpeechPlayer = class {
 						audio.playbackRate = rate;
 						this.activeAudio = audio;
 						audio.onended = () => {
-							if (this.cancelled) return;
+							if (chunkSettled || isStaleSession() || ctrl.signal.aborted) return;
+							chunkSettled = true;
 							if (upcoming) {
 								playIndex(i + 1, upcoming);
 								return;
 							}
 							finishAll();
 						};
-						audio.onerror = () => {
-							if (this.cancelled) return;
-							this.releaseAudioOnly();
-							runBrowserFallback(chunks.slice(i).join(" "));
-						};
-						audio.play().catch(() => {
-							if (!this.cancelled) {
-								this.releaseAudioOnly();
-								runBrowserFallback(chunks.slice(i).join(" "));
-							}
-						});
+						audio.onerror = fallbackFromCurrentChunk;
+						audio.play().catch(fallbackFromCurrentChunk);
 					} catch {
-						runBrowserFallback(chunks.slice(i).join(" "));
+						fallbackFromCurrentChunk();
 					}
 				});
 			};
@@ -7377,6 +7422,29 @@ function deriveVoiceSessionState(inputs) {
 	if (inputs.isConnecting) return "connecting";
 	if (inputs.isListening) return "listening";
 	return "listening";
+}
+/**
+* Prevents microphone turn activation while initial greeting synthesis or
+* active AI speech/TTS pipelines are still pending or playing.
+*/
+function shouldActivateMicForTurn(inputs) {
+	if (!inputs.isOpen) return false;
+	if (inputs.isDisconnected || inputs.isOffline || inputs.isConnecting) return false;
+	if (inputs.isGenerating || inputs.isTranscribingTurn) return false;
+	if (inputs.isInitialGreetingPending) return false;
+	if (inputs.isSynthesizingVoice || inputs.isAiSpeaking) return false;
+	if (inputs.hasPendingAudioBuffer) return false;
+	if (inputs.pipelineBusy || inputs.pendingChunkCount > 0 || inputs.activeSourceCount > 0) return false;
+	return true;
+}
+/**
+* Only allows acoustic barge-in after AI playback has actually started,
+* never during initial greeting synthesis before audio playback begins.
+*/
+function shouldAllowBargeIn(inputs) {
+	if (inputs.isMuted || inputs.isInitialGreetingPending) return false;
+	if (inputs.voiceState !== "speaking" || !inputs.isAiSpeaking) return false;
+	return inputs.aiSpeakingStartedAt > 0;
 }
 var DEFAULT_VAD_CONFIG = {
 	minSpeechThreshold: .0075,
@@ -7641,6 +7709,7 @@ function collectLiveConversationImages(input) {
 	(input.stagedImgs || []).forEach((img, idx) => {
 		if (!img || !img.url && !img.data) return;
 		const key = makeKey(img);
+		if (seenKeys.has(key)) return;
 		seenKeys.add(key);
 		const url = img.url || (img.data.startsWith("data:") ? img.data : `data:${img.mime || "image/png"};base64,${img.data}`);
 		items.push({
@@ -7834,7 +7903,7 @@ function buildUnifiedVoiceTimeline(input) {
 		formattedTime: formatVoiceTimelineTimestamp(nowMs),
 		transcriptState: "partial",
 		streamState: "streaming",
-		imgs: input.stagedImgs || [],
+		imgs: [],
 		attachedFileNames: []
 	});
 	const lastEntry = entries[entries.length - 1];
@@ -7970,7 +8039,7 @@ var STATE_COPY = {
 		hint: "Tap reconnect to resume"
 	}
 };
-var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoice, realtimeMode = false, isGenerating, messages = [], lastUserText, lastAiMessage, onChangePreferredVoice, onToggleRealtimeMode, onCancelMic, onAbortGeneration, onSendText, onEndCall }) => {
+var LiveVoiceOverlay = ({ isOpen, chatId, userName, preferredLang = "auto", preferredVoice, realtimeMode = false, isGenerating, messages = [], lastUserText, lastAiMessage, onChangePreferredVoice, onToggleRealtimeMode, onCancelMic, onAbortGeneration, onSendText, onEndCall }) => {
 	const [selectedVoice, setSelectedVoice] = (0, import_react.useState)(() => preferredVoice && preferredVoice !== "default" ? resolveTtsVoicePersona(preferredVoice) : loadSavedVoice());
 	const [voiceLang, setVoiceLang] = (0, import_react.useState)(() => loadSavedVoiceLang(preferredLang));
 	const [speechRate, setSpeechRate] = (0, import_react.useState)(loadSavedVoiceRate);
@@ -8041,6 +8110,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const rollingSttCheckedBytesRef = (0, import_react.useRef)(0);
 	const recognitionRef = (0, import_react.useRef)(null);
 	const recognitionFinalPrefixRef = (0, import_react.useRef)("");
+	const recognitionSessionFinalRef = (0, import_react.useRef)("");
 	const recognitionLiveTextRef = (0, import_react.useRef)("");
 	const speechRecCommitTimerRef = (0, import_react.useRef)(null);
 	const vadStateRef = (0, import_react.useRef)(createVadTracker());
@@ -8049,6 +8119,9 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const turnCommitInFlightRef = (0, import_react.useRef)(false);
 	const lastSubmittedRef = (0, import_react.useRef)(null);
 	const hasGreetedRef = (0, import_react.useRef)(false);
+	const isInitialGreetingPendingRef = (0, import_react.useRef)(false);
+	const ttsFailedTurnRef = (0, import_react.useRef)(null);
+	const prevChatIdRef = (0, import_react.useRef)(chatId);
 	const autoListenTimerRef = (0, import_react.useRef)(null);
 	const sessionTokenRef = (0, import_react.useRef)(0);
 	const textInputRef = (0, import_react.useRef)(null);
@@ -8072,6 +8145,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	const stateRef = (0, import_react.useRef)({
 		isOpen,
 		isMuted,
+		isConnecting,
 		isDisconnected,
 		isOffline,
 		isGenerating,
@@ -8079,6 +8153,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		isAiSpeaking,
 		isSynthesizingVoice,
 		isSessionListening,
+		keyboardOpen,
+		fullscreenImage,
 		selectedVoice,
 		voiceLang,
 		speechRate,
@@ -8089,6 +8165,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	stateRef.current = {
 		isOpen,
 		isMuted,
+		isConnecting,
 		isDisconnected,
 		isOffline,
 		isGenerating,
@@ -8096,6 +8173,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		isAiSpeaking,
 		isSynthesizingVoice,
 		isSessionListening,
+		keyboardOpen,
+		fullscreenImage,
 		selectedVoice,
 		voiceLang,
 		speechRate,
@@ -8237,6 +8316,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		vadStateRef.current = createVadTracker(vadStateRef.current.noiseFloor);
 		turnHadRealSpeechRef.current = false;
 		recognitionFinalPrefixRef.current = "";
+		recognitionSessionFinalRef.current = "";
 		recognitionLiveTextRef.current = "";
 		rollingSttCheckedBytesRef.current = 0;
 	}, [
@@ -8246,6 +8326,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	]);
 	const stopAiSpeechPlayback = (0, import_react.useCallback)(() => {
 		pipelineRunIdRef.current += 1;
+		isInitialGreetingPendingRef.current = false;
 		if (autoListenTimerRef.current !== null) {
 			window.clearTimeout(autoListenTimerRef.current);
 			autoListenTimerRef.current = null;
@@ -8280,7 +8361,9 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		pendingAudioBufferRef.current = null;
 		setNeedsTapToPlay(false);
 		setIsSynthesizingVoice(false);
+		stateRef.current.isSynthesizingVoice = false;
 		setIsAiSpeaking(false);
+		stateRef.current.isAiSpeaking = false;
 	}, []);
 	const releaseAllMicResources = (0, import_react.useCallback)(() => {
 		setMicStreamLive(false);
@@ -8322,7 +8405,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			r.onresult = (e) => {
 				if (!stateRef.current.isSessionListening || stateRef.current.isMuted) return;
 				const { finalPrefix, interimText, liveTranscript } = accumulateSpeechResults(e?.results, recognitionFinalPrefixRef.current);
-				if (finalPrefix) recognitionFinalPrefixRef.current = finalPrefix;
+				recognitionSessionFinalRef.current = finalPrefix;
 				setLiveFinalText(finalPrefix);
 				setLiveInterimText(interimText);
 				if (liveTranscript) {
@@ -8342,6 +8425,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			r.onerror = () => {};
 			r.onend = () => {
 				if (recognitionRef.current === r) recognitionRef.current = null;
+				if (recognitionSessionFinalRef.current) recognitionFinalPrefixRef.current = recognitionSessionFinalRef.current;
 				if (stateRef.current.isOpen && stateRef.current.isSessionListening && !turnCommitInFlightRef.current && recognitionLiveTextRef.current.trim()) {
 					clearSpeechRecCommitTimer();
 					commitActiveUtteranceRef.current(false);
@@ -8359,7 +8443,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 	}, [clearSpeechRecCommitTimer]);
 	const startListeningTurn = (0, import_react.useCallback)((langOverride) => {
 		const cur = stateRef.current;
-		if (!cur.isOpen || cur.isDisconnected || cur.isOffline || cur.isGenerating || cur.isTranscribingTurn) return;
+		if (!cur.isOpen || cur.isDisconnected || cur.isOffline || cur.isGenerating || cur.isTranscribingTurn || isInitialGreetingPendingRef.current) return;
 		const stream = persistentStreamRef.current;
 		if (!stream || stream.getAudioTracks().every((t) => t.readyState !== "live")) return;
 		const ctx = ensureAudioContext();
@@ -8377,6 +8461,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		turnHadRealSpeechRef.current = false;
 		turnCommitInFlightRef.current = false;
 		recognitionFinalPrefixRef.current = "";
+		recognitionSessionFinalRef.current = "";
 		recognitionLiveTextRef.current = "";
 		rollingSttCheckedBytesRef.current = 0;
 		vadStateRef.current = createVadTracker(vadStateRef.current.noiseFloor);
@@ -8447,21 +8532,50 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		startSingleTurnRecognition,
 		stopTurnRecognition
 	]);
+	const releaseInitialGreetingMicGate = (0, import_react.useCallback)(() => {
+		if (isInitialGreetingPendingRef.current) {
+			isInitialGreetingPendingRef.current = false;
+			if (persistentStreamRef.current) persistentStreamRef.current.getAudioTracks().forEach((track) => {
+				track.enabled = !stateRef.current.isMuted;
+			});
+		}
+	}, []);
 	const scheduleAutoListenAfterSpeech = (0, import_react.useCallback)((ctrl) => {
 		if (ctrl?.signal.aborted) return;
 		if (!stateRef.current.isOpen) return;
+		if (stateRef.current.isConnecting) return;
 		if (pipelineBusyRef.current) return;
 		if (pendingChunksRef.current.length > 0) return;
 		if (activeSourcesRef.current.size > 0) return;
+		if (pendingAudioBufferRef.current) return;
 		if (stateRef.current.isGenerating) return;
+		releaseInitialGreetingMicGate();
 		setIsSynthesizingVoice(false);
+		stateRef.current.isSynthesizingVoice = false;
 		setIsAiSpeaking(false);
+		stateRef.current.isAiSpeaking = false;
 		if (autoListenTimerRef.current !== null) window.clearTimeout(autoListenTimerRef.current);
 		autoListenTimerRef.current = window.setTimeout(() => {
 			autoListenTimerRef.current = null;
-			if (!ctrl?.signal.aborted && stateRef.current.isOpen && !stateRef.current.isDisconnected && !stateRef.current.isOffline && !stateRef.current.isGenerating && !stateRef.current.isAiSpeaking) startListeningTurn();
+			if (ctrl?.signal.aborted) return;
+			const cur = stateRef.current;
+			if (shouldActivateMicForTurn({
+				isOpen: cur.isOpen,
+				isConnecting: cur.isConnecting,
+				isDisconnected: cur.isDisconnected,
+				isOffline: cur.isOffline,
+				isGenerating: cur.isGenerating,
+				isTranscribingTurn: cur.isTranscribingTurn,
+				isAiSpeaking: cur.isAiSpeaking,
+				isSynthesizingVoice: cur.isSynthesizingVoice,
+				isInitialGreetingPending: isInitialGreetingPendingRef.current,
+				pipelineBusy: pipelineBusyRef.current,
+				pendingChunkCount: pendingChunksRef.current.length,
+				activeSourceCount: activeSourcesRef.current.size,
+				hasPendingAudioBuffer: Boolean(pendingAudioBufferRef.current)
+			})) startListeningTurn();
 		}, 200);
-	}, [startListeningTurn]);
+	}, [releaseInitialGreetingMicGate, startListeningTurn]);
 	const commitActiveUtterance = (0, import_react.useCallback)(async (forceManual = false) => {
 		if (turnCommitInFlightRef.current) return;
 		if (!stateRef.current.isOpen || stateRef.current.isGenerating) return;
@@ -8493,6 +8607,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		vadStateRef.current = createVadTracker(vadStateRef.current.noiseFloor);
 		turnHadRealSpeechRef.current = false;
 		recognitionFinalPrefixRef.current = "";
+		recognitionSessionFinalRef.current = "";
 		recognitionLiveTextRef.current = "";
 		rollingSttCheckedBytesRef.current = 0;
 		const submitCleanText = (candidate, realEnergy) => {
@@ -8621,9 +8736,12 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		pendingAudioBufferRef.current = null;
 		aiSpeakingStartedAtRef.current = Date.now();
 		bargeInStateRef.current = createBargeInState();
+		releaseInitialGreetingMicGate();
 		setNeedsTapToPlay(false);
 		setIsSynthesizingVoice(false);
+		stateRef.current.isSynthesizingVoice = false;
 		setIsAiSpeaking(true);
+		stateRef.current.isAiSpeaking = true;
 		let settled = false;
 		const finishSource = () => {
 			if (settled) return;
@@ -8647,7 +8765,11 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			window.clearTimeout(safetyTimerId);
 			finishSource();
 		}
-	}), [ensurePlaybackAnalyser, scheduleAutoListenAfterSpeech]);
+	}), [
+		ensurePlaybackAnalyser,
+		releaseInitialGreetingMicGate,
+		scheduleAutoListenAfterSpeech
+	]);
 	const schedulePcmSamples = (0, import_react.useCallback)((ctx, samples, sampleRate, ctrl, runId) => {
 		if (ctrl?.signal.aborted || runId !== pipelineRunIdRef.current || samples.length === 0) return;
 		bilingualSpeechPlayer.stop();
@@ -8668,12 +8790,15 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			aiSpeakingStartedAtRef.current = Date.now();
 			bargeInStateRef.current = createBargeInState();
 		}
+		releaseInitialGreetingMicGate();
 		activeSourcesRef.current.add(source);
 		playbackSourceRef.current = source;
 		pendingAudioBufferRef.current = null;
 		setNeedsTapToPlay(false);
 		setIsSynthesizingVoice(false);
+		stateRef.current.isSynthesizingVoice = false;
 		setIsAiSpeaking(true);
+		stateRef.current.isAiSpeaking = true;
 		let settled = false;
 		const finishSource = () => {
 			if (settled) return;
@@ -8696,7 +8821,11 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			window.clearTimeout(safetyTimerId);
 			finishSource();
 		}
-	}, [ensurePlaybackAnalyser, scheduleAutoListenAfterSpeech]);
+	}, [
+		ensurePlaybackAnalyser,
+		releaseInitialGreetingMicGate,
+		scheduleAutoListenAfterSpeech
+	]);
 	const speakSentenceViaBrowser = (0, import_react.useCallback)((text, msgId, isMaleVoice, voice, ctrl) => new Promise((resolve) => {
 		if (!isSpeechSynthesisSupported() || ctrl.signal.aborted) {
 			resolve();
@@ -8704,9 +8833,12 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		}
 		aiSpeakingStartedAtRef.current = Date.now();
 		bargeInStateRef.current = createBargeInState();
+		releaseInitialGreetingMicGate();
 		setActiveVoiceModel("browser");
 		setIsSynthesizingVoice(false);
+		stateRef.current.isSynthesizingVoice = false;
 		setIsAiSpeaking(true);
+		stateRef.current.isAiSpeaking = true;
 		bilingualSpeechPlayer.speak({
 			msgId: `live-voice-${msgId}-${Date.now()}`,
 			text,
@@ -8716,13 +8848,14 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			skipServerTts: true,
 			onDone: () => resolve()
 		});
-	}), []);
+	}), [releaseInitialGreetingMicGate]);
 	const drainSpeechPipeline = (0, import_react.useCallback)(async (msgId) => {
 		if (pipelineBusyRef.current) return;
 		const ctrl = ttsAbortRef.current;
 		if (!ctrl || ctrl.signal.aborted) return;
 		const runId = pipelineRunIdRef.current;
 		pipelineBusyRef.current = true;
+		let haltPipeline = false;
 		try {
 			while (pendingChunksRef.current.length > 0 && !ctrl.signal.aborted && runId === pipelineRunIdRef.current) {
 				let sentence = (pendingChunksRef.current.shift() || "").trim();
@@ -8735,12 +8868,18 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				const voice = stateRef.current.selectedVoice;
 				const isMaleVoice = voice === "Puck" || voice === "Charon" || voice === "Fenrir";
 				const voiceStyle = buildVoiceStylePrompt(voice);
-				if (activeSourcesRef.current.size === 0) setIsSynthesizingVoice(true);
+				if (activeSourcesRef.current.size === 0) {
+					setIsSynthesizingVoice(true);
+					stateRef.current.isSynthesizingVoice = true;
+				}
 				const ctx = ensureAudioContext();
 				if (ctx && ctx.state === "suspended") try {
 					await ctx.resume();
 				} catch {}
-				if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
+				if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) {
+					haltPipeline = true;
+					break;
+				}
 				if (ctx && ctx.state !== "suspended") {
 					const streamRes = await streamGeminiPcmSpeech({
 						text: sentence,
@@ -8751,7 +8890,10 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 							schedulePcmSamples(ctx, samples, sampleRate, ctrl, runId);
 						}
 					});
-					if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
+					if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) {
+						haltPipeline = true;
+						break;
+					}
 					if (streamRes.ok && streamRes.receivedAudio) {
 						if (streamRes.modelUsed) setActiveVoiceModel(streamRes.modelUsed);
 						continue;
@@ -8772,13 +8914,23 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						signal: ctrl.signal
 					});
 				}
-				if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
+				if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) {
+					haltPipeline = true;
+					break;
+				}
 				if (!res.ok || !res.audioBase64) {
 					if (stateRef.current.isOffline && !/abort/i.test(res.error || "") && activeSourcesRef.current.size === 0 && isSpeechSynthesisSupported()) {
 						await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
 						continue;
 					}
 					if (res.error && !/abort/i.test(res.error)) setStatusNotice(res.error);
+					ttsFailedTurnRef.current = msgId;
+					pendingChunksRef.current = [];
+					haltPipeline = true;
+					setIsSynthesizingVoice(false);
+					stateRef.current.isSynthesizingVoice = false;
+					setIsAiSpeaking(false);
+					stateRef.current.isAiSpeaking = false;
 					break;
 				}
 				if (res.modelUsed) setActiveVoiceModel(res.modelUsed);
@@ -8788,10 +8940,16 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 					const bytes = base64ToUint8Array(res.audioBase64);
 					if (!activeCtx || bytes.byteLength === 0) continue;
 					const audioBuffer = await activeCtx.decodeAudioData(bytes.slice().buffer);
-					if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) break;
+					if (ctrl.signal.aborted || runId !== pipelineRunIdRef.current) {
+						haltPipeline = true;
+						break;
+					}
 					if (activeCtx.state === "suspended") {
 						pendingAudioBufferRef.current = audioBuffer;
+						haltPipeline = true;
 						setNeedsTapToPlay(true);
+						setIsSynthesizingVoice(false);
+						stateRef.current.isSynthesizingVoice = false;
 						break;
 					}
 					const detuneCents = res.modelUsed === "neural-voice-hd" && isMaleVoice ? voice === "Puck" ? -150 : -220 : 0;
@@ -8799,13 +8957,23 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 					await startDecodedBufferPlayback(activeCtx, audioBuffer, ctrl, detuneCents);
 				} catch {
 					if (stateRef.current.isOffline && !ctrl.signal.aborted && runId === pipelineRunIdRef.current && activeSourcesRef.current.size === 0 && isSpeechSynthesisSupported()) await speakSentenceViaBrowser(sentence, msgId, isMaleVoice, voice, ctrl);
+					else {
+						ttsFailedTurnRef.current = msgId;
+						pendingChunksRef.current = [];
+						haltPipeline = true;
+						setIsSynthesizingVoice(false);
+						stateRef.current.isSynthesizingVoice = false;
+						setIsAiSpeaking(false);
+						stateRef.current.isAiSpeaking = false;
+						break;
+					}
 				}
 			}
 		} finally {
 			if (runId === pipelineRunIdRef.current) {
 				pipelineBusyRef.current = false;
-				if (pendingChunksRef.current.length > 0 && ttsAbortRef.current && !ttsAbortRef.current.signal.aborted) drainSpeechPipeline(msgId);
-				else scheduleAutoListenAfterSpeech(ctrl);
+				if (!haltPipeline && pendingChunksRef.current.length > 0 && ttsAbortRef.current && !ttsAbortRef.current.signal.aborted) drainSpeechPipeline(msgId);
+				else if (!pendingAudioBufferRef.current) scheduleAutoListenAfterSpeech(ctrl);
 			}
 		}
 	}, [
@@ -8819,12 +8987,18 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		const token = ++sessionTokenRef.current;
 		releaseAllMicResources();
 		stopAiSpeechPlayback();
+		const willGreet = Boolean(allowGreeting && !hasGreetedRef.current);
+		isInitialGreetingPendingRef.current = willGreet;
 		setStatusNotice(null);
 		setIsDisconnected(false);
+		stateRef.current.isDisconnected = false;
 		setIsReconnecting(false);
 		setIsConnecting(true);
+		stateRef.current.isConnecting = true;
 		if (typeof navigator !== "undefined" && !navigator.onLine) {
+			isInitialGreetingPendingRef.current = false;
 			setIsConnecting(false);
+			stateRef.current.isConnecting = false;
 			setIsOffline(true);
 			setIsReconnecting(true);
 			setStatusNotice("No internet connection — waiting to reconnect.");
@@ -8835,8 +9009,11 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			await ctx.resume();
 		} catch {}
 		if (typeof navigator === "undefined" || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+			isInitialGreetingPendingRef.current = false;
 			setIsConnecting(false);
+			stateRef.current.isConnecting = false;
 			setIsDisconnected(true);
+			stateRef.current.isDisconnected = true;
 			setStatusNotice("Microphone API unavailable in this browser. Tap keyboard to chat.");
 			return;
 		}
@@ -8858,12 +9035,13 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			persistentStreamRef.current = stream;
 			setMicStreamLive(true);
 			stream.getAudioTracks().forEach((track) => {
-				track.enabled = !stateRef.current.isMuted;
+				track.enabled = !stateRef.current.isMuted && !isInitialGreetingPendingRef.current;
 				track.onended = () => {
 					if (token !== sessionTokenRef.current || !stateRef.current.isOpen) return;
 					setMicStreamLive(false);
 					setIsSessionListening(false);
 					setIsDisconnected(true);
+					stateRef.current.isDisconnected = true;
 					setStatusNotice("Microphone connection ended. Tap reconnect to continue.");
 				};
 			});
@@ -8886,36 +9064,46 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				micAnalyserRef.current = null;
 			}
 			setIsConnecting(false);
+			stateRef.current.isConnecting = false;
 			setIsDisconnected(false);
+			stateRef.current.isDisconnected = false;
 			setIsReconnecting(false);
 			if (allowGreeting && !hasGreetedRef.current) {
 				hasGreetedRef.current = true;
+				isInitialGreetingPendingRef.current = true;
 				const greeting = buildVoiceGreeting(stateRef.current.userName, stateRef.current.voiceLang);
 				setGreetingText(greeting);
 				ttsAbortRef.current = new AbortController();
 				useBrowserTtsForTurnRef.current = false;
 				pendingChunksRef.current = [greeting];
-				aiSpeakingStartedAtRef.current = Date.now();
+				aiSpeakingStartedAtRef.current = 0;
 				drainSpeechPipeline("greeting");
-			} else startListeningTurn();
+			} else {
+				isInitialGreetingPendingRef.current = false;
+				startListeningTurn();
+			}
 		} catch (err) {
 			if (token !== sessionTokenRef.current || !stateRef.current.isOpen) return;
 			setMicStreamLive(false);
 			setIsConnecting(false);
+			stateRef.current.isConnecting = false;
 			setIsDisconnected(true);
+			stateRef.current.isDisconnected = true;
 			const name = err instanceof Error ? err.name : "";
 			if (name === "NotAllowedError" || name === "PermissionDeniedError") setStatusNotice("মাইক পারমিশন বন্ধ আছে — মাইক অনুমতি দিয়ে Reconnect চাপুন অথবা কীবোর্ডে লিখুন।");
 			else if (name === "NotFoundError" || name === "DevicesNotFoundError") setStatusNotice("কোনো মাইক্রোফোন পাওয়া যায়নি। কীবোর্ড ব্যবহার করুন।");
 			else setStatusNotice("মাইক্রোফোন চালু করা যায়নি। আবার চেষ্টা করুন।");
 			if (allowGreeting && !hasGreetedRef.current) {
 				hasGreetedRef.current = true;
+				isInitialGreetingPendingRef.current = true;
 				const greeting = buildVoiceGreeting(stateRef.current.userName, stateRef.current.voiceLang);
 				setGreetingText(greeting);
 				ttsAbortRef.current = new AbortController();
 				useBrowserTtsForTurnRef.current = false;
 				pendingChunksRef.current = [greeting];
+				aiSpeakingStartedAtRef.current = 0;
 				drainSpeechPipeline("greeting");
-			}
+			} else isInitialGreetingPendingRef.current = false;
 		}
 	}, [
 		drainSpeechPipeline,
@@ -8928,13 +9116,26 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		if (!isOpen) {
 			sessionTokenRef.current += 1;
 			hasGreetedRef.current = false;
+			isInitialGreetingPendingRef.current = false;
+			ttsFailedTurnRef.current = null;
 			setSeconds(0);
 			setDraftText("");
 			setKeyboardOpen(false);
 			setIsMuted(false);
 			setLiveCaption("");
+			setLiveFinalText("");
+			setLiveInterimText("");
+			setIsUserVoicing(false);
+			setHasRecordedAudio(false);
+			setExpandedTranscript(false);
+			setNeedsTapToPlay(false);
 			setGreetingText("");
 			setSessionUserText("");
+			setAttachedImgs([]);
+			setAttachedFiles([]);
+			setSessionSharedImgs([]);
+			setPendingSharedTurn(null);
+			setFullscreenImage(null);
 			setStatusNotice(null);
 			setIsConnecting(false);
 			setIsReconnecting(false);
@@ -8943,6 +9144,9 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			activeTurnMsgIdRef.current = null;
 			spokenCursorRef.current = 0;
 			lastSubmittedRef.current = null;
+			recognitionFinalPrefixRef.current = "";
+			recognitionSessionFinalRef.current = "";
+			recognitionLiveTextRef.current = "";
 			ripplesRef.current = [];
 			stopAiSpeechPlayback();
 			releaseAllMicResources();
@@ -8951,8 +9155,22 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		spokenMsgIdRef.current = lastAiMessage?.id || null;
 		activeTurnMsgIdRef.current = lastAiMessage?.id || null;
 		spokenCursorRef.current = lastAiMessage?.text ? formatTextForNaturalSpeech(lastAiMessage.text, 12e3).length : 0;
+		ttsFailedTurnRef.current = null;
+		setLiveCaption("");
+		setLiveFinalText("");
+		setLiveInterimText("");
+		setIsUserVoicing(false);
+		setHasRecordedAudio(false);
+		setAttachedImgs([]);
+		setAttachedFiles([]);
+		setSessionSharedImgs([]);
+		setPendingSharedTurn(null);
+		setFullscreenImage(null);
 		setSessionUserText("");
 		setGreetingText("");
+		recognitionFinalPrefixRef.current = "";
+		recognitionSessionFinalRef.current = "";
+		recognitionLiveTextRef.current = "";
 		onCancelMic?.();
 		const timer = window.setInterval(() => setSeconds((s) => s + 1), 1e3);
 		establishVoiceConnection(true);
@@ -8977,9 +9195,15 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			const isTypingTarget = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
 			if (e.key === "Escape") {
 				e.preventDefault();
-				stopAiSpeechPlayback();
-				releaseAllMicResources();
-				onEndCall();
+				e.stopPropagation();
+				if (stateRef.current.fullscreenImage) {
+					setFullscreenImage(null);
+					return;
+				}
+				if (stateRef.current.keyboardOpen) {
+					setKeyboardOpen(false);
+					return;
+				}
 				return;
 			}
 			if (isTypingTarget) return;
@@ -8988,12 +9212,12 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				setIsMuted((prev) => {
 					const nextMuted = !prev;
 					if (persistentStreamRef.current) persistentStreamRef.current.getAudioTracks().forEach((track) => {
-						track.enabled = !nextMuted;
+						track.enabled = !nextMuted && !isInitialGreetingPendingRef.current;
 					});
 					if (nextMuted) {
 						stopTurnRecognition();
 						setIsUserVoicing(false);
-					} else if (visualStateRef.current === "listening" && !stateRef.current.isGenerating && !stateRef.current.isAiSpeaking && !stateRef.current.isDisconnected) startListeningTurn();
+					} else if (visualStateRef.current === "listening" && !stateRef.current.isGenerating && !stateRef.current.isAiSpeaking && !stateRef.current.isDisconnected && !isInitialGreetingPendingRef.current) startListeningTurn();
 					return nextMuted;
 				});
 			} else if (e.code === "Space") {
@@ -9011,22 +9235,53 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			window.removeEventListener("online", handleOnline);
 			window.removeEventListener("keydown", handleKeyDown);
 			sessionTokenRef.current += 1;
+			isInitialGreetingPendingRef.current = false;
 			stopAiSpeechPlayback();
 			releaseAllMicResources();
 		};
 	}, [isOpen]);
 	(0, import_react.useEffect)(() => {
+		if (prevChatIdRef.current === chatId) return;
+		prevChatIdRef.current = chatId;
+		ttsFailedTurnRef.current = null;
+		setAttachedImgs([]);
+		setAttachedFiles([]);
+		setSessionSharedImgs([]);
+		setPendingSharedTurn(null);
+		setFullscreenImage(null);
+		setLiveCaption("");
+		setLiveFinalText("");
+		setLiveInterimText("");
+		setIsUserVoicing(false);
+		setHasRecordedAudio(false);
+		setSessionUserText("");
+		setGreetingText("");
+		setStatusNotice(null);
+		recognitionFinalPrefixRef.current = "";
+		recognitionSessionFinalRef.current = "";
+		recognitionLiveTextRef.current = "";
+		spokenMsgIdRef.current = lastAiMessage?.id || null;
+		activeTurnMsgIdRef.current = lastAiMessage?.id || null;
+		spokenCursorRef.current = lastAiMessage?.text ? formatTextForNaturalSpeech(lastAiMessage.text, 12e3).length : 0;
+	}, [
+		chatId,
+		lastAiMessage?.id,
+		lastAiMessage?.text
+	]);
+	(0, import_react.useEffect)(() => {
 		if (!isOpen) return;
 		if (!lastAiMessage || !lastAiMessage.id) return;
 		const cleanTextLen = formatTextForNaturalSpeech(lastAiMessage.text, 12e3).length;
 		if (spokenMsgIdRef.current === lastAiMessage.id && activeTurnMsgIdRef.current === lastAiMessage.id && spokenCursorRef.current >= cleanTextLen) {
-			if (!isGenerating) scheduleAutoListenAfterSpeech(ttsAbortRef.current);
+			if (!isGenerating && !isInitialGreetingPendingRef.current && !stateRef.current.isConnecting && !pipelineBusyRef.current) scheduleAutoListenAfterSpeech(ttsAbortRef.current);
 			return;
 		}
 		if (activeTurnMsgIdRef.current !== lastAiMessage.id) {
 			activeTurnMsgIdRef.current = lastAiMessage.id;
 			spokenMsgIdRef.current = lastAiMessage.id;
 			spokenCursorRef.current = 0;
+			ttsFailedTurnRef.current = null;
+			isInitialGreetingPendingRef.current = false;
 			useBrowserTtsForTurnRef.current = false;
 			stopListeningTurnOnly();
 			stopAiSpeechPlayback();
@@ -9040,14 +9295,14 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			}
 			ttsAbortRef.current = new AbortController();
 		}
-		if (lastAiMessage.isError) return;
+		if (lastAiMessage.isError || ttsFailedTurnRef.current === lastAiMessage.id) return;
 		const { chunks, nextCursor } = extractReadySpeechChunks(lastAiMessage.text, spokenCursorRef.current, !isGenerating);
 		if (chunks.length > 0) {
 			spokenCursorRef.current = nextCursor;
 			pendingChunksRef.current.push(...chunks);
 			if (!ttsAbortRef.current || ttsAbortRef.current.signal.aborted) ttsAbortRef.current = new AbortController();
 			drainSpeechPipeline(lastAiMessage.id);
-		} else if (!isGenerating) scheduleAutoListenAfterSpeech(ttsAbortRef.current);
+		} else if (!isGenerating && !isInitialGreetingPendingRef.current && !stateRef.current.isConnecting && !pipelineBusyRef.current) scheduleAutoListenAfterSpeech(ttsAbortRef.current);
 	}, [
 		drainSpeechPipeline,
 		isGenerating,
@@ -9085,13 +9340,13 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 			const state = visualStateRef.current;
 			const cur = stateRef.current;
 			let micRms = 0;
-			if (micAnalyserRef.current && !cur.isMuted) {
+			if (micAnalyserRef.current && !cur.isMuted && !isInitialGreetingPendingRef.current) {
 				micAnalyserRef.current.getByteTimeDomainData(timeBuf);
 				micAnalyserRef.current.getByteFrequencyData(freqBuf);
 				micRms = computeVocalEnergy(timeBuf, freqBuf);
 			}
 			micLevelRef.current += (Math.min(1, micRms * 8.5) - micLevelRef.current) * .26;
-			if (state === "listening" && cur.isSessionListening && !cur.isMuted && !cur.isGenerating && !cur.isTranscribingTurn && !turnCommitInFlightRef.current && micAnalyserRef.current) {
+			if (state === "listening" && cur.isSessionListening && !cur.isMuted && !cur.isGenerating && !cur.isTranscribingTurn && !isInitialGreetingPendingRef.current && !turnCommitInFlightRef.current && micAnalyserRef.current) {
 				const vadRes = stepVadTracker(vadStateRef.current, micRms, nowMs);
 				vadStateRef.current = vadRes.nextState;
 				if (vadRes.action === "speech_start") {
@@ -9120,7 +9375,13 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 					commitActiveUtteranceRef.current(false);
 				} else if (!vadRes.nextState.isVoiceActive && !recognitionLiveTextRef.current) setIsUserVoicing(false);
 			}
-			if ((state === "speaking" || cur.isSynthesizingVoice) && !cur.isMuted && micAnalyserRef.current && aiSpeakingStartedAtRef.current > 0) {
+			if (micAnalyserRef.current && shouldAllowBargeIn({
+				voiceState: state,
+				isAiSpeaking: cur.isAiSpeaking,
+				isMuted: cur.isMuted,
+				isInitialGreetingPending: isInitialGreetingPendingRef.current,
+				aiSpeakingStartedAt: aiSpeakingStartedAtRef.current
+			})) {
 				const barge = stepBargeInDetector(bargeInStateRef.current, {
 					rms: micRms,
 					nowMs,
@@ -9534,6 +9795,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 		const source = (customText || fullAiSourceText).trim();
 		if (!source || isGenerating || isOffline) return;
 		ensureAudioContext();
+		ttsFailedTurnRef.current = null;
 		stopListeningTurnOnly();
 		stopAiSpeechPlayback();
 		setStatusNotice(null);
@@ -9681,12 +9943,15 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				} catch {}
 				const base64Data = finalUrl.includes(",") ? finalUrl.split(",")[1] || "" : finalUrl;
 				if (base64Data) {
-					setAttachedImgs((prev) => [...prev.slice(-2), {
-						name: f.name,
-						mime: finalMime,
-						data: base64Data,
-						url: finalUrl
-					}]);
+					setAttachedImgs((prev) => {
+						if (prev.some((item) => item.mime === finalMime && (item.data === base64Data || finalUrl && item.url === finalUrl))) return prev;
+						return [...prev.slice(-2), {
+							name: f.name,
+							mime: finalMime,
+							data: base64Data,
+							url: finalUrl
+						}];
+					});
 					setStatusNotice(voiceLang === "bn-BD" ? `ছবি যুক্ত হয়েছে (${f.name}) — ভয়েস সেশন চালু আছে, মুখে বলুন বা বিশ্লেষণ করুন চাপুন।` : `Image shared (${f.name}) — voice session active, speak or tap Analyze.`);
 					if (stateRef.current.isOpen && !stateRef.current.isDisconnected && !stateRef.current.isOffline && !stateRef.current.isGenerating && !stateRef.current.isAiSpeaking && !stateRef.current.isSessionListening) startListeningTurn();
 				}
@@ -10216,7 +10481,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 				]
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("footer", {
-				className: "relative z-10 w-full max-w-md mx-auto px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 shrink-0",
+				className: "relative z-10 w-full max-w-md mx-auto px-2 sm:px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-col items-center gap-2 shrink-0",
 				children: [
 					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 						ref: imageInputRef,
@@ -10234,68 +10499,34 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						onChange: (e) => void handlePickVoiceFile(e),
 						className: "hidden"
 					}),
-					(attachedImgs.length > 0 || attachedFiles.length > 0) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+					attachedFiles.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 						"data-testid": "live-voice-attachment-preview",
 						className: "w-full flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-2xl bg-slate-900/90 border border-white/15 backdrop-blur-md",
-						children: [
-							attachedImgs.map((img, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								"data-testid": `live-voice-img-card-${idx}`,
-								className: "flex items-center gap-2 pl-1.5 pr-2 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[200px]",
-								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-										type: "button",
-										onClick: () => setFullscreenImage({
-											url: img.url,
-											name: img.name
-										}),
-										className: "w-7 h-7 rounded-lg overflow-hidden shrink-0 border border-white/10 cursor-pointer",
-										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("img", {
-											src: img.url,
-											alt: img.name,
-											className: "w-full h-full object-cover"
-										})
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "text-[11.5px] text-white/90 truncate",
-										children: img.name
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-										type: "button",
-										"data-testid": `live-voice-remove-img-${idx}`,
-										onClick: () => setAttachedImgs((prev) => prev.filter((_, i) => i !== idx)),
-										"aria-label": `Remove ${img.name}`,
-										className: "w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer",
-										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3 h-3" })
-									})
-								]
-							}, `vimg-${idx}-${img.name}`)),
-							attachedFiles.map((file, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								"data-testid": `live-voice-file-card-${idx}`,
-								className: "flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]",
-								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FileText, { className: "w-4 h-4 text-sky-300 shrink-0" }),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-										className: "text-[11.5px] text-white/90 truncate",
-										children: file.name
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
-										type: "button",
-										"data-testid": `live-voice-remove-file-${idx}`,
-										onClick: () => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx)),
-										"aria-label": `Remove ${file.name}`,
-										className: "w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer",
-										children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3 h-3" })
-									})
-								]
-							}, `vfile-${idx}-${file.name}`)),
-							!keyboardOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-								type: "button",
-								"data-testid": "live-voice-send-attachments-btn",
-								onClick: () => handleSubmitTyped(),
-								className: "ml-auto px-3 py-1 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-3.5 h-3.5 stroke-[2.4]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: voiceLang === "bn-BD" ? "পাঠান" : "Send" })]
-							})
-						]
+						children: [attachedFiles.map((file, idx) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							"data-testid": `live-voice-file-card-${idx}`,
+							className: "flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/[0.08] border border-white/15 max-w-[210px]",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(FileText, { className: "w-4 h-4 text-sky-300 shrink-0" }),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+									className: "text-[11.5px] text-white/90 truncate",
+									children: file.name
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+									type: "button",
+									"data-testid": `live-voice-remove-file-${idx}`,
+									onClick: () => setAttachedFiles((prev) => prev.filter((_, i) => i !== idx)),
+									"aria-label": `Remove ${file.name}`,
+									className: "w-5 h-5 rounded-full bg-white/10 hover:bg-rose-500/80 text-white inline-flex items-center justify-center shrink-0 cursor-pointer",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(X, { className: "w-3 h-3" })
+								})
+							]
+						}, `vfile-${idx}-${file.name}`)), !keyboardOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+							type: "button",
+							"data-testid": "live-voice-send-attachments-btn",
+							onClick: () => handleSubmitTyped(),
+							className: "ml-auto px-3 py-1 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shrink-0",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-3.5 h-3.5 stroke-[2.4]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: voiceLang === "bn-BD" ? "পাঠান" : "Send" })]
+						})]
 					}),
 					keyboardOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
 						onSubmit: handleSubmitTyped,
@@ -10318,7 +10549,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 						})]
 					}),
 					/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "live-voice-dock inline-flex items-center justify-center gap-1.5 sm:gap-2 px-2.5 py-2 rounded-full",
+						className: "live-voice-dock inline-flex flex-wrap items-center justify-center gap-1 sm:gap-2 px-1.5 sm:px-2.5 py-1.5 sm:py-2 max-w-full rounded-full",
 						children: [
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
@@ -10328,8 +10559,8 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								"aria-label": isMuted ? "Unmute microphone" : "Mute microphone",
 								"aria-pressed": isMuted,
 								title: isMuted ? "Unmute (M)" : "Mute (M)",
-								className: `live-voice-control w-11 h-11 sm:w-12 sm:h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 ${isMuted ? "bg-white text-slate-950" : isUserVoicing ? "bg-emerald-400/25 text-emerald-200 ring-2 ring-emerald-400/75" : "bg-white/[0.07] hover:bg-white/[0.14] text-white"}`,
-								children: isMuted ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MicOff, { className: "w-5 h-5" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Mic, { className: "w-5 h-5" })
+								className: `live-voice-control w-10 h-10 sm:w-12 sm:h-12 rounded-full inline-flex items-center justify-center transition-all cursor-pointer disabled:opacity-35 shrink-0 ${isMuted ? "bg-white text-slate-950" : isUserVoicing ? "bg-emerald-400/25 text-emerald-200 ring-2 ring-emerald-400/75" : "bg-white/[0.07] hover:bg-white/[0.14] text-white"}`,
+								children: isMuted ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MicOff, { className: "w-4 h-4 sm:w-5 sm:h-5" }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Mic, { className: "w-4 h-4 sm:w-5 sm:h-5" })
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
@@ -10337,7 +10568,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								onClick: handleToggleVoiceLang,
 								"aria-label": `Switch speech recognition language (current: ${voiceLang === "bn-BD" ? "Bangla" : "English"})`,
 								title: voiceLang === "bn-BD" ? "Bangla — tap for English" : "English — tap for Bangla",
-								className: "live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer",
+								className: "live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-[11.5px] sm:text-[12px] font-semibold tracking-tight text-slate-100 inline-flex items-center justify-center transition-colors cursor-pointer shrink-0",
 								children: voiceLang === "bn-BD" ? "বাং" : "EN"
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -10346,7 +10577,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								onClick: () => imageInputRef.current?.click(),
 								"aria-label": "Attach image",
 								title: voiceLang === "bn-BD" ? "ছবি যুক্ত করুন" : "Attach image",
-								className: `live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${attachedImgs.length > 0 ? "bg-emerald-400/25 text-emerald-200 ring-1 ring-emerald-400/60" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
+								className: `live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${attachedImgs.length > 0 ? "bg-emerald-400/25 text-emerald-200 ring-1 ring-emerald-400/60" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
 								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ImagePlus, { className: "w-4 h-4" })
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -10355,7 +10586,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								onClick: () => fileInputRef.current?.click(),
 								"aria-label": "Attach file",
 								title: voiceLang === "bn-BD" ? "ফাইল যুক্ত করুন" : "Attach file",
-								className: `live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${attachedFiles.length > 0 ? "bg-sky-400/25 text-sky-200 ring-1 ring-sky-400/60" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
+								className: `live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${attachedFiles.length > 0 ? "bg-sky-400/25 text-sky-200 ring-1 ring-sky-400/60" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
 								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Paperclip, { className: "w-4 h-4" })
 							}),
 							voiceState === "disconnected" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
@@ -10363,24 +10594,24 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								"data-testid": "live-voice-reconnect-btn",
 								onClick: () => void establishVoiceConnection(false),
 								"aria-label": "Reconnect voice session",
-								className: "live-voice-control h-11 sm:h-12 px-4 sm:px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[13px] inline-flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "w-4 h-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Reconnect" })]
+								className: "live-voice-control h-10 sm:h-12 px-3 sm:px-5 rounded-full bg-white text-slate-950 hover:bg-sky-50 font-semibold text-[12px] sm:text-[13px] inline-flex items-center gap-1.5 sm:gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(RefreshCw, { className: "w-3.5 h-3.5 sm:w-4 sm:h-4" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Reconnect" })]
 							}) : voiceState === "speaking" ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 								type: "button",
 								"data-testid": "live-voice-interrupt-btn",
 								onClick: handleInterruptAndListen,
 								"aria-label": "Interrupt AI and speak",
 								title: "Interrupt (Space)",
-								className: "live-voice-control h-11 sm:h-12 px-3.5 sm:px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Hand, { className: "w-4 h-4 text-violet-200" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Interrupt" })]
+								className: "live-voice-control h-10 sm:h-12 px-3 sm:px-4 rounded-full bg-white/[0.12] hover:bg-white/[0.2] text-white font-medium text-[12px] sm:text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Hand, { className: "w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-200" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Interrupt" })]
 							}) : hasCapturedSpeechToSend ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 								type: "button",
 								"data-testid": "live-voice-send-now-btn",
 								onClick: () => void commitActiveUtterance(true),
 								"aria-label": "Send spoken message now",
 								title: "Send (Space)",
-								className: "live-voice-control h-11 sm:h-12 px-3.5 sm:px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap",
-								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-4 h-4 stroke-[2.5]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Send" })]
+								className: "live-voice-control h-10 sm:h-12 px-3 sm:px-4 rounded-full bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-semibold text-[12px] sm:text-[12.5px] inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(ArrowUp, { className: "w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Send" })]
 							}) : null,
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 								type: "button",
@@ -10395,7 +10626,7 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								"aria-label": keyboardOpen ? "Hide text input" : "Type a message",
 								"aria-pressed": keyboardOpen,
 								title: keyboardOpen ? "Hide text input" : "Type a message",
-								className: `live-voice-control w-10 h-10 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer ${keyboardOpen ? "bg-white text-slate-950" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
+								className: `live-voice-control w-9 h-9 sm:w-11 sm:h-11 rounded-full inline-flex items-center justify-center transition-colors cursor-pointer shrink-0 ${keyboardOpen ? "bg-white text-slate-950" : "bg-white/[0.07] hover:bg-white/[0.14] text-white/85 hover:text-white"}`,
 								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Keyboard, { className: "w-4 h-4" })
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
@@ -10403,9 +10634,9 @@ var LiveVoiceOverlay = ({ isOpen, userName, preferredLang = "auto", preferredVoi
 								"data-testid": "live-voice-end-btn",
 								onClick: handleSafeExit,
 								"aria-label": "End voice session",
-								title: "End session (Esc)",
-								className: "live-voice-control w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer",
-								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PhoneOff, { className: "w-5 h-5" })
+								title: "End session",
+								className: "live-voice-control w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-rose-500 hover:bg-rose-400 text-white inline-flex items-center justify-center transition-colors cursor-pointer shrink-0",
+								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PhoneOff, { className: "w-4 h-4 sm:w-5 sm:h-5" })
 							})
 						]
 					})
@@ -14057,8 +14288,8 @@ var DeploymentConnectionDiagnosticsCard = () => {
 	const [loadingHealth, setLoadingHealth] = (0, import_react.useState)(false);
 	const [liveCheck, setLiveCheck] = (0, import_react.useState)(null);
 	const [runningLiveCheck, setRunningLiveCheck] = (0, import_react.useState)(false);
-	const clientViteSupabaseUrl = Boolean(typeof import.meta !== "undefined" && void 0);
-	const clientViteSupabaseKey = Boolean(typeof import.meta !== "undefined" && void 0);
+	const clientViteSupabaseUrl = Boolean(typeof import.meta !== "undefined" && "https://cykflyskyxvtnqpdfplm.supabase.co");
+	const clientViteSupabaseKey = Boolean(typeof import.meta !== "undefined" && "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy");
 	const fetchEnvStatus = async () => {
 		setLoadingHealth(true);
 		try {
@@ -27174,7 +27405,10 @@ var viteEnv = {
 	"TSS_DISABLE_CSRF_MIDDLEWARE_WARNING": "false",
 	"TSS_INLINE_CSS_ENABLED": "false",
 	"TSS_ROUTER_BASEPATH": "",
-	"TSS_SERVER_FN_BASE": "/_serverFn/"
+	"TSS_SERVER_FN_BASE": "/_serverFn/",
+	"VITE_SUPABASE_PROJECT_ID": "cykflyskyxvtnqpdfplm",
+	"VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy",
+	"VITE_SUPABASE_URL": "https://cykflyskyxvtnqpdfplm.supabase.co"
 };
 var SUPABASE_URL = (viteEnv?.VITE_SUPABASE_URL || "").trim();
 var SUPABASE_ANON_KEY = (viteEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || "").trim();
@@ -28317,6 +28551,18 @@ function buildSkillInstruction(skills) {
 	if (active.length === 0) return "";
 	return active.slice(0, 6).map((s, i) => `[SKILL ${i + 1}: ${s.name}]${s.description ? ` (${s.description})` : ""}\n${s.prompt}`).join("\n---\n");
 }
+/**
+* Injects an active custom skill directive into the last user message in-place
+* so image attachments (`imgs`) and other fields on that turn are preserved.
+*/
+function applySkillDirectiveToMessages(messages, activeSkillPrompt) {
+	if (!activeSkillPrompt || messages.length === 0) return messages;
+	const lastIdx = messages.length - 1;
+	return messages.map((m, idx) => idx === lastIdx ? {
+		...m,
+		text: m.text ? `${m.text}\n\n[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}` : `[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}`
+	} : m);
+}
 function runSelfCheck(ctx) {
 	const items = [];
 	const push = (id, label, ok, detail, level = ok ? "ok" : "warn") => items.push({
@@ -28831,6 +29077,14 @@ function App() {
 	const [inputText, setInputText] = (0, import_react.useState)("");
 	const [pendingImgs, setPendingImgs] = (0, import_react.useState)([]);
 	const [pendingFiles, setPendingFiles] = (0, import_react.useState)([]);
+	const prevActiveIdRef = (0, import_react.useRef)(activeId);
+	(0, import_react.useEffect)(() => {
+		if (prevActiveIdRef.current !== activeId) {
+			prevActiveIdRef.current = activeId;
+			setPendingImgs([]);
+			setPendingFiles([]);
+		}
+	}, [activeId]);
 	const [project, setProject] = (0, import_react.useState)(null);
 	const [webSearch, setWebSearch] = (0, import_react.useState)(false);
 	const [activeTaskPlan, setActiveTaskPlan] = (0, import_react.useState)(null);
@@ -29095,9 +29349,10 @@ function App() {
 		if (!trimmed) return;
 		const isV2 = isV2ModelId(trimmed);
 		const tier = BUILTIN_TIERS.find((t) => t.model === trimmed);
+		const isKeylessBuiltinGemini = (prov, keys) => (prov === "gemini_custom" || prov === "gemini_openai") && !String(keys || "").trim();
 		setSettings((prev) => sanitizeSettings(tier ? {
 			...prev,
-			provider: isBuiltinProviderId(prev.provider) ? "smfta_cloud" : prev.provider,
+			provider: isBuiltinProviderId(prev.provider) || isKeylessBuiltinGemini(prev.provider, prev.externalKeys) ? "smfta_cloud" : prev.provider,
 			externalModel: trimmed,
 			mode: tier.id
 		} : isV2 ? {
@@ -29112,7 +29367,7 @@ function App() {
 		if (activeProfile) {
 			const updated = savedProfiles.map((p) => p.id === activeProfile.id ? {
 				...p,
-				provider: (isV2 || Boolean(tier)) && isBuiltinProviderId(p.provider) ? "smfta_cloud" : p.provider,
+				provider: (isV2 || Boolean(tier)) && (isBuiltinProviderId(p.provider) || isKeylessBuiltinGemini(p.provider, p.externalKeys)) ? "smfta_cloud" : p.provider,
 				externalModel: trimmed
 			} : p);
 			handleUpdateProfiles(updated);
@@ -31090,10 +31345,7 @@ function App() {
 				if (middleOverflow.trim()) overflowChunks.push(`[ATTACHMENT OVERFLOW FROM ${label}]\n${middleOverflow.slice(0, 6e4)}`);
 				return `${head}\n\n[... ${middleOverflow.length} middle characters routed to extended projectContext ...]\n\n${tail}`;
 			};
-			const safeTargetMsgs = (activeSkillPrompt ? [...contextSlice, {
-				role: "user",
-				text: contextSlice[contextSlice.length - 1]?.text + `\n\n[SELF-BUILT SKILL DIRECTIVE]\n${activeSkillPrompt}`
-			}] : contextSlice).map((m, idx) => ({
+			const safeTargetMsgs = applySkillDirectiveToMessages(contextSlice, activeSkillPrompt).map((m, idx) => ({
 				...m,
 				text: clampMsgText(m.text, `message[${idx}]`)
 			}));
@@ -33769,6 +34021,7 @@ function App() {
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(LiveVoiceOverlay, {
 				isOpen: voiceCallOpen,
+				chatId: activeChat.id,
 				userName: profile?.name || settings.displayName,
 				preferredLang: settings.vlang || settings.appLanguage || "auto",
 				preferredVoice: settings.ttsVoice,

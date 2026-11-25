@@ -2,7 +2,7 @@ import { B as sanitizeV2QuotaConfig, D as getRiyadhDateKey, E as getNextRiyadhRe
 import { p as sanitizeProprietaryOutput } from "./providers-BGzUoiqh.mjs";
 import { n as supabaseAdmin } from "./client.server-BlnvGJA3.mjs";
 import { r as ThinkingLevel, t as GoogleGenAI } from "../_libs/@google/genai.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/v2FirebaseAi-C-VZjJHy.js
+//#region node_modules/.nitro/vite/services/ssr/assets/v2FirebaseAi-CBM8Vd-m.js
 var serverV2UsageStore = /* @__PURE__ */ new Map();
 var serverV2ConfigStore = /* @__PURE__ */ new Map();
 var customV2DbAdapter = null;
@@ -444,10 +444,21 @@ function markV2ModelHealthy(model) {
 */
 function getV2ServerFallbackModels(modelId) {
 	const primary = getV2ModelSpec(modelId).serverGeminiModel;
-	const raw = modelId === "smfta-v5" ? ["gemini-3.1-flash-lite"] : modelId === "smfta-v2-pro" ? Array.from(/* @__PURE__ */ new Set([primary, "gemini-3.1-flash-lite"])) : Array.from(/* @__PURE__ */ new Set([
+	const raw = modelId === "smfta-v5" ? Array.from(/* @__PURE__ */ new Set([
 		primary,
-		"gemini-4-hydrogen",
-		"gemini-3.1-flash-lite"
+		"gemini-flash-lite-latest",
+		"gemini-3-flash-preview",
+		"gemini-2.5-flash-lite"
+	])) : modelId === "smfta-v2-pro" ? Array.from(/* @__PURE__ */ new Set([
+		primary,
+		"gemini-3-flash-preview",
+		"gemini-3.1-flash-lite",
+		"gemini-flash-lite-latest"
+	])) : Array.from(/* @__PURE__ */ new Set([
+		primary,
+		"gemini-3.1-flash-lite",
+		"gemini-3-flash-preview",
+		"gemini-flash-lite-latest"
 	]));
 	const healthy = raw.filter((m) => !isV2ModelInCooldown(m));
 	const cooled = raw.filter((m) => isV2ModelInCooldown(m));

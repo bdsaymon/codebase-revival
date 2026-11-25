@@ -1410,6 +1410,7 @@ export class HardenedAIEngine {
           keyId
         );
         if (!elig.eligible) {
+          sawSlotBusy = true;
           break;
         }
 
@@ -2494,6 +2495,7 @@ export class HardenedAIEngine {
     let streamFinishReason = '';
     let lockedToProvider = false;
     let accumulatedText = '';
+    let sawSkippedBusyOrUnavailable = false;
 
     for (const cand of candidates) {
       if (attempts.length >= ENGINE_DEFAULTS.MAX_ATTEMPTS_PER_REQUEST) break;
@@ -2527,7 +2529,10 @@ export class HardenedAIEngine {
         provider.provider_id,
         keyId
       );
-      if (!elig.eligible) continue;
+      if (!elig.eligible) {
+        sawSkippedBusyOrUnavailable = true;
+        continue;
+      }
 
       const reservation = this.ledger.reserveQuota({
         requestId,
@@ -2916,11 +2921,31 @@ export class HardenedAIEngine {
           errMsg
         );
         const errorClass: ErrorClass = isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR';
-        kp.recordTransientFailure(
-          provider.provider_id,
-          keyId,
-          errorClass
+        const hasSiblingForKey = provider.models.some(
+          (m) =>
+            m.model_id !== model.model_id &&
+            kp.isModelAvailableForKey(
+              provider.provider_id,
+              keyId,
+              m.model_id,
+              provider.config_hash
+            )
         );
+        if (isTimeout && hasSiblingForKey) {
+          kp.markModelUnavailableForKey({
+            providerId: provider.provider_id,
+            keyId,
+            modelId: model.model_id,
+            durationMs: ENGINE_DEFAULTS.RATE_LIMIT_MIN_COOLDOWN_MS,
+            reason: 'model_stream_timeout_cooldown',
+          });
+        } else {
+          kp.recordTransientFailure(
+            provider.provider_id,
+            keyId,
+            errorClass
+          );
+        }
         this.ledger.finalizeReservation({
           reservationId: reservation.reservationId,
           actualInputTokens: null,
@@ -2981,11 +3006,10 @@ export class HardenedAIEngine {
       }
     }
 
-    const fallbackMsg = formatActionableProviderError(
-      attempts,
-      lang,
-      lastUserMsg
-    );
+    const fallbackMsg =
+      attempts.length === 0 && (sawSkippedBusyOrUnavailable || candidates.length === 0)
+        ? getSafeUserMessage('busy', lang, lastUserMsg)
+        : formatActionableProviderError(attempts, lang, lastUserMsg);
     updateStoredMessage(accumulatedText, 'interrupted');
     callbacks.onErrorEvent?.(fallbackMsg);
     return {
@@ -3005,18 +3029,18 @@ export class HardenedAIEngine {
   }): void {
     const { classified, provider, keyId, modelId } = params;
     const kp = this.getKeyPool(provider);
+    const hasAvailableSiblingForKey = provider.models.some(
+      (m) =>
+        m.model_id !== modelId &&
+        kp.isModelAvailableForKey(
+          provider.provider_id,
+          keyId,
+          m.model_id,
+          provider.config_hash
+        )
+    );
     const hasUntriedSiblingModel =
-      provider.resolved_keys.length === 1 &&
-      provider.models.some(
-        (m) =>
-          m.model_id !== modelId &&
-          kp.isModelAvailableForKey(
-            provider.provider_id,
-            keyId,
-            m.model_id,
-            provider.config_hash
-          )
-      );
+      provider.resolved_keys.length === 1 && hasAvailableSiblingForKey;
 
     switch (classified.errorClass) {
       case 'RATE_LIMITED':
@@ -3079,6 +3103,27 @@ export class HardenedAIEngine {
         break;
       case 'TIMEOUT':
       case 'SERVER_ERROR':
+        // Upstream HTTP 503 ("high demand") or single-model timeout is per-model; isolate that model
+        // on multi-model providers instead of poisoning the shared API key circuit breaker.
+        if (hasAvailableSiblingForKey) {
+          kp.markModelUnavailableForKey({
+            providerId: provider.provider_id,
+            keyId,
+            modelId,
+            durationMs: ENGINE_DEFAULTS.RATE_LIMIT_MIN_COOLDOWN_MS,
+            reason:
+              classified.errorClass === 'TIMEOUT'
+                ? 'model_timeout_cooldown'
+                : 'model_server_overloaded_cooldown',
+          });
+        } else {
+          kp.recordTransientFailure(
+            provider.provider_id,
+            keyId,
+            classified.errorClass
+          );
+        }
+        break;
       case 'NETWORK_ERROR':
       case 'UNKNOWN':
         kp.recordTransientFailure(

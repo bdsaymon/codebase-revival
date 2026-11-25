@@ -1,11 +1,11 @@
-import { d as redactSecrets } from "./security-lsE4uyVm.mjs";
+import { d as redactSecrets } from "./security-DUYHl2Kb.mjs";
 import { Router } from "./express-DfD0yhJD.mjs";
 import { c as inferModelForCustomBaseUrl, f as resolveEffectiveProvider, l as isKeylessProvider, n as PROVIDER_ENDPOINTS, o as detectProviderFromKey, t as CODECRAFT_FALLBACK_MODELS, u as normalizeEndpointUrl } from "./providers-BGzUoiqh.mjs";
-import { c as verifyConnectionTargetSafe } from "./storage-CFQ5IeNc.mjs";
-import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, i as formatActionableProviderError, o as normalizeGeminiModelName, r as callXrahatKeylessJson, s as parseCustomParamsSafe, t as buildAdHocProviderConfig } from "./aiClient-HAAuOL29.mjs";
+import { c as verifyConnectionTargetSafe } from "./storage-DysOPz1L.mjs";
+import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, i as formatActionableProviderError, o as normalizeGeminiModelName, r as callXrahatKeylessJson, s as parseCustomParamsSafe, t as buildAdHocProviderConfig } from "./aiClient-Bkf37C6D.mjs";
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
-//#region node_modules/.nitro/vite/services/ssr/assets/provider-Dds2P7Xc.js
+//#region node_modules/.nitro/vite/services/ssr/assets/provider-dp72OSdk.js
 var providerRouter = Router();
 var MODEL_CACHE_TTL_MS = 3e5;
 var MODEL_CACHE_MAX_ENTRIES = 500;

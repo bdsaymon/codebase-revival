@@ -3,10 +3,10 @@ import { n as require_jsx_runtime, r as require_react, t as QueryClientProvider 
 import { _ as createFileRoute, b as useRouter, d as Scripts, f as HeadContent, g as lazyRouteComponent, h as Outlet, m as createRouter, v as createRootRouteWithContext, y as Link } from "../_libs/@tanstack/react-router+[...].mjs";
 import { i as shouldAttemptChunkReload, n as isDynamicImportError } from "./dynamicImportRecovery-BoPXERDS.mjs";
 import { t as QueryClient } from "../_libs/tanstack__query-core.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-CEWKmiB5.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-FcBJXhm-.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
-var styles_default = "/assets/styles-CwMepB0x.css";
+var styles_default = "/assets/styles-CTX6LjId.css";
 function reportLovableError(error, context = {}) {
 	if (typeof window === "undefined") return;
 	window.__lovableEvents?.captureException?.(error, {
@@ -177,7 +177,7 @@ function RootComponent() {
 		children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Outlet, {})
 	});
 }
-var $$splitComponentImporter = () => import("./routes-DOrHDn_L.mjs");
+var $$splitComponentImporter = () => import("./routes-BoDU4TWX.mjs");
 var Route$3 = createFileRoute("/")({
 	head: () => ({ meta: [
 		{ title: "SMFTA AI Pro" },
@@ -205,7 +205,7 @@ var Route$3 = createFileRoute("/")({
 	component: lazyRouteComponent($$splitComponentImporter, "component")
 });
 var handle = async ({ request }) => {
-	const { dispatchToLegacyApp } = await import("./dispatch-C0uqoDbF.mjs");
+	const { dispatchToLegacyApp } = await import("./dispatch-DuvnJ_5h.mjs");
 	return dispatchToLegacyApp(request);
 };
 var Route$2 = createFileRoute("/api/$")({ server: { handlers: {
@@ -217,11 +217,11 @@ var Route$2 = createFileRoute("/api/$")({ server: { handlers: {
 	OPTIONS: handle
 } } });
 var Route$1 = createFileRoute("/auth/callback")({ server: { handlers: { GET: async ({ request }) => {
-	const { dispatchToLegacyApp } = await import("./dispatch-C0uqoDbF.mjs");
+	const { dispatchToLegacyApp } = await import("./dispatch-DuvnJ_5h.mjs");
 	return dispatchToLegacyApp(request);
 } } } });
 var Route = createFileRoute("/preview/$projectId")({ server: { handlers: { GET: async ({ request }) => {
-	const { dispatchToLegacyApp } = await import("./dispatch-C0uqoDbF.mjs");
+	const { dispatchToLegacyApp } = await import("./dispatch-DuvnJ_5h.mjs");
 	return dispatchToLegacyApp(request);
 } } } });
 var rootRouteChildren = {

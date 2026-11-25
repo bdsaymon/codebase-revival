@@ -1,5 +1,5 @@
 import { t as createClient } from "../_libs/supabase__supabase-js.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/client-SAOWSTXM.js
+//#region node_modules/.nitro/vite/services/ssr/assets/client-BSBW-TU9.js
 var RESULT = "lovable-preview-auth:result";
 function readBrokerReply(data, requestId) {
 	if (typeof data !== "object" || data === null) return null;
@@ -151,7 +151,10 @@ function createSupabaseClient() {
 		"TSS_DISABLE_CSRF_MIDDLEWARE_WARNING": "false",
 		"TSS_INLINE_CSS_ENABLED": "false",
 		"TSS_ROUTER_BASEPATH": "",
-		"TSS_SERVER_FN_BASE": "/_serverFn/"
+		"TSS_SERVER_FN_BASE": "/_serverFn/",
+		"VITE_SUPABASE_PROJECT_ID": "cykflyskyxvtnqpdfplm",
+		"VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy",
+		"VITE_SUPABASE_URL": "https://cykflyskyxvtnqpdfplm.supabase.co"
 	}["VITE_SUPABASE_URL"] || process.env["SUPABASE_URL"];
 	const SUPABASE_PUBLISHABLE_KEY = {
 		"BASE_URL": "/",
@@ -165,7 +168,10 @@ function createSupabaseClient() {
 		"TSS_DISABLE_CSRF_MIDDLEWARE_WARNING": "false",
 		"TSS_INLINE_CSS_ENABLED": "false",
 		"TSS_ROUTER_BASEPATH": "",
-		"TSS_SERVER_FN_BASE": "/_serverFn/"
+		"TSS_SERVER_FN_BASE": "/_serverFn/",
+		"VITE_SUPABASE_PROJECT_ID": "cykflyskyxvtnqpdfplm",
+		"VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_VOAslqrk9YwF7jTocJuhCQ_MhSa3BRy",
+		"VITE_SUPABASE_URL": "https://cykflyskyxvtnqpdfplm.supabase.co"
 	}["VITE_SUPABASE_PUBLISHABLE_KEY"] || process.env["SUPABASE_PUBLISHABLE_KEY"];
 	if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
 		const message = `Missing Supabase environment variable(s): ${[...!SUPABASE_URL ? ["SUPABASE_URL"] : [], ...!SUPABASE_PUBLISHABLE_KEY ? ["SUPABASE_PUBLISHABLE_KEY"] : []].join(", ")}. Connect Supabase in Lovable Cloud.`;

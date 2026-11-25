@@ -1,23 +1,23 @@
 import { n as initSqlite } from "./sqlite-vxxGym0h.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/dispatch-C0uqoDbF.js
+//#region node_modules/.nitro/vite/services/ssr/assets/dispatch-DuvnJ_5h.js
 var MAX_BODY_BYTES = 52428800;
 var appPromise = null;
 async function buildApp() {
 	await initSqlite();
 	const [{ Router }, { chatRouter }, { providerRouter }, { toolsRouter }, { healthRouter }, { oauthRouter }, { mcpRouter }, { dbBridgeRouter }, { v2Router }, { previewRouter }, { APP_VERSION }, { createIpRateLimiter, parseTrustProxyHops }, { createApiIdentityMiddleware, redactSecrets }, { createSecurityHeadersMiddleware }] = await Promise.all([
 		import("./express-DfD0yhJD.mjs"),
-		import("./chat-BFsFu_-_.mjs"),
-		import("./provider-Dds2P7Xc.mjs"),
-		import("./tools-BD5ytSEP.mjs"),
-		import("./health-Do34NVQk.mjs"),
-		import("./oauth-9NCWFMlA.mjs"),
-		import("./mcp-Colyhrq8.mjs"),
-		import("./dbBridge-D1eLneGL.mjs"),
-		import("./v2-gb1oE1jp.mjs"),
+		import("./chat-CeUZq-sZ.mjs"),
+		import("./provider-dp72OSdk.mjs"),
+		import("./tools-C_To5egx.mjs"),
+		import("./health-JUlhViuz.mjs"),
+		import("./oauth-Br5HRfGh.mjs"),
+		import("./mcp-D-wHzKDT.mjs"),
+		import("./dbBridge-BSn5eD1g.mjs"),
+		import("./v2-D15hdXCI.mjs"),
 		import("./preview-BAc7ChVQ.mjs"),
 		import("./version-DomTpKw0.mjs").then((n) => n.n),
 		import("./rateLimit-N72zsxxS.mjs"),
-		import("./security-lsE4uyVm.mjs").then((n) => n.f).then((n) => n.c),
+		import("./security-DUYHl2Kb.mjs").then((n) => n.f).then((n) => n.c),
 		import("./securityHeaders-CK3nkcE9.mjs")
 	]);
 	const root = Router();

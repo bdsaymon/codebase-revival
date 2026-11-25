@@ -61,17 +61,12 @@ export function normalizeGeminiModelName(requestedModel?: string): string {
 
   if (
     lower === 'gemini-3.8-flash' ||
-    lower === 'gemini-3.5-flash' ||
-    lower === 'gemini-2.5-flash' ||
     lower === 'gemini-2.0-flash' ||
     lower === 'gemini-1.5-flash' ||
     lower === 'gemini-1.5-pro' ||
     lower === 'gemini-pro'
   ) {
-    return 'gemini-4-hydrogen';
-  }
-  if (lower === 'gemini-3.5-flash-lite' || lower === 'gemini-2.5-flash-lite') {
-    return 'gemini-3.1-flash-lite';
+    return 'gemini-3-flash-preview';
   }
 
   if (lower.startsWith('gemini-')) {
@@ -318,6 +313,10 @@ export function buildAdHocProviderConfig(params: {
   if (useServerGemini) {
     // Map built-in SMFTA tier ids cleanly to fast valid Gemini models.
     const rawExt = (params.externalModel || '').trim().toLowerCase();
+    const isFastTier =
+      rawExt === 'smfta-flash' ||
+      rawExt === 'smfta-v5' ||
+      rawExt.includes('flash-lite');
     const mappedTierModel =
       rawExt === 'smfta-flash'
         ? 'gemini-3.1-flash-lite'
@@ -327,13 +326,24 @@ export function buildAdHocProviderConfig(params: {
           !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt)
         ? normalizeGeminiModelName(params.externalModel)
         : '';
-    const gemModels = Array.from(
-      new Set([
-        ...(mappedTierModel ? [mappedTierModel] : []),
-        'gemini-3.1-flash-lite',
-        'gemini-4-hydrogen',
-      ])
-    ).map((m) => ({
+    const orderedFallbacks = isFastTier
+      ? [
+          ...(mappedTierModel ? [mappedTierModel] : []),
+          'gemini-flash-lite-latest',
+          'gemini-3-flash-preview',
+          'gemini-3.1-flash-lite',
+          'gemini-2.5-flash-lite',
+          'gemini-4-hydrogen',
+        ]
+      : [
+          ...(mappedTierModel ? [mappedTierModel] : []),
+          'gemini-3-flash-preview',
+          'gemini-flash-lite-latest',
+          'gemini-3.1-flash-lite',
+          'gemini-4-hydrogen',
+          'gemini-2.5-flash',
+        ];
+    const gemModels = Array.from(new Set(orderedFallbacks)).map((m) => ({
       model_id: m,
       context_window: 1_000_000,
       max_output: maxOut,
@@ -366,11 +376,16 @@ export function buildAdHocProviderConfig(params: {
     });
   }
 
+  const isBuiltinDefaultServerGemini =
+    !hasUserKeys &&
+    !String(params.externalBaseUrl || '').trim() &&
+    (effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai');
+
   return {
     effectiveProvider,
     adHocProviders,
     hasUserKeys,
-    allowKeylessFallback: isExplicitKeyless && !hasUserKeys,
+    allowKeylessFallback: (isExplicitKeyless || isBuiltinDefaultServerGemini) && !hasUserKeys,
   };
 }
 

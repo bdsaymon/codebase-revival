@@ -2068,11 +2068,13 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     }
   }
 
-  // 5. Keyless Xrahat engine ONLY when explicitly selected or when user explicitly consented to allowKeylessFallback (P1-05)
+  // 5. Keyless engine when explicitly selected, when user consented to allowKeylessFallback,
+  // or when on the built-in keyless server profile with no user BYOK keys (P1-05)
   const canUseKeyless =
     effectiveProvider === 'xrahat' ||
     effectiveProvider === 'smfta_cloud' ||
-    allowKeylessFallback === true;
+    allowKeylessFallback === true ||
+    (built.allowKeylessFallback === true && !built.hasUserKeys);
 
   // 5a. Built-in SMFTA models: reliable gateway path first (no user key needed)
   if (!streamSucceeded && !clientClosed && canUseKeyless && isLovableAiAvailable()) {
@@ -2228,7 +2230,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         allAttempts.length > 0 ? allAttempts[allAttempts.length - 1] : null;
       const errorCode =
         lastAttempt?.class ||
-        (fullReplyAccumulator.trim() ? 'STREAM_ERROR' : 'EMPTY_RESPONSE');
+        (fullReplyAccumulator.trim()
+          ? 'STREAM_ERROR'
+          : lastErrorMessage
+          ? 'SERVER_ERROR'
+          : 'EMPTY_RESPONSE');
       const httpStatus = lastAttempt?.http_status ?? null;
       const upstreamError = sanitizeErrorMsg(
         lastAttempt?.error_message || '',

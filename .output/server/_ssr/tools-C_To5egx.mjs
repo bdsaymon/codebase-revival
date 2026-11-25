@@ -1,16 +1,16 @@
 import { t as APP_VERSION } from "./version-DomTpKw0.mjs";
 import { i as isToolEnabled, n as TOOL_CAPABILITY_REGISTRY, r as WORKSPACE_RUNTIME_CAPABILITIES } from "./capabilityRegistry-CZDvkEGR.mjs";
-import { p as timingSafeTokenEqual } from "./security-lsE4uyVm.mjs";
+import { p as timingSafeTokenEqual } from "./security-DUYHl2Kb.mjs";
 import { Router } from "./express-DfD0yhJD.mjs";
 import { p as sanitizeProprietaryOutput } from "./providers-BGzUoiqh.mjs";
-import { c as verifyConnectionTargetSafe } from "./storage-CFQ5IeNc.mjs";
-import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, l as validateStructuredOutput, n as callBackendEngine } from "./aiClient-HAAuOL29.mjs";
+import { c as verifyConnectionTargetSafe } from "./storage-DysOPz1L.mjs";
+import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, l as validateStructuredOutput, n as callBackendEngine } from "./aiClient-Bkf37C6D.mjs";
 import { a as getNeuralStatus, i as getMaxResponseCacheSize, o as getResponseCacheSize, p as retrainModelWeights } from "./intentRules-h5lRGT_x.mjs";
 import { n as Modality, r as ThinkingLevel, t as GoogleGenAI } from "../_libs/@google/genai.mjs";
-import { i as getV2GeminiApiKey } from "./v2FirebaseAi-C-VZjJHy.mjs";
+import { i as getV2GeminiApiKey } from "./v2FirebaseAi-CBM8Vd-m.mjs";
 import { n as generateOrEditGeminiImage } from "./geminiService-IzUPBaHt.mjs";
 import crypto from "node:crypto";
-//#region node_modules/.nitro/vite/services/ssr/assets/tools-BD5ytSEP.js
+//#region node_modules/.nitro/vite/services/ssr/assets/tools-C_To5egx.js
 var toolsRouter = Router();
 function isAdminAuthorized(req) {
 	const adminToken = (process.env.AI_ADMIN_TOKEN || "").trim();

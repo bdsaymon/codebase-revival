@@ -2,17 +2,17 @@ import { t as APP_VERSION } from "./version-DomTpKw0.mjs";
 import { i as resolveActiveSystemLabel, n as buildCreatorAndSecurityDirective } from "./creatorIdentity-TTkWUL_b.mjs";
 import { A as isSensitiveFact, I as migrateMemory, L as parseExtractedMemoriesJson, M as looksTruncated, P as mergeContinuationText, f as buildMemoryPromptBlock, h as createIdleWatchdog, i as FILE_ARTIFACT_SYSTEM_DIRECTIVE, j as isV2ModelId, k as getV2ModelSpec, m as continuationDirective, s as MASTER_PROFILE_PROMPT_BASELINE } from "./v2UsageLimits-BjYCttv1.mjs";
 import { a as supportsNativeThinking } from "./thinking-DAYUonWm.mjs";
-import { r as SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from "./security-lsE4uyVm.mjs";
+import { r as SERVER_KEY_DAILY_CAP_REACHED_MESSAGE_BN } from "./security-DUYHl2Kb.mjs";
 import { Router } from "./express-DfD0yhJD.mjs";
 import { a as buildXrahatUrl, d as parseXrahatSseEvent, f as resolveEffectiveProvider, i as buildXrahatPrompt, p as sanitizeProprietaryOutput, s as extractXrahatReply } from "./providers-BGzUoiqh.mjs";
-import { c as verifyConnectionTargetSafe } from "./storage-CFQ5IeNc.mjs";
-import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, i as formatActionableProviderError, n as callBackendEngine, o as normalizeGeminiModelName, s as parseCustomParamsSafe, t as buildAdHocProviderConfig } from "./aiClient-HAAuOL29.mjs";
+import { c as verifyConnectionTargetSafe } from "./storage-DysOPz1L.mjs";
+import { a as getSharedHardenedEngine, c as sanitizeErrorMsg, i as formatActionableProviderError, n as callBackendEngine, o as normalizeGeminiModelName, s as parseCustomParamsSafe, t as buildAdHocProviderConfig } from "./aiClient-Bkf37C6D.mjs";
 import { c as hasUnclosedCodeFence, d as isLongCodeOrWritingRequest, f as matchTrainedWeights, l as hasUnclosedHtmlDocument, m as setCachedResponse, n as classifyPromptComplexity, p as retrainModelWeights, r as getCachedResponse, s as hasUnclosedArtifactTag, t as INSTANT_GREETING_REGEX, u as interceptIdentityQuery } from "./intentRules-h5lRGT_x.mjs";
 import { r as ThinkingLevel, t as GoogleGenAI } from "../_libs/@google/genai.mjs";
-import { a as isServerAuthorizedTester, c as setServerV2UsageCountForTesting, i as getV2GeminiApiKey, l as streamV2FirebaseModel, n as formatGeminiContents, r as getAllV2ModelStatusesForUser, t as checkAndConsumeServerV2Quota, u as updateServerV2QuotaConfig } from "./v2FirebaseAi-C-VZjJHy.mjs";
-import { c as retrieveRelevantV2Memories, l as retrieveV2RagContext } from "./v2Rag-DNjRY2sF.mjs";
+import { a as isServerAuthorizedTester, c as setServerV2UsageCountForTesting, i as getV2GeminiApiKey, l as streamV2FirebaseModel, n as formatGeminiContents, r as getAllV2ModelStatusesForUser, t as checkAndConsumeServerV2Quota, u as updateServerV2QuotaConfig } from "./v2FirebaseAi-CBM8Vd-m.mjs";
+import { c as retrieveRelevantV2Memories, l as retrieveV2RagContext } from "./v2Rag-DZtM3tA1.mjs";
 import { performance } from "node:perf_hooks";
-//#region node_modules/.nitro/vite/services/ssr/assets/chat-BFsFu_-_.js
+//#region node_modules/.nitro/vite/services/ssr/assets/chat-CeUZq-sZ.js
 var SYSTEM_IDENTITY_CORE_DIRECTIVE = `# SYSTEM IDENTITY & CORE DIRECTIVE
 You are an Advanced Autonomous AI System powered by world-class reasoning, precision software engineering, and elite multilingual capabilities. Your mission is to solve complex problems, write production-grade code, analyze data deeply, and deliver verifiable solutions without unnecessary filler.
 
@@ -1782,7 +1782,7 @@ chatRouter.post("/chat/stream", async (req, res) => {
 				} else if (nonStreamRes.text) lastErrorMessage = nonStreamRes.text;
 			}
 		}
-		const canUseKeyless = effectiveProvider === "xrahat" || effectiveProvider === "smfta_cloud" || allowKeylessFallback === true;
+		const canUseKeyless = effectiveProvider === "xrahat" || effectiveProvider === "smfta_cloud" || allowKeylessFallback === true || built.allowKeylessFallback === true && !built.hasUserKeys;
 		if (!streamSucceeded && !clientClosed && canUseKeyless && isLovableAiAvailable()) {
 			if (fullReplyAccumulator.length > 0) emitReset();
 			const gw = await streamFromLovableAi({
@@ -1863,7 +1863,7 @@ chatRouter.post("/chat/stream", async (req, res) => {
 			else {
 				let detailedDiag = "";
 				const lastAttempt = allAttempts.length > 0 ? allAttempts[allAttempts.length - 1] : null;
-				const errorCode = lastAttempt?.class || (fullReplyAccumulator.trim() ? "STREAM_ERROR" : "EMPTY_RESPONSE");
+				const errorCode = lastAttempt?.class || (fullReplyAccumulator.trim() ? "STREAM_ERROR" : lastErrorMessage ? "SERVER_ERROR" : "EMPTY_RESPONSE");
 				const httpStatus = lastAttempt?.http_status ?? null;
 				const upstreamError = sanitizeErrorMsg(lastAttempt?.error_message || "", parsedKeys);
 				const statusBadge = httpStatus ? `HTTP ${httpStatus}` : errorCode;

@@ -85,7 +85,12 @@ healthRouter.post('/health/live-check', async (_req: Request, res: Response) => 
         apiKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
       });
-      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-4-hydrogen'];
+      const candidateModels = [
+        'gemini-3.1-flash-lite',
+        'gemini-4-hydrogen',
+        'gemini-3-flash-preview',
+        'gemini-flash-lite-latest',
+      ];
       let lastErrMsg = '';
       for (const candidateModel of candidateModels) {
         try {
@@ -96,7 +101,8 @@ healthRouter.post('/health/live-check', async (_req: Request, res: Response) => 
               maxOutputTokens: 128,
               thinkingConfig: {
                 thinkingLevel:
-                  candidateModel === 'gemini-3.1-flash-lite'
+                  candidateModel === 'gemini-3.1-flash-lite' ||
+                  candidateModel === 'gemini-flash-lite-latest'
                     ? ThinkingLevel.MINIMAL
                     : ThinkingLevel.LOW,
               },

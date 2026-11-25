@@ -1,9 +1,9 @@
 import { i as extractTextFromXlsxAsync, n as extractTextFromDocxAsync, r as extractTextFromPdfAsync } from "./documentReader-CBfMw-pp.mjs";
 import { n as supabaseAdmin } from "./client.server-BlnvGJA3.mjs";
 import { t as GoogleGenAI } from "../_libs/@google/genai.mjs";
-import { o as isSupabaseV2Configured } from "./v2FirebaseAi-C-VZjJHy.mjs";
+import { o as isSupabaseV2Configured } from "./v2FirebaseAi-CBM8Vd-m.mjs";
 import crypto from "node:crypto";
-//#region node_modules/.nitro/vite/services/ssr/assets/v2Rag-DNjRY2sF.js
+//#region node_modules/.nitro/vite/services/ssr/assets/v2Rag-DZtM3tA1.js
 /**
 * V2-only RAG Ingestion, Vector Retrieval, and Persistent Memory Store.
 * Strictly isolated from V1 chat/memory routing.

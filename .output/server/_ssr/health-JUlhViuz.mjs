@@ -1,11 +1,11 @@
 import { t as APP_VERSION } from "./version-DomTpKw0.mjs";
-import { p as timingSafeTokenEqual } from "./security-lsE4uyVm.mjs";
+import { p as timingSafeTokenEqual } from "./security-DUYHl2Kb.mjs";
 import { Router } from "./express-DfD0yhJD.mjs";
-import { a as getSharedHardenedEngine } from "./aiClient-HAAuOL29.mjs";
+import { a as getSharedHardenedEngine } from "./aiClient-Bkf37C6D.mjs";
 import { a as getNeuralStatus, o as getResponseCacheSize } from "./intentRules-h5lRGT_x.mjs";
-import { uidSessionStore } from "./chat-BFsFu_-_.mjs";
+import { uidSessionStore } from "./chat-CeUZq-sZ.mjs";
 import { r as isGeminiConfigured, t as GEMINI_TEXT_MODELS } from "./geminiService-IzUPBaHt.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/health-Do34NVQk.js
+//#region node_modules/.nitro/vite/services/ssr/assets/health-JUlhViuz.js
 var healthRouter = Router();
 var killSwitchAuditLog = [];
 healthRouter.get("/health", (_req, res) => {
@@ -62,7 +62,12 @@ healthRouter.post("/health/live-check", async (_req, res) => {
 				apiKey,
 				httpOptions: { headers: { "User-Agent": "aistudio-build" } }
 			});
-			const candidateModels = ["gemini-3.1-flash-lite", "gemini-4-hydrogen"];
+			const candidateModels = [
+				"gemini-3.1-flash-lite",
+				"gemini-4-hydrogen",
+				"gemini-3-flash-preview",
+				"gemini-flash-lite-latest"
+			];
 			let lastErrMsg = "";
 			for (const candidateModel of candidateModels) try {
 				const resp = await ai.models.generateContent({
@@ -70,7 +75,7 @@ healthRouter.post("/health/live-check", async (_req, res) => {
 					contents: "শুধু \"ঠিক\" শব্দটি লেখো।",
 					config: {
 						maxOutputTokens: 128,
-						thinkingConfig: { thinkingLevel: candidateModel === "gemini-3.1-flash-lite" ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW }
+						thinkingConfig: { thinkingLevel: candidateModel === "gemini-3.1-flash-lite" || candidateModel === "gemini-flash-lite-latest" ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW }
 					}
 				});
 				if (resp?.text && resp.text.trim().length > 0) {

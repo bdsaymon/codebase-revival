@@ -811,16 +811,29 @@ export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const primary = spec.serverGeminiModel;
   const raw =
     modelId === 'smfta-v5'
-      ? ['gemini-3.1-flash-lite']
+      ? Array.from(
+          new Set([
+            primary,
+            'gemini-flash-lite-latest',
+            'gemini-3-flash-preview',
+            'gemini-2.5-flash-lite',
+          ])
+        )
       : modelId === 'smfta-v2-pro'
         ? Array.from(
-            new Set([primary, 'gemini-3.1-flash-lite'])
+            new Set([
+              primary,
+              'gemini-3-flash-preview',
+              'gemini-3.1-flash-lite',
+              'gemini-flash-lite-latest',
+            ])
           )
         : Array.from(
             new Set([
               primary,
-              'gemini-4-hydrogen',
               'gemini-3.1-flash-lite',
+              'gemini-3-flash-preview',
+              'gemini-flash-lite-latest',
             ])
           );
   const healthy = raw.filter((m) => !isV2ModelInCooldown(m));
