@@ -55,7 +55,7 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(v5.useSearchGrounding, false);
 
   assert.equal(pro.label, 'SMFTA Pro');
-  assert.equal(pro.serverGeminiModel, 'gemini-3.8-flash');
+  assert.equal(pro.serverGeminiModel, 'gemini-3-flash-preview');
   assert.equal(pro.temperature, 0.4);
   assert.equal(pro.maxOutputTokens, 16384);
   assert.equal(pro.defaultDailyLimit, 40);
@@ -63,10 +63,10 @@ test('V2 models have exact distinct configurations, capabilities, and daily limi
   assert.equal(pro.useSearchGrounding, false);
 
   assert.equal(max.label, 'SMFTA Max');
-  assert.equal(max.serverGeminiModel, 'gemini-4-hydrogen');
+  assert.equal(max.serverGeminiModel, 'gemini-3-flash-preview');
   assert.equal(max.maxOutputTokens, 32768);
   assert.equal(max.defaultDailyLimit, 15);
-  assert.equal(max.thinkingLevel, 'MEDIUM');
+  assert.equal(max.thinkingLevel, 'HIGH');
   assert.equal(max.useSearchGrounding, true);
 });
 
@@ -309,20 +309,20 @@ test('extractCleanV2ErrorMessage unwraps nested 503 JSON and V2 fallback stays b
   assert.deepEqual(getV2ServerFallbackModels('smfta-v5'), [
     'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
-    'gemini-flash-lite-latest',
     'gemini-3-flash-preview',
+    'gemini-flash-lite-latest',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-v2-pro'), [
-    'gemini-3.8-flash',
     'gemini-3-flash-preview',
     'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
     'gemini-flash-lite-latest',
   ]);
   assert.deepEqual(getV2ServerFallbackModels('smfta-max'), [
-    'gemini-4-hydrogen',
-    'gemini-3.8-flash',
-    'gemini-3.1-flash-lite',
     'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-4-hydrogen',
   ]);
 });
 
@@ -333,7 +333,7 @@ test('streamV2FirebaseModel falls back downward when primary stalls thinking-onl
     models: {
       generateContentStream: async ({ model }: { model: string }) => {
         modelsSeen.push(model);
-        if (model === 'gemini-4-hydrogen') {
+        if (model === 'gemini-3-flash-preview') {
           return {
             async *[Symbol.asyncIterator]() {
               yield {
@@ -386,8 +386,8 @@ test('streamV2FirebaseModel falls back downward when primary stalls thinking-onl
   });
 
   assert.equal(res.ok, true);
-  assert.equal(res.modelUsed, 'gemini-3.8-flash');
+  assert.equal(res.modelUsed, 'gemini-3.1-flash-lite');
   assert.equal(res.truncated, true);
   assert.equal(emitted, 'Clean downward reply!');
-  assert.deepEqual(modelsSeen, ['gemini-4-hydrogen', 'gemini-3.8-flash']);
+  assert.deepEqual(modelsSeen, ['gemini-3-flash-preview', 'gemini-3.1-flash-lite']);
 });

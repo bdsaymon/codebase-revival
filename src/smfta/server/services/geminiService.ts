@@ -118,22 +118,25 @@ export function normalizeActiveGeminiModel(requestedModel?: string): GeminiTextM
   const bare = raw.includes('/') ? raw.split('/').pop() || raw : raw;
   const lower = bare.toLowerCase();
 
-  if (!lower) return 'gemini-4-hydrogen';
+  if (!lower) return 'gemini-3-flash-preview';
 
-  // Map retired 1.5 / 2.0 aliases and logical SMFTA tiers
+  // Map retired 1.5 / 2.0 aliases, unavailable 3.8-flash, and logical SMFTA tiers
   if (
     lower === 'gemini-2.0-flash' ||
     lower === 'gemini-1.5-flash' ||
     lower === 'gemini-1.5-pro' ||
-    lower === 'gemini-pro'
+    lower === 'gemini-pro' ||
+    lower === 'gemini-3.8-flash'
   ) {
     return 'gemini-3-flash-preview';
   }
-  if (lower === 'smfta-pro' || lower === 'smfta-ultra' || lower === 'smfta-v2-pro') {
-    return 'gemini-3.8-flash';
-  }
-  if (lower === 'smfta-max') {
-    return 'gemini-4-hydrogen';
+  if (
+    lower === 'smfta-pro' ||
+    lower === 'smfta-ultra' ||
+    lower === 'smfta-v2-pro' ||
+    lower === 'smfta-max'
+  ) {
+    return 'gemini-3-flash-preview';
   }
   if (lower === 'smfta-v5') {
     return 'gemini-3.5-flash-lite';
@@ -162,8 +165,9 @@ export function buildGeminiModelFallbackChain(requestedModel?: string): string[]
     ordered = [
       primary,
       'gemini-3.1-flash-lite',
-      'gemini-flash-lite-latest',
+      'gemini-3.5-flash-lite',
       'gemini-3-flash-preview',
+      'gemini-flash-lite-latest',
     ];
   } else if (
     lower === 'gemini-4-neon' ||
@@ -172,16 +176,17 @@ export function buildGeminiModelFallbackChain(requestedModel?: string): string[]
   ) {
     ordered = [
       primary,
-      'gemini-4-hydrogen',
       'gemini-3-flash-preview',
       'gemini-3.1-flash-lite',
-      'gemini-flash-lite-latest',
+      'gemini-3.5-flash-lite',
+      'gemini-4-hydrogen',
     ];
   } else {
     ordered = [
       primary,
       'gemini-3-flash-preview',
       'gemini-3.1-flash-lite',
+      'gemini-3.5-flash-lite',
       'gemini-flash-lite-latest',
     ];
   }

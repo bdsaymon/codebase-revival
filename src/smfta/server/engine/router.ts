@@ -2505,11 +2505,15 @@ export class HardenedAIEngine {
     let accumulatedText = '';
     let sawSkippedBusyOrUnavailable = false;
 
-    for (const cand of candidates) {
+    for (let candIdx = 0; candIdx < candidates.length; candIdx++) {
+      const cand = candidates[candIdx]!;
       if (attempts.length >= ENGINE_DEFAULTS.MAX_ATTEMPTS_PER_REQUEST) break;
       // S1 & I5: Never switch providers after output has locked to provider!
       if (lockedToProvider) break;
 
+      const hasFallbackCandidate =
+        candIdx < candidates.length - 1 &&
+        attempts.length + 1 < ENGINE_DEFAULTS.MAX_ATTEMPTS_PER_REQUEST;
       const provider = cand.provider;
       const keyId = cand.keyEntry.key_id;
       const model = cand.model;
@@ -2579,14 +2583,18 @@ export class HardenedAIEngine {
       streamFinishReason = '';
       accumulatedText = '';
 
-      // S2: First activity (thinking or answer) within timeout
+      // S2: First activity (thinking or answer) within timeout; fail over fast (8s) when another server fallback candidate is available
+      const effectiveFirstTokenTimeoutMs =
+        !provider.is_client_supplied && hasFallbackCandidate
+          ? Math.min(ENGINE_DEFAULTS.STREAM_FIRST_TOKEN_TIMEOUT_MS, 8_000)
+          : ENGINE_DEFAULTS.STREAM_FIRST_TOKEN_TIMEOUT_MS;
       let firstTokenTimer: ReturnType<typeof setTimeout> | null = setTimeout(
         () => {
           if (!firstActivitySeen && !firstTokenEmitted && !upstreamAbort.signal.aborted) {
             upstreamAbort.abort(new Error('FirstTokenTimeoutError'));
           }
         },
-        ENGINE_DEFAULTS.STREAM_FIRST_TOKEN_TIMEOUT_MS
+        effectiveFirstTokenTimeoutMs
       );
 
       let nextChunkTimer: ReturnType<typeof setTimeout> | null = null;

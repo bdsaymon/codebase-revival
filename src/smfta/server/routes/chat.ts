@@ -1136,9 +1136,11 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
   });
 
   try {
+  const serverEnvGeminiKey = getV2GeminiApiKey();
   if (
     resolvedGeminiKey.errorCode === 'KEY_DECRYPT_FAILED' &&
     !resolvedGeminiKey.apiKey &&
+    !(isV2ModelId(activeCustomModelName) && serverEnvGeminiKey) &&
     (isV2ModelId(activeCustomModelName) ||
       effectiveProvider === 'gemini_custom' ||
       effectiveProvider === 'gemini_openai')
@@ -1401,7 +1403,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
       thinkingEffort:
         liveVoiceMode || requestedThinkingMode === 'off' ? 'low' : requestedThinkingMode,
       liveVoiceMode,
-      apiKeyOverride: resolvedGeminiKey.apiKey || undefined,
+      apiKeyOverride: serverEnvGeminiKey || resolvedGeminiKey.apiKey || undefined,
       maxOutputTokensOverride: liveVoiceMode
         ? v2WantsDetailedVoice
           ? 480
@@ -1463,7 +1465,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         },
         thinkingEnabled: false,
         thinkingEffort: 'low',
-        apiKeyOverride: resolvedGeminiKey.apiKey || undefined,
+        apiKeyOverride: serverEnvGeminiKey || resolvedGeminiKey.apiKey || undefined,
       });
       if (!v2ContRes.ok || !contBuffer.trim()) {
         v2LastTruncated = v2LastTruncated || Boolean(v2ContRes.truncated);
@@ -1977,9 +1979,9 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
           : [{ role: 'user' as const, parts: [{ text: lastUserText || 'Hello' }] }];
       const fastVoiceCandidates: Array<{ model: string; level?: ThinkingLevel }> = [
         { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
-        { model: 'gemini-3.8-flash', level: ThinkingLevel.LOW },
+        { model: 'gemini-3.5-flash-lite', level: ThinkingLevel.LOW },
+        { model: 'gemini-3-flash-preview', level: ThinkingLevel.LOW },
         { model: 'gemini-flash-lite-latest', level: ThinkingLevel.MINIMAL },
-        { model: 'gemini-3-flash-preview' },
       ];
 
       for (const cand of fastVoiceCandidates) {
@@ -2505,7 +2507,7 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
     ) &&
     !(
       (effectiveProvider === 'gemini_custom' || effectiveProvider === 'gemini_openai') &&
-      actualProviderUsed === 'gemini'
+      (actualProviderUsed === 'gemini' || actualProviderUsed === 'gemini_server')
     );
   const modelSwitched = Boolean(
     activeCustomModelName &&

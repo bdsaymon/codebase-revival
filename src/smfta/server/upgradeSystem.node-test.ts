@@ -190,8 +190,8 @@ test('V1 JSON Provider Gateway parses specs, extracts nested paths, streams chun
   assert.ok(failChat.errorBn?.includes('HTTP 401'));
 });
 
-test('V2 model specs preserve upgraded gemini-3.5-flash-lite and gemini-3.8-flash mappings', () => {
+test('V2 model specs map to verified responsive Gemini models without stalled defaults', () => {
   assert.equal(getV2ModelSpec('smfta-v5').serverGeminiModel, 'gemini-3.5-flash-lite');
-  assert.equal(getV2ModelSpec('smfta-v2-pro').serverGeminiModel, 'gemini-3.8-flash');
-  assert.equal(getV2ModelSpec('smfta-max').serverGeminiModel, 'gemini-4-hydrogen');
+  assert.equal(getV2ModelSpec('smfta-v2-pro').serverGeminiModel, 'gemini-3-flash-preview');
+  assert.equal(getV2ModelSpec('smfta-max').serverGeminiModel, 'gemini-3-flash-preview');
 });

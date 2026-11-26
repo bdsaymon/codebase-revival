@@ -70,18 +70,18 @@ describe('V2 Special Firebase AI System', () => {
       maxOutputTokens: 16384,
       thinkingLevel: 'MEDIUM',
       useSearchGrounding: false,
-      serverGeminiModel: 'gemini-3.8-flash',
-      firebaseAiModel: 'gemini-3.8-flash',
+      serverGeminiModel: 'gemini-3-flash-preview',
+      firebaseAiModel: 'gemini-3-flash-preview',
     });
 
     const max = getV2ModelSpec('smfta-max');
     expect(max).toMatchObject({
       defaultDailyLimit: 15,
       maxOutputTokens: 32768,
-      thinkingLevel: 'MEDIUM',
+      thinkingLevel: 'HIGH',
       useSearchGrounding: true,
-      serverGeminiModel: 'gemini-4-hydrogen',
-      firebaseAiModel: 'gemini-4-hydrogen',
+      serverGeminiModel: 'gemini-3-flash-preview',
+      firebaseAiModel: 'gemini-3-flash-preview',
     });
   });
 

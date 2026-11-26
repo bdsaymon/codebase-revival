@@ -387,13 +387,13 @@ describe('SMFTA AI Pro Master Upgrade UI & Audio Engine Verification', () => {
     expect(preflight.headers.get('Access-Control-Allow-Headers') || '').toContain('X-Gemini-Key');
   });
 
-  it('maps V1 & V2 model names to upgraded Gemini backends and respects apiKeyOverride', () => {
+  it('maps V1 & V2 model names to verified working Gemini backends and respects apiKeyOverride', () => {
     expect(normalizeGeminiModelName('smfta-flash')).toBe('gemini-3.1-flash-lite');
-    expect(normalizeGeminiModelName('smfta-pro')).toBe('gemini-3.8-flash');
-    expect(normalizeGeminiModelName('smfta-ultra')).toBe('gemini-3.8-flash');
+    expect(normalizeGeminiModelName('smfta-pro')).toBe('gemini-3-flash-preview');
+    expect(normalizeGeminiModelName('smfta-ultra')).toBe('gemini-3-flash-preview');
     expect(normalizeGeminiModelName('smfta-v5')).toBe('gemini-3.5-flash-lite');
-    expect(normalizeGeminiModelName('smfta-max')).toBe('gemini-4-hydrogen');
-    expect(normalizeGeminiModelName('gemini-3.8-flash')).toBe('gemini-3.8-flash');
+    expect(normalizeGeminiModelName('smfta-max')).toBe('gemini-3-flash-preview');
+    expect(normalizeGeminiModelName('gemini-3.8-flash')).toBe('gemini-3-flash-preview');
     expect(normalizeGeminiModelName('gemini-3.5-flash-lite')).toBe('gemini-3.5-flash-lite');
 
     const built = buildAdHocProviderConfig({
@@ -403,6 +403,6 @@ describe('SMFTA AI Pro Master Upgrade UI & Audio Engine Verification', () => {
     });
     expect(built.adHocProviders.length).toBeGreaterThan(0);
     expect(built.adHocProviders[0]?.rawKeys[0]).toBe('AIza_header_override');
-    expect(built.adHocProviders[0]?.provider.models[0]?.model_id).toBe('gemini-3.8-flash');
+    expect(built.adHocProviders[0]?.provider.models[0]?.model_id).toBe('gemini-3-flash-preview');
   });
 });

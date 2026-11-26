@@ -122,6 +122,7 @@ import {
   DEFAULT_BUILTIN_PROFILE,
   builtinTierForModel,
   builtinTierLabel,
+  computeSelectModelTransition,
   getInitialProviderProfiles,
   getModelsForProfile,
   hydrateSavedProfiles,
@@ -1164,63 +1165,29 @@ export default function App() {
   const handleSelectModel = (modelId: string) => {
     const trimmed = modelId.trim();
     if (!trimmed) return;
-    const isV2 = isV2ModelId(trimmed);
-    // Picking a built-in tier also switches the reasoning mode so request and
-    // label stay consistent; external models only change the model id.
-    const tier = BUILTIN_TIERS.find((t) => t.model === trimmed);
-    const isKeylessBuiltinGemini = (prov?: string | null, keys?: string | null) =>
-      (prov === 'gemini_custom' || prov === 'gemini_openai') &&
-      !String(keys || '').trim();
+    const transition = computeSelectModelTransition({
+      modelId: trimmed,
+      settings,
+      savedProfiles,
+      activeProfile,
+    });
     setSettings((prev) =>
-      sanitizeSettings(
-        tier
-          ? {
-              ...prev,
-              provider:
-                isBuiltinProviderId(prev.provider) ||
-                isKeylessBuiltinGemini(prev.provider, prev.externalKeys)
-                  ? 'smfta_cloud'
-                  : prev.provider,
-              externalModel: trimmed,
-              mode: tier.id,
-            }
-          : isV2
-          ? {
-              ...prev,
-              provider: 'smfta_cloud',
-              externalModel: trimmed,
-              mode:
-                trimmed === 'smfta-v5'
-                  ? 'fast'
-                  : trimmed === 'smfta-max'
-                    ? 'power'
-                    : 'balanced',
-            }
-          : { ...prev, externalModel: trimmed }
-      )
+      sanitizeSettings({
+        ...prev,
+        ...transition.nextSettingsPatch,
+      })
     );
-    if (activeProfile) {
-      const updated = savedProfiles.map((p) =>
-        p.id === activeProfile.id
-          ? {
-              ...p,
-              provider:
-                (isV2 || Boolean(tier)) &&
-                (isBuiltinProviderId(p.provider) ||
-                  isKeylessBuiltinGemini(p.provider, p.externalKeys))
-                  ? 'smfta_cloud'
-                  : p.provider,
-              externalModel: trimmed,
-            }
-          : p
-      );
-      handleUpdateProfiles(updated);
+    if (transition.nextProfiles !== savedProfiles) {
+      handleUpdateProfiles(transition.nextProfiles);
+    }
+    if (transition.isBuiltinOrV2) {
+      setProviderLimitBanner(null);
     }
     setBottomModelMenuOpen(false);
     showToast(
-      tier
-        ? `Model: ${tier.label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
-        : isV2
+      transition.tier
+        ? `Model: ${transition.tier.label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
+        : transition.isV2
           ? `V2 – Special: ${getV2ModelSpec(trimmed).label} (চ্যাট মেমোরি অক্ষুণ্ণ আছে)`
           : `Model: ${trimmed}`
     );
@@ -3941,18 +3908,36 @@ export default function App() {
 
     const baseProfileSnapshot = resolveActiveProfile(settings, savedProfiles);
     const profileSnapshot = slotOverride?.profile || baseProfileSnapshot;
-    const activeProvider =
-      overrideProvider ||
-      profileSnapshot.provider ||
-      settings.provider ||
-      'smfta_cloud';
+    const candidateExternalModel =
+      slotOverride?.modelId ||
+      profileSnapshot.externalModel?.trim() ||
+      settings.externalModel?.trim() ||
+      '';
+    const isV2Selected = !overrideProvider && isV2ModelId(candidateExternalModel);
+    const activeProvider = isV2Selected
+      ? 'smfta_cloud'
+      : overrideProvider ||
+        profileSnapshot.provider ||
+        settings.provider ||
+        'smfta_cloud';
     const isDefaultUnlimitedProfile =
-      activeProvider === 'xrahat' || activeProvider === 'smfta_cloud';
-    const rawEffectiveKeys =
-      profileSnapshot.externalKeys?.trim() ||
-      (!isDefaultUnlimitedProfile ? settings.externalKeys?.trim() || '' : '');
+      isV2Selected ||
+      activeProvider === 'xrahat' ||
+      activeProvider === 'smfta_cloud';
+    const rawEffectiveKeys = isDefaultUnlimitedProfile
+      ? ''
+      : profileSnapshot.externalKeys?.trim() ||
+        settings.externalKeys?.trim() ||
+        '';
+    const isKeylessServerGemini =
+      (activeProvider === 'gemini_custom' || activeProvider === 'gemini_openai') &&
+      !rawEffectiveKeys;
     let effectiveExternalKeys = rawEffectiveKeys;
-    if (!isDefaultUnlimitedProfile && profileSnapshot?.decryptionFailed) {
+    if (
+      !isDefaultUnlimitedProfile &&
+      !isKeylessServerGemini &&
+      profileSnapshot?.decryptionFailed
+    ) {
       window.clearTimeout(phaseFallback);
       window.clearTimeout(timeoutId);
       setDecryptionAlertProfileName(profileSnapshot.name || activeProvider);
@@ -3967,7 +3952,7 @@ export default function App() {
       setGenPhase(null);
       return;
     }
-    if (isEncrypted(rawEffectiveKeys)) {
+    if (!isDefaultUnlimitedProfile && isEncrypted(rawEffectiveKeys)) {
       try {
         effectiveExternalKeys = await decryptSecret(rawEffectiveKeys);
       } catch {
@@ -4022,18 +4007,16 @@ export default function App() {
         return;
       }
     }
-    const effectiveExternalBaseUrl = isDefaultUnlimitedProfile
-      ? ''
-      : profileSnapshot.externalBaseUrl?.trim() ||
-        settings.externalBaseUrl?.trim() ||
-        '';
+    const effectiveExternalBaseUrl =
+      isDefaultUnlimitedProfile || isKeylessServerGemini
+        ? ''
+        : profileSnapshot.externalBaseUrl?.trim() ||
+          settings.externalBaseUrl?.trim() ||
+          '';
     const effectiveExternalModel =
       activeProvider === 'smfta_cloud' && overrideProvider === 'smfta_cloud'
         ? ''
-        : slotOverride?.modelId ||
-          profileSnapshot.externalModel?.trim() ||
-          settings.externalModel?.trim() ||
-          '';
+        : candidateExternalModel;
 
     const maxConcurrent = Math.max(1, Math.min(4, settings.concurrentRequests ?? 1));
     if (activeStreamCountRef.current >= maxConcurrent) {
@@ -8101,23 +8084,14 @@ export default function App() {
                                 !activeIsV2 &&
                                 (activeModelName === tier.model ||
                                   (tier.model === 'smfta-pro' &&
-                                    activeModelName === 'gemini-4-hydrogen'));
+                                    (activeModelName === 'gemini-3-flash-preview' ||
+                                      activeModelName === 'gemini-4-hydrogen')));
                               return (
                                 <button
                                   key={tier.model}
                                   type="button"
                                   data-testid={`select-model-${tier.model}`}
                                   onClick={() => {
-                                    if (!activeIsKeylessServer) {
-                                      const builtinProf =
-                                        savedProfiles.find((p) =>
-                                          isBuiltinProviderId(p.provider)
-                                        ) || DEFAULT_BUILTIN_PROFILE;
-                                      handleSelectProfile({
-                                        ...builtinProf,
-                                        externalModel: tier.model,
-                                      });
-                                    }
                                     handleSelectModel(tier.model);
                                     setBottomModelMenuOpen(false);
                                   }}

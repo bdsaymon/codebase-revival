@@ -55,7 +55,7 @@ export function getServerGeminiKey(): string {
 
 export function normalizeGeminiModelName(requestedModel?: string): string {
   const raw = (requestedModel || '').trim();
-  if (!raw) return 'gemini-3.8-flash';
+  if (!raw) return 'gemini-3-flash-preview';
   const bare = raw.includes('/') ? raw.split('/').pop() || raw : raw;
   const lower = bare.toLowerCase();
 
@@ -63,17 +63,22 @@ export function normalizeGeminiModelName(requestedModel?: string): string {
     lower === 'gemini-2.0-flash' ||
     lower === 'gemini-1.5-flash' ||
     lower === 'gemini-1.5-pro' ||
-    lower === 'gemini-pro'
+    lower === 'gemini-pro' ||
+    lower === 'gemini-3.8-flash'
   ) {
     return 'gemini-3-flash-preview';
   }
 
   if (lower === 'smfta-flash') return 'gemini-3.1-flash-lite';
-  if (lower === 'smfta-pro' || lower === 'smfta-ultra' || lower === 'smfta-v2-pro') {
-    return 'gemini-3.8-flash';
-  }
   if (lower === 'smfta-v5') return 'gemini-3.5-flash-lite';
-  if (lower === 'smfta-max') return 'gemini-4-hydrogen';
+  if (
+    lower === 'smfta-pro' ||
+    lower === 'smfta-ultra' ||
+    lower === 'smfta-v2-pro' ||
+    lower === 'smfta-max'
+  ) {
+    return 'gemini-3-flash-preview';
+  }
 
   if (lower.startsWith('gemini-')) {
     return bare;
@@ -91,7 +96,7 @@ export function normalizeGeminiModelName(requestedModel?: string): string {
     lower.includes('72b') ||
     lower.includes('405b')
   ) {
-    return 'gemini-4-hydrogen';
+    return 'gemini-3-flash-preview';
   }
   return 'gemini-3.1-flash-lite';
 }
@@ -285,7 +290,7 @@ export function buildAdHocProviderConfig(params: {
     const defaultModel =
       preset?.defaultModel ||
       (protocol === 'gemini_native'
-        ? 'gemini-4-hydrogen'
+        ? 'gemini-3-flash-preview'
         : protocol === 'anthropic_native'
         ? 'claude-sonnet-4-20250514'
         : effectiveProvider === 'custom'
@@ -305,10 +310,10 @@ export function buildAdHocProviderConfig(params: {
               new Set([
                 ...(params.externalModel ? [normalizeGeminiModelName(params.externalModel)] : []),
                 ...(params.discoveredModels || []).map((m) => normalizeGeminiModelName(m)),
-                'gemini-4-hydrogen',
+                'gemini-3-flash-preview',
                 'gemini-3.1-flash-lite',
-                'gemini-4-neon',
-                'gemini-4-carbon',
+                'gemini-3.5-flash-lite',
+                'gemini-4-hydrogen',
               ])
             )
         : buildProviderModelCandidates(
@@ -384,12 +389,14 @@ export function buildAdHocProviderConfig(params: {
     const mappedTierModel =
       rawExt === 'smfta-flash'
         ? 'gemini-3.1-flash-lite'
-        : rawExt === 'smfta-ultra' || rawExt === 'smfta-pro' || rawExt === 'smfta-v2-pro'
-        ? 'gemini-3.8-flash'
         : rawExt === 'smfta-v5'
         ? 'gemini-3.5-flash-lite'
-        : rawExt === 'smfta-max'
-        ? 'gemini-4-hydrogen'
+        : rawExt === 'smfta-ultra' ||
+          rawExt === 'smfta-pro' ||
+          rawExt === 'smfta-v2-pro' ||
+          rawExt === 'smfta-max' ||
+          rawExt === 'gemini-3.8-flash'
+        ? 'gemini-3-flash-preview'
         : rawExt &&
           !/^(smfta-|gpt-|claude-|deepseek-|llama-|qwen-)/i.test(rawExt)
         ? normalizeGeminiModelName(params.externalModel)
@@ -398,18 +405,17 @@ export function buildAdHocProviderConfig(params: {
       ? [
           ...(mappedTierModel ? [mappedTierModel] : []),
           'gemini-3.1-flash-lite',
-          'gemini-flash-lite-latest',
+          'gemini-3.5-flash-lite',
           'gemini-3-flash-preview',
-          'gemini-2.5-flash-lite',
-          'gemini-4-hydrogen',
+          'gemini-flash-lite-latest',
         ]
       : [
           ...(mappedTierModel ? [mappedTierModel] : []),
-          'gemini-3.8-flash',
-          'gemini-4-hydrogen',
           'gemini-3-flash-preview',
           'gemini-3.1-flash-lite',
+          'gemini-3.5-flash-lite',
           'gemini-flash-lite-latest',
+          'gemini-4-hydrogen',
         ];
     const gemModels = Array.from(new Set(orderedFallbacks)).map((m) => ({
       model_id: m,

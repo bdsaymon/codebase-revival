@@ -57,14 +57,14 @@ describe('Small Model Upgrade, Thinking Stability, RAG & V2 Memory Verification'
     expect(v5.thinkingLevel).toBe('LOW');
 
     const pro = getV2ModelSpec('smfta-v2-pro');
-    expect(pro.serverGeminiModel).toBe('gemini-3.8-flash');
-    expect(pro.firebaseAiModel).toBe('gemini-3.8-flash');
+    expect(pro.serverGeminiModel).toBe('gemini-3-flash-preview');
+    expect(pro.firebaseAiModel).toBe('gemini-3-flash-preview');
     expect(pro.thinkingLevel).toBe('MEDIUM');
 
     const max = getV2ModelSpec('smfta-max');
-    expect(max.serverGeminiModel).toBe('gemini-4-hydrogen');
-    expect(max.firebaseAiModel).toBe('gemini-4-hydrogen');
-    expect(max.thinkingLevel).toBe('MEDIUM');
+    expect(max.serverGeminiModel).toBe('gemini-3-flash-preview');
+    expect(max.firebaseAiModel).toBe('gemini-3-flash-preview');
+    expect(max.thinkingLevel).toBe('HIGH');
     expect(max.useSearchGrounding).toBe(true);
   });
 
@@ -258,7 +258,7 @@ describe('Small Model Upgrade, Thinking Stability, RAG & V2 Memory Verification'
         generateContentStream: async ({ model, contents }: { model: string; contents: any[] }) => {
           modelsTried.push(model);
           // Primary drops stream mid-answer after emitting partial text
-          if (model === 'gemini-4-hydrogen' && contents.length === 1) {
+          if (model === 'gemini-3-flash-preview' && contents.length === 1) {
             return {
               async *[Symbol.asyncIterator]() {
                 yield {
@@ -306,7 +306,7 @@ describe('Small Model Upgrade, Thinking Stability, RAG & V2 Memory Verification'
 
     expect(res.ok).toBe(true);
     expect(res.resumedAfterDrop).toBe(true);
-    expect(modelsTried).toEqual(['gemini-4-hydrogen', 'gemini-3.8-flash']);
+    expect(modelsTried).toEqual(['gemini-3-flash-preview', 'gemini-3.1-flash-lite']);
     expect(emitted).toBe('export function Demo() {\n  return <div>Done</div>;\n}');
     expect(thoughts.join('')).toContain('Analyzing full architecture');
   });

@@ -806,9 +806,9 @@ function markV2ModelHealthy(model: string): void {
 
 /**
  * Downward-only single-pass V2 server model chain:
- * - smfta-v5: gemini-3.5-flash-lite -> gemini-3.1-flash-lite -> gemini-flash-lite-latest -> gemini-3-flash-preview
- * - smfta-v2-pro: gemini-3.8-flash -> gemini-3-flash-preview -> gemini-3.1-flash-lite -> gemini-flash-lite-latest
- * - smfta-max: gemini-4-hydrogen -> gemini-3.8-flash -> gemini-3.1-flash-lite -> gemini-3-flash-preview
+ * - smfta-v5: gemini-3.5-flash-lite -> gemini-3.1-flash-lite -> gemini-3-flash-preview -> gemini-flash-lite-latest
+ * - smfta-v2-pro: gemini-3-flash-preview -> gemini-3.1-flash-lite -> gemini-3.5-flash-lite -> gemini-flash-lite-latest
+ * - smfta-max: gemini-3-flash-preview -> gemini-3.1-flash-lite -> gemini-3.5-flash-lite -> gemini-4-hydrogen
  */
 export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
   const spec = getV2ModelSpec(modelId);
@@ -819,25 +819,25 @@ export function getV2ServerFallbackModels(modelId: V2ModelId): string[] {
           new Set([
             primary,
             'gemini-3.1-flash-lite',
-            'gemini-flash-lite-latest',
             'gemini-3-flash-preview',
+            'gemini-flash-lite-latest',
           ])
         )
       : modelId === 'smfta-v2-pro'
         ? Array.from(
             new Set([
               primary,
-              'gemini-3-flash-preview',
               'gemini-3.1-flash-lite',
+              'gemini-3.5-flash-lite',
               'gemini-flash-lite-latest',
             ])
           )
         : Array.from(
             new Set([
               primary,
-              'gemini-3.8-flash',
               'gemini-3.1-flash-lite',
-              'gemini-3-flash-preview',
+              'gemini-3.5-flash-lite',
+              'gemini-4-hydrogen',
             ])
           );
   const healthy = raw.filter((m) => !isV2ModelInCooldown(m));

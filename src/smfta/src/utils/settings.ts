@@ -67,7 +67,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Primary server-side @google/genai engine (uses server GEMINI_API_KEY).
   provider: 'gemini_custom',
   externalKeys: '',
-  externalModel: 'gemini-4-hydrogen',
+  externalModel: 'gemini-3-flash-preview',
   externalBaseUrl: '',
   allowKeylessFallback: false,
   // Spec defaults: temperature 0.7 · top P 0.9 · max output tokens 16384.
@@ -228,7 +228,19 @@ export function sanitizeSettings(input: unknown): AppSettings {
     .trim()
     .slice(0, 200);
   if (/^(?:gemini-1\.5|gemini-2\.0|gemini-pro)/i.test(externalModel)) {
-    externalModel = 'gemini-4-hydrogen';
+    externalModel = 'gemini-3-flash-preview';
+  }
+  const isKeylessServerProvider =
+    (provider === 'gemini_custom' ||
+      provider === 'gemini_openai' ||
+      provider === 'smfta_cloud' ||
+      provider === 'xrahat') &&
+    !externalKeys.trim();
+  if (
+    isKeylessServerProvider &&
+    /^(?:gemini-4-hydrogen|gemini-3\.8-flash)$/i.test(externalModel)
+  ) {
+    externalModel = 'gemini-3-flash-preview';
   }
 
   // Clamp (and round) instead of rejecting: an outdated/corrupt stored value

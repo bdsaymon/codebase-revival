@@ -103,8 +103,8 @@ export function builtinTierForModel(
       desc: 'Firebase AI Logic · Deeper analysis & demanding tasks',
     };
   }
-  if (m === 'gemini-3.1-flash-lite') return BUILTIN_TIERS[0];
-  if (m === 'gemini-4-hydrogen') return BUILTIN_TIERS[1];
+  if (m === 'gemini-3.1-flash-lite' || m === 'gemini-3.5-flash-lite') return BUILTIN_TIERS[0];
+  if (m === 'gemini-3-flash-preview' || m === 'gemini-4-hydrogen') return BUILTIN_TIERS[1];
   if (m === 'gemini-4-neon' || m === 'gemini-4-carbon') return BUILTIN_TIERS[2];
   if (mode === 'fast') return BUILTIN_TIERS[0];
   if (mode === 'power') return BUILTIN_TIERS[2];
@@ -130,8 +130,8 @@ export const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   smfta_cloud: '',
   unorouter: 'google/gemini-4-hydrogen',
   codecraft: 'gemini-4-hydrogen',
-  gemini_custom: 'gemini-4-hydrogen',
-  gemini_openai: 'gemini-4-hydrogen',
+  gemini_custom: 'gemini-3-flash-preview',
+  gemini_openai: 'gemini-3-flash-preview',
   anthropic: 'claude-sonnet-4-20250514',
   openrouter: 'google/gemini-4-hydrogen',
   groq: 'llama-3.3-70b-versatile',
@@ -759,10 +759,11 @@ export function applyKeyToDraft(
 export const SAVED_PROFILES_KEY = 'smfta_provider_profiles';
 
 export const GEMINI_ACTIVE_MODELS = [
-  'gemini-4-hydrogen',
-  'gemini-3.8-flash',
-  'gemini-3.5-flash-lite',
+  'gemini-3-flash-preview',
   'gemini-3.1-flash-lite',
+  'gemini-3.5-flash-lite',
+  'gemini-flash-lite-latest',
+  'gemini-4-hydrogen',
   'gemini-4-neon',
   'gemini-4-carbon',
 ];
@@ -772,7 +773,7 @@ export const DEFAULT_BUILTIN_PROFILE: SavedProviderProfile = {
   name: 'Google Gemini (Server)',
   provider: 'gemini_custom',
   externalKeys: '',
-  externalModel: 'gemini-4-hydrogen',
+  externalModel: 'gemini-3-flash-preview',
   externalBaseUrl: '',
   availableModels: [...GEMINI_ACTIVE_MODELS],
   verified: true,
@@ -785,16 +786,123 @@ export function normalizeProviderProfile(
 ): SavedProviderProfile {
   if (p.provider === 'gemini_custom' || isBuiltinProviderId(p.provider)) {
     const cleaned = (p.externalModel || '').trim();
+    const isKeyless = !String(p.externalKeys || '').trim();
+    // Auto-migrate stalled built-in defaults (gemini-4-hydrogen / gemini-3.8-flash)
+    // on keyless server profiles so previously saved sessions immediately recover.
+    const migratedModel =
+      isKeyless &&
+      (cleaned.toLowerCase() === 'gemini-4-hydrogen' ||
+        cleaned.toLowerCase() === 'gemini-3.8-flash')
+        ? 'gemini-3-flash-preview'
+        : cleaned;
     return {
       ...p,
       availableModels: [...GEMINI_ACTIVE_MODELS, ...BUILTIN_TIER_MODELS],
       externalModel:
-        GEMINI_ACTIVE_MODELS.includes(cleaned) || isBuiltinTierModel(cleaned)
-          ? cleaned
-          : 'gemini-4-hydrogen',
+        GEMINI_ACTIVE_MODELS.includes(migratedModel) ||
+        isBuiltinTierModel(migratedModel)
+          ? migratedModel
+          : 'gemini-3-flash-preview',
     };
   }
   return p;
+}
+
+export function findKeylessServerProfile(
+  savedProfiles: SavedProviderProfile[]
+): SavedProviderProfile {
+  return (
+    savedProfiles.find(
+      (p) =>
+        p.id === DEFAULT_BUILTIN_PROFILE.id ||
+        isBuiltinProviderId(p.provider) ||
+        ((p.provider === 'gemini_custom' || p.provider === 'gemini_openai') &&
+          !String(p.externalKeys || '').trim())
+    ) || DEFAULT_BUILTIN_PROFILE
+  );
+}
+
+/**
+ * Pure state transition for selecting a model from the Model Selector.
+ * Ensures selecting any built-in V1 tier or V2 special model atomically
+ * switches activeProfileId back to the keyless server profile, clears custom
+ * credentials from active settings, and NEVER mutates custom user profiles.
+ */
+export function computeSelectModelTransition(params: {
+  modelId: string;
+  settings: AppSettings;
+  savedProfiles: SavedProviderProfile[];
+  activeProfile: SavedProviderProfile | null;
+}): {
+  nextSettingsPatch: Partial<AppSettings>;
+  nextProfiles: SavedProviderProfile[];
+  isBuiltinOrV2: boolean;
+  tier: BuiltinTier | null;
+  isV2: boolean;
+} {
+  const trimmed = params.modelId.trim();
+  const isV2 = isV2SpecialModel(trimmed);
+  const tier = BUILTIN_TIERS.find((t) => t.model === trimmed) || null;
+  const isBuiltinOrV2 = isV2 || Boolean(tier);
+
+  if (isBuiltinOrV2) {
+    const builtinProf = findKeylessServerProfile(params.savedProfiles);
+    const nextMode: AppSettings['mode'] = tier
+      ? tier.id
+      : trimmed === 'smfta-v5'
+        ? 'fast'
+        : trimmed === 'smfta-max'
+          ? 'power'
+          : 'balanced';
+
+    const nextSettingsPatch: Partial<AppSettings> = {
+      activeProfileId: builtinProf.id,
+      provider: 'smfta_cloud',
+      externalKeys: '',
+      externalBaseUrl: '',
+      externalModel: trimmed,
+      displayName: builtinProf.name || DEFAULT_BUILTIN_PROFILE.name,
+      mode: nextMode,
+    };
+
+    const hasBuiltinInList = params.savedProfiles.some(
+      (p) => p.id === builtinProf.id
+    );
+    const updatedBuiltin: SavedProviderProfile = {
+      ...builtinProf,
+      provider: 'smfta_cloud',
+      externalKeys: '',
+      externalBaseUrl: '',
+      externalModel: trimmed,
+    };
+    const nextProfiles = hasBuiltinInList
+      ? params.savedProfiles.map((p) =>
+          p.id === builtinProf.id ? updatedBuiltin : p
+        )
+      : [updatedBuiltin, ...params.savedProfiles];
+
+    return {
+      nextSettingsPatch,
+      nextProfiles,
+      isBuiltinOrV2: true,
+      tier,
+      isV2,
+    };
+  }
+
+  const nextProfiles = params.activeProfile
+    ? params.savedProfiles.map((p) =>
+        p.id === params.activeProfile!.id ? { ...p, externalModel: trimmed } : p
+      )
+    : params.savedProfiles;
+
+  return {
+    nextSettingsPatch: { externalModel: trimmed },
+    nextProfiles,
+    isBuiltinOrV2: false,
+    tier: null,
+    isV2: false,
+  };
 }
 
 export const VALID_CATALOG_PROVIDERS = new Set<string>(
