@@ -61,7 +61,11 @@ import {
   getV2ModelSpec,
   V2ModelId,
 } from '../../src/utils/v2UsageLimits';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
+import {
+  resolveVoiceFastLaneTimeoutMs,
+  runVoiceFastLaneStream,
+} from '../voiceFastLane';
 import {
   checkAndConsumeServerV2Quota,
   formatGeminiContents,
@@ -1977,95 +1981,60 @@ chatRouter.post('/chat/stream', async (req: Request, res: Response) => {
         formattedTurns.length > 0
           ? formattedTurns
           : [{ role: 'user' as const, parts: [{ text: lastUserText || 'Hello' }] }];
-      const fastVoiceCandidates: Array<{ model: string; level?: ThinkingLevel }> = [
-        { model: 'gemini-3.1-flash-lite', level: ThinkingLevel.MINIMAL },
-        { model: 'gemini-3.5-flash-lite', level: ThinkingLevel.LOW },
-        { model: 'gemini-3-flash-preview', level: ThinkingLevel.LOW },
-        { model: 'gemini-flash-lite-latest', level: ThinkingLevel.MINIMAL },
-      ];
+      const hasVoiceImages = voiceHistoryContents.some(
+        (turn) =>
+          Array.isArray(turn.parts) &&
+          turn.parts.some(
+            (p) => Boolean(p && typeof p === 'object' && 'inlineData' in p)
+          )
+      );
+      const fastLaneResult = await runVoiceFastLaneStream({
+        timeoutMs: resolveVoiceFastLaneTimeoutMs(hasVoiceImages),
+        upstreamSignal: upstreamAbortController.signal,
+        isClientClosed: () => clientClosed,
+        emitDelta,
+        openStream: (cand, abortSignal) =>
+          fastAi.models.generateContentStream({
+            model: cand.model,
+            contents: voiceHistoryContents,
+            config: {
+              abortSignal,
+              systemInstruction: liveVoiceSysInstruction,
+              maxOutputTokens: wantsDetailedVoiceReply
+                ? Math.min(effectiveMaxOutputTokens, 480)
+                : Math.min(effectiveMaxOutputTokens, 200),
+              ...(cand.level !== undefined
+                ? { thinkingConfig: { thinkingLevel: cand.level } }
+                : {}),
+            },
+          }),
+      });
 
-      for (const cand of fastVoiceCandidates) {
-        if (clientClosed || upstreamAbortController.signal.aborted) break;
-        let candidateTimedOut = false;
-        let firstTokenTimer: ReturnType<typeof setTimeout> | null = null;
-        try {
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            firstTokenTimer = setTimeout(() => {
-              candidateTimedOut = true;
-              reject(new Error(`Voice fast-lane ${cand.model} first-token timeout`));
-            }, 3600);
-          });
+      if (fastLaneResult.ok && fullReplyAccumulator.trim()) {
+        finishStream({
+          type: 'done',
+          ok: true,
+          requestId,
+          requestedProvider: effectiveProvider,
+          requestedModel:
+            activeCustomModelName || fastLaneResult.modelUsed || 'gemini-3.5-flash-lite',
+          providerUsed: 'gemini',
+          modelUsed: fastLaneResult.modelUsed || 'gemini-3.5-flash-lite',
+          attemptCount: fastLaneResult.attemptCount,
+          latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
+        });
+        return;
+      }
 
-          const fastStream = await Promise.race([
-            fastAi.models.generateContentStream({
-              model: cand.model,
-              contents: voiceHistoryContents,
-              config: {
-                systemInstruction: liveVoiceSysInstruction,
-                maxOutputTokens: wantsDetailedVoiceReply
-                  ? Math.min(effectiveMaxOutputTokens, 480)
-                  : Math.min(effectiveMaxOutputTokens, 200),
-                ...(cand.level !== undefined
-                  ? { thinkingConfig: { thinkingLevel: cand.level } }
-                  : {}),
-              },
-            }),
-            timeoutPromise,
-          ]);
-
-          const iterator = fastStream[Symbol.asyncIterator]();
-          // Race the very first yielded chunk against the same first-token watchdog
-          while (true) {
-            if (clientClosed || upstreamAbortController.signal.aborted || candidateTimedOut) {
-              break;
-            }
-            const nextStep = !fullReplyAccumulator
-              ? await Promise.race([iterator.next(), timeoutPromise])
-              : await iterator.next();
-
-            if (nextStep.done) break;
-            const deltaText = nextStep.value?.text || '';
-            if (deltaText) {
-              if (firstTokenTimer) {
-                clearTimeout(firstTokenTimer);
-                firstTokenTimer = null;
-              }
-              emitDelta(deltaText);
-            }
-          }
-
-          if (firstTokenTimer) {
-            clearTimeout(firstTokenTimer);
-            firstTokenTimer = null;
-          }
-
-          if (fullReplyAccumulator.trim()) {
-            finishStream({
-              type: 'done',
-              ok: true,
-              requestId,
-              requestedProvider: effectiveProvider,
-              requestedModel: activeCustomModelName || cand.model,
-              providerUsed: 'gemini',
-              modelUsed: cand.model,
-              attemptCount: 1,
-              latencyMs: Math.max(1, Math.round(performance.now() - streamStartPerf)),
-            });
-            return;
-          }
-        } catch (err) {
-          if (firstTokenTimer) {
-            clearTimeout(firstTokenTimer);
-            firstTokenTimer = null;
-          }
-          console.warn(
-            `[chat/stream] voice fast-lane failed for model="${cand.model}": ${err instanceof Error ? err.message : String(err)}`
-          );
-          if (fullReplyAccumulator.trim()) {
-            break;
-          }
-          // Try next fast voice candidate or fall through to standard engine
-        }
+      if (
+        !clientClosed &&
+        !upstreamAbortController.signal.aborted &&
+        fastLaneResult.errors.length > 0
+      ) {
+        const summary = fastLaneResult.errors
+          .map((e) => `${e.model}: ${e.message}`)
+          .join(' | ');
+        console.warn(`[chat/stream] voice fast-lane exhausted (${summary})`);
       }
     }
   }
