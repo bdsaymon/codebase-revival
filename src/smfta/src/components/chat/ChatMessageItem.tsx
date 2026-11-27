@@ -18,6 +18,15 @@ import {
   InteractiveMessageContent,
   extractThinkingAndResponse,
 } from '../InteractiveMessageContent';
+import {
+  type AttachmentCardMeta,
+  extractAttachedFilesFromMessage,
+} from '../../utils/chatDisplay';
+import {
+  AttachmentCard,
+  AttachmentPreviewModal,
+  ImageAttachmentCard,
+} from './AttachmentCard';
 import { CollapsibleUserPrompt } from './CollapsibleUserPrompt';
 
 export interface ChatMessageItemProps {
@@ -91,18 +100,21 @@ const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
   const [feedbackReasonInput, setFeedbackReasonInput] = useState(
     m.feedback?.reason || ''
   );
+  const [previewAttachment, setPreviewAttachment] =
+    useState<AttachmentCardMeta | null>(null);
 
-  const attachedDocNames = React.useMemo(() => {
+  const attachedFiles = React.useMemo(() => {
     if (m.role !== 'user') return [];
-    return Array.from(
-      m.text.matchAll(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g)
-    ).map((match) => match[1].trim());
+    return extractAttachedFilesFromMessage(m.text);
   }, [m.role, m.text]);
 
   const cleanUserText = React.useMemo(() => {
     if (m.role !== 'user') return m.text;
     return m.text.replace(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g, '').trim();
   }, [m.role, m.text]);
+
+  const hasUserAttachments =
+    ((m.imgs && m.imgs.length > 0) || attachedFiles.length > 0) ?? false;
 
   return (
     <div className={`msg-row ${m.role === 'user' ? 'is-user' : 'is-ai'} group`}>
@@ -115,34 +127,48 @@ const ChatMessageItemInner: React.FC<ChatMessageItemProps> = ({
       >
         {m.role === 'user' ? (
           <>
-            {((m.imgs && m.imgs.length > 0) || attachedDocNames.length > 0) && (
-              <div className="ref-attach-grid">
+            {hasUserAttachments && (
+              <div
+                data-testid="sent-attachments-row"
+                className="flex items-center gap-2.5 overflow-x-auto flex-nowrap sm:flex-wrap max-w-full pb-1 mb-1.5 no-scrollbar"
+              >
                 {m.imgs?.map((im, idx) => {
                   const src = im.url || `data:${im.mime};base64,${im.data}`;
                   return (
-                    <img
+                    <ImageAttachmentCard
                       key={`img-${idx}`}
                       src={src}
-                      alt="Uploaded attachment"
-                      referrerPolicy="no-referrer"
+                      name={`Image ${idx + 1}`}
+                      mime={im.mime}
                       onClick={() => onOpenLightbox(src)}
-                      className="ref-attach-img"
+                      testId="sent-image-attachment-card"
                     />
                   );
                 })}
-                {attachedDocNames.map((fname, idx) => {
-                  const ext =
-                    fname.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE';
-                  return (
-                    <div key={`doc-${idx}`} className="ref-attach-doc">
-                      <span className="ref-attach-badge">{ext}</span>
-                      <span className="ref-attach-name">{fname}</span>
-                    </div>
-                  );
-                })}
+                {attachedFiles.map((fileMeta, idx) => (
+                  <AttachmentCard
+                    key={`doc-${idx}`}
+                    name={fileMeta.name}
+                    content={fileMeta.content}
+                    sizeBytes={fileMeta.byteCount}
+                    status="ready"
+                    onClick={() => setPreviewAttachment(fileMeta)}
+                    testId="sent-attachment-card"
+                  />
+                ))}
               </div>
             )}
-            {cleanUserText && <CollapsibleUserPrompt text={cleanUserText} />}
+            {cleanUserText && (
+              <CollapsibleUserPrompt
+                text={cleanUserText}
+                hasAttachments={hasUserAttachments}
+              />
+            )}
+            <AttachmentPreviewModal
+              attachment={previewAttachment}
+              onClose={() => setPreviewAttachment(null)}
+              onToast={onToast}
+            />
           </>
         ) : (
           <div className="w-full min-w-0">

@@ -622,6 +622,7 @@ const CODE_EXTS: Record<string, string> = {
 interface ThinkingAccordionProps {
   thinkingText: string;
   thinkingDurationSec?: number;
+  statusSteps?: string[];
   isReasoningNow: boolean;
   isStreaming: boolean;
   hasAnswerStarted: boolean;
@@ -632,9 +633,32 @@ interface ThinkingAccordionProps {
   preferBengali: boolean;
 }
 
+function extractLatestThinkingLine(
+  thinkingText: string,
+  statusSteps?: string[]
+): string {
+  const raw = String(thinkingText || '').trim();
+  if (raw) {
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^[•\-*#>\s]+/, '').trim())
+      .filter((l) => l.length > 0);
+    if (lines.length > 0) {
+      const latest = lines[lines.length - 1];
+      return latest.length > 90 ? `${latest.slice(0, 90)}…` : latest;
+    }
+  }
+  if (Array.isArray(statusSteps) && statusSteps.length > 0) {
+    const latestStep = String(statusSteps[statusSteps.length - 1] || '').trim();
+    if (latestStep) return latestStep;
+  }
+  return '';
+}
+
 const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
   thinkingText,
   thinkingDurationSec,
+  statusSteps,
   isReasoningNow,
   isStreaming,
   hasAnswerStarted,
@@ -651,7 +675,12 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   const manualToggleRef = useRef<boolean>(false);
 
-  const activelyThinking = isReasoningNow || (isStreaming && !hasAnswerStarted);
+  const hasRealContent = Boolean(
+    thinkingText.trim().length > 0 ||
+      (Array.isArray(statusSteps) && statusSteps.length > 0)
+  );
+  const activelyThinking =
+    hasRealContent && (isReasoningNow || (isStreaming && !hasAnswerStarted));
 
   // Calm 1s timer isolated solely inside this leaf component (never re-renders code blocks)
   useEffect(() => {
@@ -671,29 +700,26 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
       const finalSec = Math.max(1, Math.round((Date.now() - startRef.current) / 1000));
       setMeasuredSec(finalSec);
       startRef.current = null;
-      if (!manualToggleRef.current) {
+      if (autoCollapseThinking !== false) {
         setUserToggled(false);
       }
     }
-  }, [activelyThinking]);
+  }, [activelyThinking, autoCollapseThinking]);
 
-  // Auto-collapse once the answer begins streaming unless user explicitly expanded it
+  // Auto-collapse once the answer begins streaming or finishes unless autoCollapseThinking is disabled
   useEffect(() => {
-    if (hasAnswerStarted && !manualToggleRef.current) {
+    if ((hasAnswerStarted || !isStreaming) && autoCollapseThinking !== false) {
       setUserToggled(false);
     }
-  }, [hasAnswerStarted]);
+  }, [hasAnswerStarted, isStreaming, autoCollapseThinking]);
 
   const effectiveSec = activelyThinking
     ? liveSec
     : thinkingDurationSec ?? measuredSec ?? estimateThinkingSeconds(thinkingText, measuredSec);
 
-  const isExpanded =
-    userToggled !== null
-      ? userToggled
-      : activelyThinking
-        ? liveThinkingSummary !== false
-        : autoCollapseThinking === false && liveThinkingSummary !== false;
+  // Phase 3.1 & 3.2: While streaming, default to collapsed row ("Thinking…") with live timer & latest real thinking line.
+  // When done, auto-collapse to "Thought for Ns". Click toggles.
+  const isExpanded = userToggled !== null ? userToggled : false;
 
   useEffect(() => {
     if (isExpanded && activelyThinking && scrollRef.current) {
@@ -706,20 +732,31 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
     [isExpanded, thinkingText]
   );
 
+  const latestRealThinkingLine = React.useMemo(
+    () => extractLatestThinkingLine(thinkingText, statusSteps),
+    [thinkingText, statusSteps]
+  );
+
+  if (!hasRealContent) return null;
+
   const labelText = activelyThinking
     ? preferBengali
-      ? effectiveSec > 0
-        ? `ভাবছি · ${toBengaliDigits(effectiveSec)} সে.`
-        : 'ভাবছি…'
-      : effectiveSec > 0
-        ? `Thinking · ${effectiveSec}s`
-        : 'Thinking…'
+      ? `ভাবছি… ${toBengaliDigits(effectiveSec)} সে.`
+      : `Thinking… ${effectiveSec}s`
     : preferBengali
       ? `${toBengaliDigits(Math.max(1, Math.round(effectiveSec)))} সেকেন্ড ভেবেছে`
       : `Thought for ${Math.max(1, Math.round(effectiveSec))}s`;
 
+  const inlineSummaryText = activelyThinking
+    ? liveThinkingSummary !== false
+      ? latestRealThinkingLine
+      : ''
+    : showThinkingTopic && thinkingSubject && thinkingSubject !== 'আপনার প্রশ্ন'
+      ? thinkingSubject
+      : '';
+
   return (
-    <div data-testid="thinking-accordion" className="mt-0 mb-2.5 select-none">
+    <div data-testid="thinking-accordion" className="claude-thinking-row mt-0 mb-2.5 select-none">
       <button
         type="button"
         data-testid="thinking-accordion-toggle"
@@ -743,6 +780,7 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
           className="flex items-center gap-1.5 min-w-0"
         >
           <span
+            data-testid="thinking-accordion-label"
             className={`font-medium shrink-0 ${
               activelyThinking
                 ? 'text-[var(--ink)]'
@@ -752,12 +790,12 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
             {labelText}
           </span>
 
-          {showThinkingTopic && thinkingSubject && thinkingSubject !== 'আপনার প্রশ্ন' && (
+          {inlineSummaryText && (
             <span
               data-testid="thinking-subject-label"
-              className="text-[12px] text-[var(--ink-dim)]/80 truncate max-w-[200px] sm:max-w-[300px]"
+              className="text-[12px] text-[var(--ink-dim)]/85 truncate max-w-[220px] sm:max-w-[360px]"
             >
-              · {thinkingSubject}
+              · {inlineSummaryText}
             </span>
           )}
         </div>
@@ -790,11 +828,16 @@ const ThinkingAccordion: React.FC<ThinkingAccordionProps> = React.memo(({
                 )}
               </div>
             ))
-          ) : (
-            <div className="text-[12px] text-[var(--ink-dim)] italic">
-              {preferBengali ? 'চিন্তা বিশ্লেষণ হচ্ছে…' : 'Reasoning…'}
-            </div>
-          )}
+          ) : Array.isArray(statusSteps) && statusSteps.length > 0 ? (
+            statusSteps.map((st, idx) => (
+              <div
+                key={idx}
+                className="text-[12px] leading-[1.6] text-[var(--ink-dim)] font-normal"
+              >
+                {st}
+              </div>
+            ))
+          ) : null}
         </div>
       )}
     </div>
@@ -806,6 +849,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
   text,
   thinking,
   thinkingDurationSec,
+  statusSteps,
   liveThinkingSummary = true,
   isStreaming = false,
   proactiveSuggestions = [],
@@ -841,14 +885,17 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
   );
 
   const hasAnswerStarted = Boolean(cleanResponse.trim().length > 0);
-  const isReasoningNow = Boolean(
-    isThinkingActive ||
-      (isStreaming && !hasAnswerStarted && thinkingEnabled !== false)
+  const hasRealThinkingOrStatus = Boolean(
+    thinkingText.trim().length > 0 ||
+      (Array.isArray(statusSteps) && statusSteps.length > 0)
   );
+  const isReasoningNow = Boolean(
+    hasRealThinkingOrStatus &&
+      (isThinkingActive || (isStreaming && !hasAnswerStarted))
+  );
+  // Phase 3.3 & 3.4: Only show thinking card if thinkingEnabled !== false AND real thinking text or real tool-status events exist
   const showInlineThinkingCard = Boolean(
-    thinkingText.trim() ||
-      isThinkingActive ||
-      (isStreaming && !hasAnswerStarted && thinkingEnabled !== false)
+    thinkingEnabled !== false && hasRealThinkingOrStatus
   );
 
   const preferBengali = React.useMemo(
@@ -1055,6 +1102,7 @@ const InteractiveMessageContentInner: React.FC<InteractiveMessageContentProps> =
         <ThinkingAccordion
           thinkingText={thinkingText}
           thinkingDurationSec={thinkingDurationSec}
+          statusSteps={statusSteps}
           isReasoningNow={isReasoningNow}
           isStreaming={isStreaming}
           hasAnswerStarted={hasAnswerStarted}

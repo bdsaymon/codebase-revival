@@ -1794,23 +1794,8 @@ body {
 }
 .project-chip-btn.is-ghost:hover { color: var(--ink); background: var(--surface-3); }
 
-/* ── Messages ────────────────────────────────────────────────────────────── */
-.msg-row { width: 100%; }
-.msg-row.is-user { display: flex; justify-content: flex-end; }
-.msg-row.is-ai { display: block; }
-.msg-row.is-ai + .msg-row.is-ai { padding-top: 4px; }
-.msg-user-bubble {
-  max-width: min(100%, 620px);
-  padding: 10px 14px;
-  border-radius: 14px 14px 4px 14px;
-  background: var(--primary);
-  color: #fff;
-  font-size: 13.8px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  box-shadow: var(--shadow-sm);
-}
+/* ── Messages (base actions) ─────────────────────────────────────────────── */
+/* Consolidated .msg-row and .msg-user-bubble defined in Claude Source of Truth section below */
 .msg-ai-head {
   display: flex;
   align-items: center;
@@ -1938,80 +1923,8 @@ body {
 }
 .empty-foot button:hover { color: var(--ink); border-color: var(--surface-3); background: var(--surface-2); }
 
-/* ── Composer ────────────────────────────────────────────────────────────── */
-.composer-wrap {
-  padding: 6px 14px 10px;
-  background: linear-gradient(to top, var(--bg) 62%, transparent);
-  flex-shrink: 0;
-}
-.composer {
-  width: 100%;
-  max-width: 780px;
-  margin: 0 auto;
-  border-radius: var(--r-xl);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.composer:focus-within {
-  border-color: var(--primary-border);
-  box-shadow: 0 0 0 3px var(--primary-soft), var(--shadow-md);
-}
-.composer textarea {
-  width: 100%;
-  padding: 13px 16px 6px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  resize: none;
-  color: var(--ink);
-  font-family: var(--ui-font);
-  font-size: 14.5px;
-  line-height: 1.6;
-  min-height: 48px;
-  max-height: 160px;
-}
-.composer textarea::placeholder { color: var(--ink-dim); }
-.composer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 2px 8px 8px 10px;
-}
-.composer-icon {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  border: 0;
-  background: transparent;
-  color: var(--ink-dim);
-  cursor: pointer;
-  transition: background 0.14s, color 0.14s;
-}
-.composer-icon:hover { background: var(--surface-2); color: var(--ink); }
-.composer-icon.is-on { background: var(--primary-soft); color: var(--primary); }
-.composer-send {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  margin-left: 2px;
-  border-radius: 12px;
-  border: 0;
-  background: var(--primary);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0.72;
-  transition: opacity 0.15s, transform 0.08s, background 0.15s;
-}
-.composer-send.is-ready { opacity: 1; }
-.composer-send:hover { opacity: 1; }
-.composer-send:disabled { opacity: 0.4; cursor: not-allowed; }
-.composer-send:not(:disabled):active { transform: scale(0.96); }
+/* ── Composer hint ───────────────────────────────────────────────────────── */
+/* Consolidated .composer, .composer-wrap, .composer-bar, .composer-icon, .composer-send defined in Claude Source of Truth section below */
 .composer-hint {
   max-width: 780px;
   margin: 6px auto 0;
@@ -2124,16 +2037,12 @@ html[data-density='spacious'] {
 .sb-nav-item,
 .sb-chat,
 .sb-chat-more,
-.composer-icon,
-.composer-send,
 .chip-btn,
 .icon-btn,
 .reasoning,
 .sb-menu,
 .menu { border-radius: var(--r-md); }
-.composer { border-radius: var(--r-xl); }
 .app-header .icon-btn { border-radius: var(--r-sm); }
-.msg-user-bubble { border-radius: var(--r-lg) var(--r-lg) 4px var(--r-lg); }
 .scroll-down-btn { border-radius: 999px; }
 
 /* Density applies to the real rhythm of the conversation. */
@@ -2243,27 +2152,6 @@ body,
   flex-shrink: 0;
 }
 
-.composer {
-  min-width: 0;
-}
-.composer-bar {
-  flex-wrap: nowrap;
-  min-width: 0;
-}
-.composer-bar > div {
-  min-width: 0;
-}
-.composer-wrap {
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-}
-
-.msg-row {
-  min-width: 0;
-}
-.msg-user-bubble {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
 .msg-actions {
   flex-wrap: wrap;
   gap: 2px 4px;
@@ -3589,13 +3477,9 @@ body,
 [data-font-family="mono"] { --ui-font: var(--font-mono, ui-monospace, monospace); }
 [data-font-family="system"] { --ui-font: system-ui, -apple-system, sans-serif; }
 
-[data-bubble="sharp"] { --bubble-radius: 4px; }
-[data-bubble="rounded"] { --bubble-radius: 16px; }
-[data-bubble="minimal"] { --bubble-radius: 8px; }
-/* Loaded after the base bubble rule, so the user's choice wins on equal specificity. */
-.msg-user-bubble {
-  border-radius: var(--bubble-radius, 16px);
-}
+[data-bubble="sharp"] { --bubble-radius: 6px; }
+[data-bubble="rounded"] { --bubble-radius: 18px; }
+[data-bubble="minimal"] { --bubble-radius: 10px; }
 [data-bubble="minimal"] .msg-user-bubble {
   background: transparent;
   border: 1px solid var(--border);
@@ -5574,66 +5458,6 @@ html[data-theme='dark'] .cs-account-avatar { color: var(--ink); }
   }
 }
 
-/* Composer: gradient frame */
-.composer {
-  border: 1.5px solid transparent !important;
-  border-radius: 18px !important;
-  background:
-    linear-gradient(var(--surface), var(--surface)) padding-box,
-    linear-gradient(115deg, var(--primary), color-mix(in oklab, var(--primary) 40%, #f2c46d) 70%, #f2c46d) border-box !important;
-  box-shadow: 0 18px 40px -26px color-mix(in oklab, var(--primary) 70%, transparent) !important;
-}
-.composer:focus-within {
-  box-shadow: 0 0 0 4px var(--primary-soft), 0 18px 40px -26px var(--primary) !important;
-}
-.composer-send {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-radius: 50% !important;
-}
-
-/* Starter suggestions */
-.starter-grid {
-  width: 100%;
-  max-width: 780px;
-  margin: 12px auto 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.starter-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  text-align: left;
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: color-mix(in oklab, var(--surface) 80%, transparent);
-  cursor: pointer;
-  transition: border-color .15s, transform .15s;
-  min-width: 0;
-}
-.starter-card:hover { border-color: var(--primary-border); transform: translateY(-1px); }
-.starter-title { font-size: 13.5px; font-weight: 650; color: var(--ink); }
-.starter-text {
-  font-size: 12px;
-  color: var(--ink-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-@media (max-width: 640px) {
-  .starter-grid { grid-template-columns: 1fr; gap: 8px; }
-  .starter-card { padding: 10px 12px; }
-}
-
-/* Messages: calmer user bubble */
-.msg-user-bubble {
-  background: var(--primary) !important;
-  color: #fff !important;
-  border-radius: 18px 18px 6px 18px !important;
-}
 @media (min-width: 1024px) {
   .app-header > .icon-btn.lg\:hidden,
   .sb-brand > .icon-btn.lg\:hidden { display: none !important; }
@@ -6041,82 +5865,7 @@ body {
   padding: 8px 16px 20px !important;
 }
 
-.msg-row {
-  margin-bottom: 20px;
-}
-
-.ref-attach-grid {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.ref-attach-img {
-  width: 96px;
-  height: 96px;
-  border-radius: 16px;
-  object-fit: cover;
-  border: 1px solid var(--border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  cursor: zoom-in;
-}
-
-.ref-attach-doc {
-  width: 96px;
-  height: 96px;
-  border-radius: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  text-align: left;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-.ref-attach-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-start;
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--ink-muted);
-  text-transform: uppercase;
-}
-
-.ref-attach-name {
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1.3;
-  color: var(--ink);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-word;
-}
-
-.msg-user-bubble {
-  background: var(--user-bubble-bg) !important;
-  color: var(--user-bubble-ink) !important;
-  border: 1px solid transparent;
-  border-radius: 20px !important;
-  padding: 12px 16px !important;
-  font-size: 15px !important;
-  line-height: 1.55 !important;
-  box-shadow: none !important;
-  max-width: min(86%, 540px);
-}
-
+/* Legacy duplicate .msg-row, .msg-user-bubble, .msg-prose, and .composer rules removed in favor of single Claude source of truth below */
 .msg-ai-head {
   margin-bottom: 6px;
   gap: 6px;
@@ -6142,14 +5891,7 @@ body {
   opacity: 0.85;
 }
 
-.msg-prose {
-  font-family: var(--font-main) !important;
-  color: var(--ink) !important;
-  font-size: 15.5px !important;
-  line-height: 1.65 !important;
-}
-
-/* ── Artifact / Downloadable File Card (Screenshot 1) ── */
+/* ── Artifact / Downloadable File Card ── */
 .ref-artifact-card {
   width: 100%;
   margin: 12px 0;
@@ -6184,116 +5926,6 @@ body {
   flex-shrink: 0;
   transform: rotate(-3deg);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.06);
-}
-
-/* ── Composer Card (Screenshot 1) ── */
-.composer-wrap {
-  padding: 6px 14px 14px !important;
-  background: linear-gradient(to top, var(--bg) 72%, transparent) !important;
-}
-
-.composer {
-  max-width: 760px !important;
-  border-radius: 22px !important;
-  border: 1px solid var(--border) !important;
-  background: var(--surface) !important;
-  box-shadow: 0 8px 28px -8px rgba(0, 0, 0, 0.08) !important;
-  padding: 2px 4px;
-}
-
-[data-theme='dark'] .composer {
-  box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.45) !important;
-}
-
-.composer:focus-within {
-  border-color: rgba(255, 255, 255, 0.2) !important;
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.28) !important;
-}
-
-[data-theme='light'] .composer:focus-within {
-  border-color: rgba(26, 25, 24, 0.24) !important;
-  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, 0.1) !important;
-}
-
-.composer-input-spark {
-  display: none !important;
-}
-
-.composer textarea {
-  padding: 14px 16px 6px !important;
-  font-size: 15px !important;
-  line-height: 1.5 !important;
-  min-height: 46px !important;
-}
-
-.composer-bar {
-  padding: 4px 10px 10px 10px !important;
-  gap: 8px !important;
-}
-
-.composer-icon {
-  width: 40px !important;
-  height: 40px !important;
-  border-radius: 999px !important;
-  color: var(--ink-muted) !important;
-}
-
-.composer-icon-attach {
-  background: var(--surface-2) !important;
-  color: var(--ink) !important;
-}
-
-.composer-icon:hover {
-  background: var(--surface-2) !important;
-  color: var(--ink) !important;
-}
-
-.composer-icon-attach:hover {
-  background: var(--surface-3) !important;
-}
-
-.composer-icon.is-on {
-  background: var(--primary-soft) !important;
-  color: var(--primary) !important;
-}
-
-.composer-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 38px;
-  padding: 0 10px !important;
-  border-radius: 999px !important;
-  border: 0 !important;
-  background: transparent !important;
-  color: var(--ink-muted) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  max-width: 170px !important;
-  cursor: pointer;
-  transition: background 0.14s ease, color 0.14s ease;
-}
-
-.composer-model:hover {
-  background: var(--surface-2) !important;
-  color: var(--ink) !important;
-}
-
-.composer-send {
-  width: 40px !important;
-  height: 40px !important;
-  border-radius: 999px !important;
-  background: var(--ink) !important;
-  color: var(--bg) !important;
-  opacity: 0.94;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  transition: opacity 0.14s ease, transform 0.12s ease;
-}
-
-.composer-send:hover,
-.composer-send.is-ready {
-  opacity: 1 !important;
-  background: var(--ink) !important;
 }
 
 /* ── Bottom Sheet Model Picker (Screenshot 4) ── */
@@ -7527,87 +7159,194 @@ body {
   color: var(--ink) !important;
 }
 
-/* Claude User Prompt Bubble (Warm flat card, no purple gradient) */
-.msg-user-bubble {
-  background: var(--user-bubble-bg) !important;
-  color: var(--user-bubble-ink) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 18px !important;
-  padding: 11px 16px !important;
-  font-size: 15px !important;
-  line-height: 1.55 !important;
-  box-shadow: none !important;
-  max-width: min(88%, 560px);
-}
+/* ══════════════════════════════════════════════════════════════════════════
+   SINGLE SOURCE OF TRUTH — CLAUDE UI COMPONENTS
+   1. Message rows & AI message (.msg-row, .msg-prose)
+   2. User message bubble (.msg-user-bubble)
+   3. Composer (.composer-wrap, .composer, .composer-bar, .composer-icon, .composer-model, .composer-send)
+   4. Attachment card (.claude-attach-card)
+   5. Thinking row (.claude-thinking-row)
+   ══════════════════════════════════════════════════════════════════════════ */
 
-/* Claude Assistant Prose (Editorial Serif Typography) */
+/* 1. Message rows & AI message: full-width plain text, no bubble */
+.msg-row {
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 20px;
+}
+.msg-row.is-user {
+  display: flex;
+  justify-content: flex-end;
+}
+.msg-row.is-ai {
+  display: block;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
 .msg-prose {
   font-family: var(--font-serif) !important;
   color: var(--ink) !important;
   font-size: 15.8px !important;
   line-height: 1.7 !important;
+  background: transparent;
+  border: 0;
 }
 
-.chat-scroll {
-  padding-bottom: 185px !important;
-}
-
-/* Calm Thinking Accordion (No loud rainbow aurora border) */
-.thinking-accordion-container {
-  background: var(--border) !important;
-  animation: none !important;
+/* 2. User message bubble: right-aligned rounded subtle-surface bubble */
+.msg-user-bubble {
+  background: var(--user-bubble-bg) !important;
+  color: var(--user-bubble-ink) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--bubble-radius, 18px) !important;
+  padding: 11px 16px !important;
+  font-size: 15px !important;
+  line-height: 1.55 !important;
   box-shadow: none !important;
-  padding: 1px !important;
-  border-radius: 12px !important;
+  max-width: min(88%, 560px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.thinking-accordion-inner {
-  background: var(--surface) !important;
-  border-radius: 11px !important;
+/* 3. Composer: large rounded container, auto-growing textarea (max ~8 lines), circular send button, attach button on left */
+.composer-wrap {
+  padding: 6px 14px calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+  background: linear-gradient(to top, var(--bg) 72%, transparent) !important;
+  flex-shrink: 0;
 }
-
-/* Claude Composer Surface (Clean rounded box, no gold/rainbow gradient border) */
 .composer {
+  width: 100%;
+  min-width: 0;
   max-width: 760px !important;
+  margin: 0 auto;
   border-radius: 20px !important;
   border: 1px solid var(--border) !important;
   background: var(--surface) !important;
+  padding: 4px 6px;
   box-shadow: 0 6px 24px -10px rgba(0, 0, 0, 0.22) !important;
   transition: border-color 0.16s ease, box-shadow 0.16s ease !important;
 }
-
 [data-theme='light'] .composer {
   box-shadow: 0 4px 20px -8px rgba(38, 36, 33, 0.10) !important;
 }
-
 .composer:focus-within {
   border-color: var(--primary-border) !important;
   box-shadow: 0 0 0 3px var(--primary-soft), 0 8px 28px -10px rgba(0, 0, 0, 0.24) !important;
 }
-
+.composer textarea {
+  width: 100%;
+  padding: 13px 16px 6px !important;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  resize: none;
+  color: var(--ink);
+  font-family: var(--ui-font);
+  font-size: 15.5px !important;
+  line-height: 1.55 !important;
+  min-height: 46px !important;
+  max-height: 192px !important;
+}
+.composer textarea::placeholder {
+  color: var(--ink-dim);
+}
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  min-width: 0;
+  padding: 4px 8px 8px 8px !important;
+  gap: 8px !important;
+}
+.composer-bar > div {
+  min-width: 0;
+}
+.composer-icon {
+  display: grid;
+  place-items: center;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 999px !important;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted) !important;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.composer-icon:hover {
+  background: var(--surface-2) !important;
+  color: var(--ink) !important;
+}
+.composer-icon.is-on {
+  background: var(--primary-soft) !important;
+  color: var(--primary) !important;
+}
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 10px !important;
+  height: 34px !important;
+  padding: 0 10px !important;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--ink-muted) !important;
+  max-width: 170px !important;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.composer-model:hover {
+  background: var(--surface-2) !important;
+  color: var(--ink) !important;
+}
 .composer-send {
+  display: grid;
+  place-items: center;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 999px !important;
+  border: 0;
   background: var(--primary) !important;
   color: #ffffff !important;
   opacity: 0.45 !important;
   box-shadow: none !important;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.1s ease, background 0.15s ease;
 }
-
-.composer-send.is-ready {
+.composer-send.is-ready,
+.composer-send:hover:not(:disabled) {
   opacity: 1 !important;
   background: var(--primary) !important;
 }
-
-.composer-model {
-  border-radius: 10px !important;
-  height: 34px !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  color: var(--ink-muted) !important;
+.composer-send:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed;
+}
+.composer-send:not(:disabled):active {
+  transform: scale(0.96);
 }
 
-.composer-model:hover {
-  background: var(--surface-2) !important;
-  color: var(--ink) !important;
+/* 4. Attachment card: unified size for files and images, horizontal scroll on mobile */
+.claude-attach-card {
+  width: 214px;
+  height: 64px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* 5. Thinking row: calm collapsible row with zero rainbow aurora border */
+.claude-thinking-row {
+  display: block;
+  width: 100%;
+}
+
+.chat-scroll {
+  padding-bottom: 185px !important;
 }
 
 /* Claude Model Selector Bottom Sheet / Popover */

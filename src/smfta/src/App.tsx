@@ -170,6 +170,19 @@ import {
 import { VoiceWaveformBar } from './components/VoiceWaveformBar';
 import { CollapsibleUserPrompt } from './components/chat/CollapsibleUserPrompt';
 import {
+  AttachmentCard,
+  AttachmentPreviewModal,
+  ImageAttachmentCard,
+} from './components/chat/AttachmentCard';
+import {
+  type AttachmentCardMeta,
+  MAX_PENDING_FILES,
+  MAX_PENDING_IMAGES,
+  buildAttachmentCardMeta,
+  evaluateLongPasteToFile,
+  extractAttachedFilesFromMessage,
+} from './utils/chatDisplay';
+import {
   Project,
   buildProjectPreview,
   downloadZipProject,
@@ -755,18 +768,30 @@ export default function App() {
   const [pendingImgs, setPendingImgs] = useState<ImageAttachment[]>([]);
   const [pendingFiles, setPendingFiles] = useState<
     Array<{
+      id?: string;
       name: string;
       content: string;
+      sizeBytes?: number;
       summary?: string;
       doc?: ReadDocumentResult;
+      status?: 'loading' | 'ready' | 'error';
+      errorMessage?: string;
     }>
   >([]);
+  const [previewAttachmentModal, setPreviewAttachmentModal] =
+    useState<AttachmentCardMeta | null>(null);
+  const pendingFilesRef = useRef(pendingFiles);
+  pendingFilesRef.current = pendingFiles;
+  const pendingImgsRef = useRef(pendingImgs);
+  pendingImgsRef.current = pendingImgs;
+  const pasteCounterRef = useRef(0);
   const prevActiveIdRef = useRef<number>(activeId);
   useEffect(() => {
     if (prevActiveIdRef.current !== activeId) {
       prevActiveIdRef.current = activeId;
       setPendingImgs([]);
       setPendingFiles([]);
+      pasteCounterRef.current = 0;
     }
   }, [activeId]);
   // v18.6.0 — a loaded .zip project: the assistant can edit exact paths and
@@ -3430,18 +3455,23 @@ export default function App() {
     }
   ) => {
     if (isGenerating || inFlightSendRef.current) return;
+    if (pendingFiles.some((f) => f.status === 'loading')) {
+      showToast('Please wait while attached files finish loading…', 2600);
+      return;
+    }
     const rawTxt = (overrideText ?? inputText).trim();
     const imgs = [
       ...pendingImgs,
       ...(Array.isArray(extraAttachments?.imgs) ? extraAttachments.imgs : []),
     ];
+    const readyPendingFiles = pendingFiles.filter((f) => f.status !== 'error' && f.status !== 'loading');
     const files: Array<{
       name: string;
       content: string;
       summary?: string;
       doc?: ReadDocumentResult;
     }> = [
-      ...pendingFiles,
+      ...readyPendingFiles,
       ...(Array.isArray(extraAttachments?.files)
         ? extraAttachments.files.map((f) => ({
             name: f.name,
@@ -3488,34 +3518,16 @@ export default function App() {
     try {
       let mergedTxt = rawTxt;
       if (files.length > 0) {
-        // Keep total inline message text under 54,000 chars so it never trips the
-        // 60,000-char requestGuard limit even when multiple large files are attached.
-        const maxInlineTotal = Math.max(8_000, 52_000 - rawTxt.length);
-        const perFileBudget = Math.max(
-          3_000,
-          Math.floor(maxInlineTotal / files.length)
-        );
         files.forEach((f) => {
-          let fileBody = f.doc
-            ? buildQueryAwareDocumentPayload(f.doc, rawTxt, perFileBudget)
-            : f.content || '';
-          if (fileBody.length > perFileBudget) {
-            const headLen = Math.floor(perFileBudget * 0.65);
-            const tailLen = Math.max(500, perFileBudget - headLen - 220);
-            const omitted = Math.max(0, fileBody.length - (headLen + tailLen));
-            fileBody = `${fileBody.slice(0, headLen)}\n\n[COVERAGE NOTICE: Multi-file budget windowed — ${omitted.toLocaleString()} middle chars omitted (${(
-              headLen + tailLen
-            ).toLocaleString()} of ${fileBody.length.toLocaleString()} chars included)]\n\n${fileBody.slice(
-              -tailLen
-            )}`;
-          }
-          mergedTxt += `\n\n⟦FILE:${f.name}⟧\n${fileBody}\n⟦/FILE⟧`;
+          const fullFileText = f.doc?.rawContent ?? f.content ?? '';
+          mergedTxt += `\n\n⟦FILE:${f.name}⟧\n${fullFileText}\n⟦/FILE⟧`;
         });
       }
 
     setInputText('');
     setPendingImgs([]);
     setPendingFiles([]);
+    pasteCounterRef.current = 0;
     if (rawTxt) {
       sentHistoryRef.current.push(rawTxt);
       histIdxRef.current = -1;
@@ -3672,20 +3684,11 @@ export default function App() {
         !voiceCallOpen &&
         settings.streamingReveal !== false &&
         replyText.length > 24;
-      const isThinkingOn =
-        settings.thinkingEnabled !== false && settings.thinkingMode !== 'off';
-      const localTopic = deriveInitialThinkingTopic(rawTxt);
-      const localThinkingText = isThinkingOn
-        ? `বিষয় বিশ্লেষণ: ${localTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`
-        : undefined;
-
       if (!shouldAnimate) {
         appendMessageToChat(targetChatId, {
           id: localMsgId,
           role: 'ai',
           text: replyText,
-          thinking: localThinkingText,
-          thinkingDurationSec: isThinkingOn ? 1 : undefined,
           ts: Date.now(),
           ...extraFields,
         });
@@ -3697,8 +3700,6 @@ export default function App() {
         id: localMsgId,
         role: 'ai',
         text: ' ',
-        thinking: localThinkingText,
-        thinkingDurationSec: isThinkingOn ? 1 : undefined,
         status: 'streaming',
         ts: Date.now(),
         ...extraFields,
@@ -4048,37 +4049,11 @@ export default function App() {
       !isLiveVoiceTurn &&
       settings.thinkingEnabled !== false &&
       settings.thinkingMode !== 'off';
-    const rawLastUserMsg =
-      [...historyMsgs].reverse().find((m) => m.role === 'user')?.text || '';
-    const initialTurnTopic = deriveInitialThinkingTopic(rawLastUserMsg);
-    let thinkingStartMs: number | null = isThinkingEnabledForTurn
-      ? Date.now()
-      : null;
+    let thinkingStartMs: number | null = null;
     let computedThinkingSec: number | undefined;
 
     if (appendToMsg) {
       setStreamingMsgId(aiMsgId);
-    } else if (isThinkingEnabledForTurn) {
-      bubbleCreated = true;
-      setIsWaitingFirstToken(false);
-      setStreamingMsgId(aiMsgId);
-      appendMessageToChat(chatId, {
-        id: aiMsgId,
-        role: 'ai',
-        text: ' ',
-        thinking: `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`,
-        v2ModelId: isV2Request ? effectiveExternalModel : undefined,
-        ts: reqStart,
-        turnId,
-        status: 'streaming',
-        requestedProvider: activeProvider,
-        requestedModel: effectiveExternalModel || activeModelName,
-        timing: {
-          createdAt: reqStartIso,
-          startedAt: reqStartIso,
-        },
-      });
-      scrollToBottom(false);
     }
 
     try {
@@ -4550,9 +4525,8 @@ export default function App() {
       let liveStatusSteps: string[] = [];
 
       const buildEffectiveLiveThinking = (): string | undefined => {
-        if (liveThinking.trim()) return liveThinking;
         if (!isThinkingEnabledForTurn) return undefined;
-        return `বিষয় বিশ্লেষণ: ${initialTurnTopic}\n• প্রশ্নের মূল বিষয়বস্তু ও প্রাসঙ্গিক তথ্য বিশ্লেষণ করা হচ্ছে…\n• নির্ভুল ও সুশৃঙ্খল উত্তর প্রস্তুত করা হচ্ছে…`;
+        return liveThinking.trim() ? liveThinking : undefined;
       };
 
       const scheduleReveal = (): number => {
@@ -5793,58 +5767,39 @@ export default function App() {
 
   // Process incoming files (from file picker, drag & drop, or paste) — universal unlimited-size reader
   const handleProcessIncomingFiles = async (files: File[]) => {
-    for (const f of files) {
-      // 1. .zip project archive (with automatic fallback to universal document reader for huge/binary zips)
-      if (/\.zip$/i.test(f.name)) {
-        try {
-          if (f.size <= 60 * 1024 * 1024) {
-            const buf = await f.arrayBuffer();
-            const loaded = readZipProject(new Uint8Array(buf), f.name);
-            if (loaded.files.length > 0) {
-              setProject(loaded);
-              showToast(
-                `${loaded.name} · ${loaded.files.length} files loaded${
-                  loaded.entry ? ` · entry ${loaded.entry}` : ''
-                }`,
-                4200
-              );
-              continue;
-            }
-          }
-          // Fallback if zip is > 60MB or contains only non-project files: read via universal document reader
-          const doc = await readDocumentFile(f);
-          setPendingFiles((prev) => [
-            ...prev.slice(-15),
-            { name: doc.name, content: doc.content, summary: doc.summary, doc },
-          ]);
-          showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
-        } catch {
-          try {
-            const doc = await readDocumentFile(f);
-            setPendingFiles((prev) => [
-              ...prev.slice(-15),
-              { name: doc.name, content: doc.content, summary: doc.summary, doc },
-            ]);
-            showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
-          } catch (err) {
-            showToast(err instanceof Error ? err.message : 'ZIP could not be read', 4000);
-          }
-        }
-        continue;
-      }
+    let currentFileCount = pendingFilesRef.current.length;
+    let currentImgCount = pendingImgsRef.current.length;
+    let hitFileLimit = false;
+    let hitImageLimit = false;
 
-      // 2. Images (auto-compress oversized images on canvas so any size photo works without limit errors)
-      if (
+    for (const f of files) {
+      const isImageFile =
         /^image\/(png|jpe?g|webp|gif|svg\+xml|bmp)$/i.test(f.type) ||
-        /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(f.name)
-      ) {
+        /\.(png|jpe?g|webp|gif|svg|bmp)$/i.test(f.name);
+
+      if (isImageFile) {
+        if (currentImgCount >= MAX_PENDING_IMAGES) {
+          hitImageLimit = true;
+          showToast(
+            `Maximum ${MAX_PENDING_IMAGES} images can be attached at once.`,
+            3600
+          );
+          continue;
+        }
+        currentImgCount += 1;
+
         const attachImageDataUrl = (url: string, mime: string) => {
           const base64Data = url.includes(',') ? url.split(',')[1] : url;
-          setPendingImgs((prev) => [
-            ...prev.slice(-3),
-            { mime: mime || 'image/jpeg', data: base64Data, url },
-          ]);
-          showToast(`Attached image "${f.name}"`, 2200);
+          setPendingImgs((prev) => {
+            if (prev.length >= MAX_PENDING_IMAGES) return prev;
+            return [
+              ...prev,
+              { mime: mime || 'image/jpeg', data: base64Data, url },
+            ];
+          });
+          if (!hitImageLimit) {
+            showToast(`Attached image "${f.name}"`, 2200);
+          }
         };
 
         if (f.size > 3.2 * 1024 * 1024 && typeof document !== 'undefined') {
@@ -5884,20 +5839,100 @@ export default function App() {
         continue;
       }
 
-      // 3. Universal file reader: documents, spreadsheets, archives, data, code, logs, or binary files of ANY size
-      try {
-        const doc = await readDocumentFile(f);
-        setPendingFiles((prev) => [
-          ...prev.slice(-15),
-          { name: doc.name, content: doc.content, summary: doc.summary, doc },
-        ]);
-        showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
-      } catch (err) {
+      // Check file attachment limit before adding or dropping anything
+      if (currentFileCount >= MAX_PENDING_FILES) {
+        hitFileLimit = true;
         showToast(
-          `Could not read "${f.name}": ${err instanceof Error ? err.message : 'Unknown error'}`,
+          `Maximum ${MAX_PENDING_FILES} files can be attached at once.`,
           3600
         );
+        continue;
       }
+
+      // 1. .zip project archive (with automatic fallback to universal document reader for huge/binary zips)
+      if (/\.zip$/i.test(f.name)) {
+        try {
+          if (f.size <= 60 * 1024 * 1024) {
+            const buf = await f.arrayBuffer();
+            const loaded = readZipProject(new Uint8Array(buf), f.name);
+            if (loaded.files.length > 0) {
+              setProject(loaded);
+              showToast(
+                `${loaded.name} · ${loaded.files.length} files loaded${
+                  loaded.entry ? ` · entry ${loaded.entry}` : ''
+                }`,
+                4200
+              );
+              continue;
+            }
+          }
+        } catch {
+          // Fall through to universal document reader below
+        }
+      }
+
+      // 3. Universal file reader with real loading/ready/error card states
+      currentFileCount += 1;
+      const entryId = createUniqueId('att');
+      setPendingFiles((prev) => [
+        ...prev,
+        {
+          id: entryId,
+          name: f.name,
+          content: '',
+          sizeBytes: f.size,
+          status: 'loading',
+        },
+      ]);
+
+      try {
+        const doc = await readDocumentFile(f);
+        const fullText = doc.rawContent ?? doc.content;
+        setPendingFiles((prev) =>
+          prev.map((item) =>
+            item.id === entryId
+              ? {
+                  ...item,
+                  name: doc.name,
+                  content: fullText,
+                  sizeBytes: doc.sizeBytes || f.size,
+                  summary: doc.summary,
+                  doc,
+                  status: 'ready',
+                }
+              : item
+          )
+        );
+        if (!hitFileLimit) {
+          showToast(`✓ ${doc.name} (${doc.summary})`, 3200);
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Could not read file';
+        setPendingFiles((prev) =>
+          prev.map((item) =>
+            item.id === entryId
+              ? {
+                  ...item,
+                  status: 'error',
+                  errorMessage: errMsg,
+                }
+              : item
+          )
+        );
+        showToast(`Could not read "${f.name}": ${errMsg}`, 3600);
+      }
+    }
+
+    if (hitFileLimit) {
+      showToast(
+        `Maximum ${MAX_PENDING_FILES} files can be attached at once.`,
+        3600
+      );
+    } else if (hitImageLimit) {
+      showToast(
+        `Maximum ${MAX_PENDING_IMAGES} images can be attached at once.`,
+        3600
+      );
     }
   };
 
@@ -7028,11 +7063,9 @@ export default function App() {
                           .reverse()
                           .find((x) => x.role === 'user')
                       : undefined;
-                  const attachedDocNames =
+                  const attachedFiles =
                     m.role === 'user'
-                      ? Array.from(
-                          m.text.matchAll(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g)
-                        ).map((match) => match[1].trim())
+                      ? extractAttachedFilesFromMessage(m.text)
                       : [];
                   const cleanUserText =
                     m.role === 'user'
@@ -7040,6 +7073,11 @@ export default function App() {
                           .replace(/⟦FILE:([^\n⟦]+)⟧[\s\S]*?⟦\/FILE⟧/g, '')
                           .trim()
                       : m.text;
+                  const hasUserAttachments =
+                    m.role === 'user' &&
+                    (((m.imgs && m.imgs.length > 0) ||
+                      attachedFiles.length > 0) ??
+                      false);
                   return (
                   <div key={m.id} className={`msg-row ${m.role === 'user' ? 'is-user' : 'is-ai'}`}>
                     {/* Message Body */}
@@ -7052,41 +7090,45 @@ export default function App() {
                     >
                       {m.role === 'user' ? (
                         <>
-                          {((m.imgs && m.imgs.length > 0) || attachedDocNames.length > 0) && (
-                            <div className="ref-attach-grid">
-                              {m.imgs?.map((im, idx) => (
-                                <img
-                                  key={`img-${idx}`}
-                                  src={
-                                    im.url ||
-                                    `data:${im.mime};base64,${im.data}`
-                                  }
-                                  alt="Uploaded attachment"
-                                  referrerPolicy="no-referrer"
-                                  onClick={() =>
-                                    setLightboxImg(
-                                      im.url ||
-                                        `data:${im.mime};base64,${im.data}`
-                                    )
-                                  }
-                                  className="ref-attach-img"
-                                />
-                              ))}
-                              {attachedDocNames.map((fname, idx) => {
-                                const ext =
-                                  fname.split('.').pop()?.slice(0, 4).toUpperCase() ||
-                                  'FILE';
+                          {hasUserAttachments && (
+                            <div
+                              data-testid="sent-attachments-row"
+                              className="flex items-center gap-2.5 overflow-x-auto flex-nowrap sm:flex-wrap max-w-full pb-1 mb-1.5 no-scrollbar"
+                            >
+                              {m.imgs?.map((im, idx) => {
+                                const src =
+                                  im.url || `data:${im.mime};base64,${im.data}`;
                                 return (
-                                  <div key={`doc-${idx}`} className="ref-attach-doc">
-                                    <span className="ref-attach-badge">{ext}</span>
-                                    <span className="ref-attach-name">{fname}</span>
-                                  </div>
+                                  <ImageAttachmentCard
+                                    key={`img-${idx}`}
+                                    src={src}
+                                    name={`Image ${idx + 1}`}
+                                    mime={im.mime}
+                                    onClick={() => setLightboxImg(src)}
+                                    testId="sent-image-attachment-card"
+                                  />
                                 );
                               })}
+                              {attachedFiles.map((fileMeta, idx) => (
+                                <AttachmentCard
+                                  key={`doc-${idx}`}
+                                  name={fileMeta.name}
+                                  content={fileMeta.content}
+                                  sizeBytes={fileMeta.byteCount}
+                                  status="ready"
+                                  onClick={() =>
+                                    setPreviewAttachmentModal(fileMeta)
+                                  }
+                                  testId="sent-attachment-card"
+                                />
+                              ))}
                             </div>
                           )}
                           {cleanUserText && (
-                            <CollapsibleUserPrompt text={cleanUserText} />
+                            <CollapsibleUserPrompt
+                              text={cleanUserText}
+                              hasAttachments={hasUserAttachments}
+                            />
                           )}
                         </>
                       ) : (
@@ -7201,7 +7243,7 @@ export default function App() {
                             highlightCode={settings.codeHighlight !== false}
                             userPromptPreview={prevUserMsg?.text || ''}
                             showThinkingTopic={settings.showThinkingTopic !== false}
-                            autoCollapseThinking={Boolean(settings.autoCollapseThinking)}
+                            autoCollapseThinking={true}
                           />
 
                           {/* Artifact / Downloadable Card (Screenshot 1 style) */}
@@ -7531,40 +7573,6 @@ export default function App() {
                   </div>
                   );
                 })}
-
-                {/* Direct Groq-style Thinking indicator before first token (zero Processing/Confirming intermediate screens) */}
-                {isWaitingFirstToken && (() => {
-                  const lastUser = [...activeChat.msgs]
-                    .reverse()
-                    .find((x) => x.role === 'user');
-                  const waitingSubject = deriveInitialThinkingTopic(
-                    lastUser?.text || ''
-                  );
-                  return (
-                    <div className="msg-row is-ai">
-                      <div
-                        data-testid="thinking-accordion"
-                        className="mt-0 mb-2.5 select-none"
-                      >
-                        <div
-                          data-testid="thinking-accordion-headline"
-                          className="inline-flex items-center gap-2 py-1 px-2.5 -ml-1.5 rounded-lg text-[13px] font-medium text-[var(--primary)]"
-                        >
-                          <Brain className="w-3.5 h-3.5 animate-pulse shrink-0" />
-                          <span className="font-semibold animate-pulse">
-                            Thinking... 0.1s
-                          </span>
-                          <span
-                            data-testid="thinking-subject-label"
-                            className="text-[12.5px] font-medium text-[var(--ink-dim)] truncate max-w-[240px]"
-                          >
-                            · {waitingSubject}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
                 )}
               </div>
@@ -7706,60 +7714,71 @@ export default function App() {
                 )}
 
                 {/* Professional composer (v18.4.0) */}
-                <div className="composer">
+                <div
+                  className="composer"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const files = Array.from(
+                      e.dataTransfer?.files || []
+                    ) as File[];
+                    if (files.length > 0) {
+                      handleProcessIncomingFiles(files);
+                    }
+                  }}
+                >
                   {/* Attachment Previews Inside Composer */}
                   {(pendingImgs.length > 0 || pendingFiles.length > 0) && (
-                    <div className="flex flex-wrap items-center gap-2 pb-2.5 mb-2 border-b border-[var(--border)]">
-                      {pendingImgs.map((im, idx) => (
-                        <div key={idx} className="relative w-12 h-12">
-                          <img
-                            src={im.url}
-                            alt="Pending attachment"
-                            className="w-full h-full object-cover rounded-xl border border-[var(--border)]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
+                    <div
+                      data-testid="composer-attachments-row"
+                      className="flex items-center gap-2.5 overflow-x-auto flex-nowrap sm:flex-wrap pb-2.5 mb-2 border-b border-[var(--border)] no-scrollbar"
+                    >
+                      {pendingImgs.map((im, idx) => {
+                        const src = im.url || `data:${im.mime};base64,${im.data}`;
+                        return (
+                          <ImageAttachmentCard
+                            key={`pending-img-${idx}`}
+                            src={src}
+                            name={`Image ${idx + 1}`}
+                            mime={im.mime}
+                            onClick={() => setLightboxImg(src)}
+                            onRemove={() =>
                               setPendingImgs((prev) =>
                                 prev.filter((_, i) => i !== idx)
                               )
                             }
-                            className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[var(--ink)] text-[var(--bg)] rounded-full flex items-center justify-center text-[10px] cursor-pointer"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      ))}
+                            testId="composer-image-attachment-card"
+                          />
+                        );
+                      })}
                       {pendingFiles.map((f, idx) => (
-                        <div
-                          key={idx}
-                          title={f.summary || f.name}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[var(--surface-2)] border border-[var(--border)] rounded-xl text-xs text-[var(--ink)] max-w-full"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-[var(--primary)] shrink-0" />
-                          <div className="flex flex-col min-w-0">
-                            <span className="truncate max-w-[140px] sm:max-w-[220px] text-[11px] font-medium">
-                              {f.name}
-                            </span>
-                            {f.summary && (
-                              <span className="text-[10px] text-[var(--ink-dim)] truncate max-w-[140px] sm:max-w-[220px]">
-                                {f.summary}
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setPendingFiles((prev) =>
-                                prev.filter((_, i) => i !== idx)
-                              )
+                        <AttachmentCard
+                          key={f.id || `pending-file-${idx}`}
+                          name={f.name}
+                          content={f.doc?.rawContent ?? f.content}
+                          sizeBytes={f.sizeBytes ?? f.doc?.sizeBytes}
+                          status={f.status || 'ready'}
+                          errorMessage={f.errorMessage}
+                          onClick={() => {
+                            if ((f.status || 'ready') === 'ready') {
+                              setPreviewAttachmentModal(
+                                buildAttachmentCardMeta({
+                                  name: f.name,
+                                  content: f.doc?.rawContent ?? f.content,
+                                  sizeBytes: f.sizeBytes ?? f.doc?.sizeBytes,
+                                })
+                              );
                             }
-                            className="text-[var(--ink-dim)] hover:text-rose-500 cursor-pointer ml-1 shrink-0"
-                            aria-label={`Remove ${f.name}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
+                          }}
+                          onRemove={() =>
+                            setPendingFiles((prev) =>
+                              prev.filter((item, i) =>
+                                f.id ? item.id !== f.id : i !== idx
+                              )
+                            )
+                          }
+                          testId="composer-attachment-card"
+                        />
                       ))}
                     </div>
                   )}
@@ -7846,23 +7865,62 @@ export default function App() {
                       <textarea
                         ref={composerRef}
                         value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
+                        onChange={(e) => {
+                          setInputText(e.target.value);
+                          const el = e.currentTarget;
+                          el.style.height = 'auto';
+                          el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+                        }}
                         onPaste={(e) => {
                           const items = e.clipboardData?.items;
-                          if (!items) return;
                           const pastedFiles: File[] = [];
-                          for (const it of items) {
-                            const file = it.getAsFile();
-                            if (file) {
-                              pastedFiles.push(file);
+                          if (items) {
+                            for (const it of items) {
+                              if (it.kind === 'file') {
+                                const file = it.getAsFile();
+                                if (file) {
+                                  pastedFiles.push(file);
+                                }
+                              }
                             }
                           }
                           if (pastedFiles.length > 0) {
                             e.preventDefault();
-                            handleProcessIncomingFiles(pastedFiles);
+                            void handleProcessIncomingFiles(pastedFiles);
+                            return;
+                          }
+                          const pastedText =
+                            e.clipboardData?.getData('text/plain') ||
+                            e.clipboardData?.getData('text') ||
+                            '';
+                          const existingPastedCount = pendingFilesRef.current.filter(
+                            (pf) => /^Pasted text \d+\.txt$/i.test(pf.name)
+                          ).length;
+                          const nextPasteIdx =
+                            Math.max(pasteCounterRef.current, existingPastedCount) + 1;
+                          const decision = evaluateLongPasteToFile(
+                            pastedText,
+                            false,
+                            nextPasteIdx
+                          );
+                          if (decision.convertToFile) {
+                            e.preventDefault();
+                            pasteCounterRef.current = nextPasteIdx;
+                            const pastedFile = new File(
+                              [pastedText],
+                              decision.filename,
+                              { type: 'text/plain' }
+                            );
+                            void handleProcessIncomingFiles([pastedFile]);
                           }
                         }}
                         onKeyDown={(e) => {
+                          if (
+                            e.nativeEvent.isComposing ||
+                            (e as unknown as { keyCode?: number }).keyCode === 229
+                          ) {
+                            return;
+                          }
                           if (
                             e.key === 'Enter' &&
                             ((settings.sendOnEnter && !e.shiftKey) ||
@@ -7896,7 +7954,7 @@ export default function App() {
                               ? activeModelLabel
                               : activeDisplayName
                         } anything…`}
-                        className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[160px] leading-relaxed px-4 pt-3.5"
+                        className="w-full bg-transparent border-none outline-none resize-none text-[15.5px] text-[var(--ink)] placeholder:text-[var(--ink-dim)] min-h-[46px] max-h-[192px] leading-relaxed px-4 pt-3.5"
                       />
                       </div>
 
@@ -7981,6 +8039,10 @@ export default function App() {
                           <button
                             type="button"
                             data-testid="send-btn"
+                            disabled={
+                              !isGenerating &&
+                              pendingFiles.some((f) => f.status === 'loading')
+                            }
                             onClick={() => {
                               if (isGenerating) {
                                 abortRef.current?.abort();
@@ -7988,9 +8050,22 @@ export default function App() {
                                 handleSend();
                               }
                             }}
-                            className={`composer-send${inputText.trim() || isGenerating ? ' is-ready' : ''}`}
+                            className={`composer-send${
+                              (inputText.trim() ||
+                                pendingImgs.length > 0 ||
+                                pendingFiles.some((f) => (f.status || 'ready') === 'ready')) &&
+                              !pendingFiles.some((f) => f.status === 'loading')
+                                ? ' is-ready'
+                                : isGenerating
+                                  ? ' is-ready'
+                                  : ''
+                            }`}
                             title={
-                              isGenerating ? 'Stop generation' : 'Send message'
+                              isGenerating
+                                ? 'Stop generation'
+                                : pendingFiles.some((f) => f.status === 'loading')
+                                  ? 'Reading file…'
+                                  : 'Send message'
                             }
                             aria-label={isGenerating ? 'Stop generating' : 'Send message'}
                           >
@@ -8005,6 +8080,12 @@ export default function App() {
                     </>
                   )}
                 </div>
+
+                <AttachmentPreviewModal
+                  attachment={previewAttachmentModal}
+                  onClose={() => setPreviewAttachmentModal(null)}
+                  onToast={showToast}
+                />
 
                 {/* Claude-style Clean Model Selector Sheet */}
                 {bottomModelMenuOpen && (

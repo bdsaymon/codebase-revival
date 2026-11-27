@@ -18,6 +18,8 @@ export interface ReadDocumentResult {
   charCount: number;
   summary: string;
   content: string;
+  /** Full unmodified extracted text before any 48k preview chunk windowing. */
+  rawContent?: string;
   /** True only when 100% of the file and extracted text was read with zero omitted characters. */
   readComplete: boolean;
   /** True when any portion of the file or extracted text was omitted or windowed. */
@@ -1080,6 +1082,7 @@ export async function readDocumentFile(
     charCount: rawLength,
     summary,
     content: finalContent,
+    rawContent: extractedText,
     readComplete,
     isTruncated,
     totalChars: rawLength,

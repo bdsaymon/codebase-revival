@@ -4,13 +4,15 @@ import { shouldCollapseUserPrompt } from '../../utils/chatDisplay';
 
 interface CollapsibleUserPromptProps {
   text: string;
+  hasAttachments?: boolean;
 }
 
 export const CollapsibleUserPrompt: React.FC<CollapsibleUserPromptProps> = ({
   text,
+  hasAttachments = false,
 }) => {
   const cleanText = String(text || '').trim();
-  const isCollapsible = shouldCollapseUserPrompt(cleanText);
+  const isCollapsible = shouldCollapseUserPrompt(cleanText, hasAttachments);
   const [expanded, setExpanded] = useState(false);
 
   if (!cleanText) return null;
@@ -20,7 +22,7 @@ export const CollapsibleUserPrompt: React.FC<CollapsibleUserPromptProps> = ({
       <div
         data-testid="user-prompt-text"
         className={`whitespace-pre-wrap break-words ${
-          isCollapsible && !expanded ? 'line-clamp-3' : ''
+          isCollapsible && !expanded ? 'line-clamp-6' : ''
         }`}
       >
         {cleanText}

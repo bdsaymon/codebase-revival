@@ -33,16 +33,29 @@ describe('Claude Redesign: Prompt Collapsing, Code Artifact Boxes & Lovable Voic
     vi.restoreAllMocks();
   });
 
-  it('decides prompt collapsing accurately by character count or line count', () => {
+  it('decides prompt collapsing accurately by character count (800) or line count (12) and never collapses when attachments exist', () => {
     expect(shouldCollapseUserPrompt('Hello Claude')).toBe(false);
-    expect(shouldCollapseUserPrompt('Line 1\nLine 2\nLine 3')).toBe(false);
-    expect(shouldCollapseUserPrompt('Line 1\nLine 2\nLine 3\nLine 4')).toBe(true);
-    expect(shouldCollapseUserPrompt('a'.repeat(181))).toBe(true);
+    expect(
+      shouldCollapseUserPrompt(
+        Array.from({ length: 12 }, (_, i) => `Line ${i + 1}`).join('\n')
+      )
+    ).toBe(false);
+    expect(
+      shouldCollapseUserPrompt(
+        Array.from({ length: 13 }, (_, i) => `Line ${i + 1}`).join('\n')
+      )
+    ).toBe(true);
+    expect(shouldCollapseUserPrompt('a'.repeat(800))).toBe(false);
+    expect(shouldCollapseUserPrompt('a'.repeat(801))).toBe(true);
+    expect(shouldCollapseUserPrompt('a'.repeat(1200), true)).toBe(false);
   });
 
-  it('renders CollapsibleUserPrompt clamped by default for long prompts and toggles cleanly via See more / See less', () => {
-    const longPrompt =
-      'এই একটি অনেক বড় প্রম্পট যেখানে আমি চাই আমার সম্পূর্ণ ড্যাশবোর্ড অ্যাপ্লিকেশন, নেভিগেশন, প্রোফাইল সেটিংস, এবং লাইভ ভয়েস ট্রান্সক্রিপশন সবকিছু একসাথে সাজিয়ে দেওয়া হোক যাতে দুই-তিনটা মেসেজে পুরো চ্যাট স্ক্রিন ভরে না যায় এবং পড়তে সুন্দর লাগে।';
+  it('renders CollapsibleUserPrompt clamped by default for long prompts (>800 chars or >12 lines) and toggles cleanly via See more / See less', () => {
+    const longPrompt = Array.from(
+      { length: 14 },
+      (_, i) =>
+        `এই একটি অনেক বড় প্রম্পট লাইন ${i + 1} যেখানে সম্পূর্ণ ড্যাশবোর্ড অ্যাপ্লিকেশন এবং সেটিংস সাজিয়ে দেওয়া হচ্ছে।`
+    ).join('\n');
 
     act(() => {
       root.render(<CollapsibleUserPrompt text={longPrompt} />);
@@ -53,7 +66,7 @@ describe('Claude Redesign: Prompt Collapsing, Code Artifact Boxes & Lovable Voic
       '[data-testid="user-prompt-see-more-btn"]'
     ) as HTMLButtonElement | null;
 
-    expect(textEl?.className).toContain('line-clamp-3');
+    expect(textEl?.className).toContain('line-clamp-6');
     expect(btnEl).not.toBeNull();
     expect(btnEl?.textContent).toContain('See more');
     expect(btnEl?.getAttribute('aria-expanded')).toBe('false');
@@ -62,9 +75,19 @@ describe('Claude Redesign: Prompt Collapsing, Code Artifact Boxes & Lovable Voic
       btnEl?.click();
     });
 
-    expect(textEl?.className).not.toContain('line-clamp-3');
+    expect(textEl?.className).not.toContain('line-clamp-6');
     expect(btnEl?.textContent).toContain('See less');
     expect(btnEl?.getAttribute('aria-expanded')).toBe('true');
+
+    // Prompts with attachments must never show See more toggle even if over 800 chars
+    act(() => {
+      root.render(
+        <CollapsibleUserPrompt text={longPrompt} hasAttachments={true} />
+      );
+    });
+    expect(
+      container.querySelector('[data-testid="user-prompt-see-more-btn"]')
+    ).toBeNull();
 
     // Short prompts must not show any See more toggle
     act(() => {
